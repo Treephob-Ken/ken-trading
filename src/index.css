@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Geist:wght@400;450;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: 0 0% 0%;
+    --panel: 0 0% 3.9%;
+    --panel-2: 0 0% 9%;
+    --border: 0 0% 14.9%;
+    --border-strong: 0 0% 22%;
+    --text: 0 0% 93%;
+    --muted: 0 0% 63%;
+    --dim: 0 0% 42%;
+    --brand: 212 100% 47%;
+    --gain: 151 83% 43%;
+    --loss: 358 75% 59%;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-text;
+    font-family: 'Geist', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11';
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-panel border border-border rounded-lg;
+  }
+
+  .field {
+    @apply w-full bg-bg border border-border rounded-md px-2.5 py-1.5 text-sm text-text
+           outline-none transition-colors focus:border-border-strong
+           hover:border-border-strong;
+  }
+
+  .label {
+    @apply block text-[11px] font-medium uppercase tracking-wider text-dim mb-1.5;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-1.5 rounded-md text-sm font-medium
+           bg-text text-bg transition-all duration-100 hover:opacity-85 active:scale-[0.98]
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium
+           bg-panel-2 border border-border text-text transition-all duration-100
+           hover:border-border-strong active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .seg {
+    @apply flex-1 px-2 py-1.5 text-xs font-medium rounded transition-colors text-muted
+           hover:text-text;
+  }
+  .seg-active {
+    @apply bg-panel-2 text-text;
+  }
+}
