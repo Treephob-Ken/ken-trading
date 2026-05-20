@@ -12,9 +12,11 @@ import { fmtNum, fmtPct, fmtPrice, fmtTime, fmtUsd } from '@/lib/format'
 interface Props {
   result: BacktestResult
   candles: Candle[]
+  stopLossPct: number
+  takeProfitPct: number
 }
 
-export default function Results({ result, candles }: Props) {
+export default function Results({ result, candles, stopLossPct, takeProfitPct }: Props) {
   const { metrics, trades, equity, openPosition } = result
   const beatBuyHold = metrics.totalReturnPct > metrics.buyHoldReturnPct
 
@@ -72,6 +74,8 @@ export default function Results({ result, candles }: Props) {
         <Metric label="Best Trade" value={fmtPct(metrics.bestTradePct)} tone="gain" />
         <Metric label="Worst Trade" value={fmtPct(metrics.worstTradePct)} tone="loss" />
       </div>
+
+      <RiskManager metrics={metrics} stopLossPct={stopLossPct} takeProfitPct={takeProfitPct} />
 
       <div className="card p-4">
         <div className="mb-1 flex items-center justify-between">
@@ -211,6 +215,139 @@ function Metric({
         {value}
       </p>
       {sub && <p className="mt-0.5 text-xs text-dim">{sub}</p>}
+    </div>
+  )
+}
+
+function RiskManager({
+  metrics,
+  stopLossPct,
+  takeProfitPct,
+}: {
+  metrics: BacktestResult['metrics']
+  stopLossPct: number
+  takeProfitPct: number
+}) {
+  if (metrics.numTrades < 3) return null
+
+  const wr = metrics.winRate / 100
+  const avgWin = metrics.avgWinPct
+  const avgLoss = Math.abs(metrics.avgLossPct)
+  const impliedRR = avgLoss > 0 ? avgWin / avgLoss : 0
+  const expectancyPct = wr * avgWin + (1 - wr) * -avgLoss
+  const breakevenWR = impliedRR > 0 ? (1 / (1 + impliedRR)) * 100 : 50
+  const kelly = impliedRR > 0 ? (wr - (1 - wr) / impliedRR) * 100 : 0
+  const halfKelly = Math.max(0, kelly / 2)
+
+  // Suggested SL = avg loss of losing trades; TP suggestions at various R:R
+  const suggestedSL = avgLoss
+  const tp = (rr: number) => +(suggestedSL * rr).toFixed(2)
+
+  const rrTone = impliedRR >= 2 ? 'gain' : impliedRR >= 1 ? 'warn' : 'loss'
+  const expTone = expectancyPct > 0 ? 'gain' : 'loss'
+  const rrToneClass = rrTone === 'gain' ? 'text-gain' : rrTone === 'warn' ? 'text-[#f5a623]' : 'text-loss'
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+        <span className="text-base">⚖️</span>
+        <h3 className="text-sm font-semibold text-text">Risk Manager</h3>
+        <span className="ml-auto text-xs text-dim">Based on {metrics.numTrades} closed trades</span>
+      </div>
+
+      <div className="grid gap-0 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border">
+
+        {/* Column 1: Historical edge */}
+        <div className="p-4">
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-dim">Historical Edge</p>
+          <div className="flex flex-col gap-2">
+            <RiskRow label="Win Rate" value={`${metrics.winRate.toFixed(1)}%`} />
+            <RiskRow label="Avg Win" value={`+${avgWin.toFixed(2)}%`} tone="gain" />
+            <RiskRow label="Avg Loss" value={`-${avgLoss.toFixed(2)}%`} tone="loss" />
+            <RiskRow label="Implied R:R" value={`${impliedRR.toFixed(2)}:1`} tone={rrTone} />
+            <RiskRow label="Expectancy / trade" value={`${expectancyPct >= 0 ? '+' : ''}${expectancyPct.toFixed(2)}%`} tone={expTone} />
+          </div>
+        </div>
+
+        {/* Column 2: Breakeven analysis */}
+        <div className="p-4">
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-dim">Breakeven Analysis</p>
+          <div className="flex flex-col gap-2">
+            {[1, 1.5, 2, 3].map((rr) => {
+              const need = (1 / (1 + rr)) * 100
+              const beats = metrics.winRate >= need
+              return (
+                <div key={rr} className="flex items-center justify-between text-xs">
+                  <span className="text-dim">{rr}:1 R:R needs</span>
+                  <span className={beats ? 'text-gain font-medium' : 'text-loss'}>
+                    ≥{need.toFixed(0)}% WR {beats ? '✓' : '✗'}
+                  </span>
+                </div>
+              )
+            })}
+            <div className="mt-1 h-px bg-border" />
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-dim">Your implied R:R</span>
+              <span className={rrToneClass}>{impliedRR.toFixed(2)}:1</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-dim">Need WR ≥</span>
+              <span className={metrics.winRate >= breakevenWR ? 'text-gain font-medium' : 'text-loss font-medium'}>
+                {breakevenWR.toFixed(1)}% {metrics.winRate >= breakevenWR ? '✓' : '✗'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Column 3: Suggested levels */}
+        <div className="p-4">
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-dim">Suggested Levels</p>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-dim">Stop Loss (avg risk)</span>
+              <span className="font-mono text-loss font-medium">-{suggestedSL.toFixed(2)}%</span>
+            </div>
+            {[1.5, 2, 3].map((rr) => (
+              <div key={rr} className="flex items-center justify-between text-xs">
+                <span className="text-dim">TP at {rr}:1 R:R {rr === 2 ? '★' : ''}</span>
+                <span className="font-mono text-gain">+{tp(rr)}%</span>
+              </div>
+            ))}
+            {stopLossPct > 0 && (
+              <>
+                <div className="mt-1 h-px bg-border" />
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-dim mt-1">Your Settings</p>
+                <RiskRow label="SL set" value={`-${stopLossPct.toFixed(2)}%`} tone="loss" />
+                {takeProfitPct > 0 && (
+                  <RiskRow label="TP set" value={`+${takeProfitPct.toFixed(2)}%`} tone="gain" />
+                )}
+                {takeProfitPct > 0 && stopLossPct > 0 && (
+                  <RiskRow label="Your R:R" value={`${(takeProfitPct / stopLossPct).toFixed(2)}:1`}
+                    tone={takeProfitPct / stopLossPct >= 2 ? 'gain' : takeProfitPct / stopLossPct >= 1 ? 'warn' : 'loss'} />
+                )}
+              </>
+            )}
+            <div className="mt-1 h-px bg-border" />
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-dim">½ Kelly size</span>
+              <span className={`font-mono font-medium ${halfKelly > 0 ? 'text-text' : 'text-loss'}`}>
+                {halfKelly > 0 ? `${halfKelly.toFixed(1)}% of capital` : 'Negative edge'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+function RiskRow({ label, value, tone }: { label: string; value: string; tone?: 'gain' | 'loss' | 'warn' }) {
+  const cls = tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : tone === 'warn' ? 'text-[#f5a623]' : 'text-text'
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-dim">{label}</span>
+      <span className={`font-mono font-medium ${cls}`}>{value}</span>
     </div>
   )
 }

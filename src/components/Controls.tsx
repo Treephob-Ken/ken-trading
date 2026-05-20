@@ -33,6 +33,9 @@ interface Props {
   direction: Direction
   initialCapital: number
   feePct: number
+  stopLossPct: number
+  takeProfitPct: number
+  positionMode: 'fixed' | 'compounding'
   loading: boolean
   onSymbol: (v: string) => void
   onTimeframe: (v: string) => void
@@ -43,6 +46,9 @@ interface Props {
   onDirection: (v: Direction) => void
   onCapital: (v: number) => void
   onFee: (v: number) => void
+  onStopLoss: (v: number) => void
+  onTakeProfit: (v: number) => void
+  onPositionMode: (v: 'fixed' | 'compounding') => void
   onReload: () => void
 }
 
@@ -232,6 +238,61 @@ export default function Controls(props: Props) {
             onChange={(e) => props.onFee(Math.max(0, Number(e.target.value) || 0))}
           />
         </div>
+      </div>
+
+      <div>
+        <label className="label">Position Sizing</label>
+        <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
+          {(['fixed', 'compounding'] as const).map((m) => (
+            <button
+              key={m}
+              className={`seg ${props.positionMode === m ? 'seg-active' : ''}`}
+              onClick={() => props.onPositionMode(m)}
+            >
+              {m === 'fixed' ? 'Fixed Size' : 'Compounding'}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] text-dim">
+          {props.positionMode === 'fixed'
+            ? 'Same $ per trade — realistic. P&L accumulates but position size stays constant.'
+            : 'Position grows with equity — each win risks more, each loss risks less.'}
+        </p>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      <div>
+        <label className="label">Risk Controls</label>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-[11px] text-dim">Stop Loss %</label>
+            <input
+              type="number"
+              className="field"
+              value={props.stopLossPct}
+              min={0}
+              step={0.1}
+              placeholder="0 = off"
+              onChange={(e) => props.onStopLoss(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-dim">Take Profit %</label>
+            <input
+              type="number"
+              className="field"
+              value={props.takeProfitPct}
+              min={0}
+              step={0.1}
+              placeholder="0 = off"
+              onChange={(e) => props.onTakeProfit(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </div>
+        </div>
+        <p className="mt-1.5 text-[11px] text-dim">
+          Applied intrabar to every trade. 0 = disabled. See Risk Manager below for suggested levels.
+        </p>
       </div>
 
       <button className="btn-ghost" onClick={props.onReload} disabled={props.loading}>
