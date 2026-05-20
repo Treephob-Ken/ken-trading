@@ -10,7 +10,7 @@ async function main() {
   log.info(`Network: ${env.isTestnet ? 'TESTNET' : 'MAINNET'}`)
   log.info(`User: ${env.user}`)
   log.info(
-    `Grid: ${cfg.asset} [${cfg.lower}, ${cfg.upper}] x ${cfg.gridCount} (${cfg.mode}) sz=${cfg.orderSize}`,
+    `Grid: ${cfg.asset} [${cfg.lower}, ${cfg.upper}] x ${cfg.gridCount} (${cfg.mode})`,
   )
 
   if (!env.isTestnet) {

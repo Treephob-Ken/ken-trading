@@ -4,7 +4,7 @@ import type { Candle } from '@/types'
 const REST = 'https://data-api.binance.vision/api/v3'
 const WS = 'wss://data-stream.binance.vision/ws'
 
-const MAX_BARS = 6000
+export const MAX_BARS = 20000
 
 export interface SymbolInfo {
   symbol: string

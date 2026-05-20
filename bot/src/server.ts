@@ -1,25 +1,34 @@
 import express, { type Request, type Response } from 'express'
-import { readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadEnv, loadGridConfig, type GridConfig } from './config.js'
+import {
+  deleteConfig,
+  listConfigs,
+  loadConfig,
+  loadEnv,
+  saveConfig,
+  type GridConfig,
+} from './config.js'
 import { GridBot } from './grid-bot.js'
 import { createClients } from './hyperliquid.js'
-import { getLogBuffer, log, onLog } from './logger.js'
+import { clearLogBuffer, createLogger, getLogBuffer, log, onLog } from './logger.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const CONFIG_PATH = join(__dirname, '..', 'grid.config.json')
 const DASHBOARD_PATH = join(__dirname, '..', 'dashboard', 'index.html')
+
+interface BotEntry {
+  id: string
+  bot: GridBot
+  running: boolean
+}
+
+const bots = new Map<string, BotEntry>()
 
 const app = express()
 app.use(express.json())
 
-let bot: GridBot | null = null
-let botRunning = false
 const sseClients = new Set<Response>()
-
-// Broadcast every log line to all SSE clients
 onLog((line) => {
   const data = `data: ${JSON.stringify(line)}\n\n`
   for (const res of sseClients) res.write(data)
@@ -29,93 +38,148 @@ app.get('/', (_req: Request, res: Response) => {
   res.sendFile(DASHBOARD_PATH)
 })
 
-app.get('/api/config', (_req: Request, res: Response) => {
-  const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) as GridConfig
-  res.json(cfg)
+// ---------- Bot list / CRUD ----------
+
+app.get('/api/bots', (_req: Request, res: Response) => {
+  const all = listConfigs().map((cfg) => ({
+    id: cfg.id!,
+    name: cfg.name ?? cfg.asset,
+    asset: cfg.asset,
+    gridCount: cfg.gridCount,
+    lower: cfg.lower,
+    upper: cfg.upper,
+    running: bots.get(cfg.id!)?.running ?? false,
+  }))
+  res.json(all)
 })
 
-app.post('/api/config', (req: Request, res: Response) => {
-  if (botRunning) {
-    res.status(400).json({ error: 'Stop the bot before changing config.' })
+app.get('/api/bots/:id/config', (req: Request, res: Response) => {
+  try {
+    res.json(loadConfig(req.params.id))
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
+  }
+})
+
+// Create or update a config. Body should be a full GridConfig.
+// If :id matches an existing config we overwrite it; otherwise we create.
+app.put('/api/bots/:id/config', (req: Request, res: Response) => {
+  const existingId = req.params.id
+  if (bots.get(existingId)?.running) {
+    res.status(400).json({ error: 'Stop the bot before changing its config.' })
     return
   }
-  const cfg = req.body as GridConfig
-  if (!cfg.asset || !cfg.lower || !cfg.upper || !cfg.gridCount || !cfg.orderSize) {
-    res.status(400).json({ error: 'Invalid config — missing required fields.' })
+  try {
+    const cfg = req.body as GridConfig
+    cfg.id = cfg.id ?? existingId
+    const saved = saveConfig(cfg, existingId)
+    log.ok(`Config saved: ${saved.id} (${saved.asset} ${saved.lower}-${saved.upper})`)
+    res.json(saved)
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+// Create new — body has full config minus id (server will assign).
+app.post('/api/bots', (req: Request, res: Response) => {
+  try {
+    const cfg = req.body as GridConfig
+    const saved = saveConfig(cfg)
+    log.ok(`Bot created: ${saved.id}`)
+    res.json(saved)
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+app.delete('/api/bots/:id', (req: Request, res: Response) => {
+  const id = req.params.id
+  if (bots.get(id)?.running) {
+    res.status(400).json({ error: 'Stop the bot before deleting it.' })
     return
   }
-  if (cfg.upper <= cfg.lower) {
-    res.status(400).json({ error: 'upper must be greater than lower.' })
-    return
-  }
-  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2))
-  log.ok(`Config updated: ${cfg.asset} [${cfg.lower}, ${cfg.upper}] x${cfg.gridCount}`)
+  bots.delete(id)
+  deleteConfig(id)
+  clearLogBuffer(id)
+  log.ok(`Bot deleted: ${id}`)
   res.json({ ok: true })
 })
 
-app.get('/api/status', (_req: Request, res: Response) => {
-  res.json({ running: botRunning, logs: getLogBuffer() })
-})
+// ---------- Bot lifecycle ----------
 
-app.post('/api/start', async (_req: Request, res: Response) => {
-  if (botRunning) {
+app.post('/api/bots/:id/start', async (req: Request, res: Response) => {
+  const id = req.params.id
+  if (bots.get(id)?.running) {
     res.json({ ok: true })
     return
   }
   try {
     const env = loadEnv()
-    const cfg = loadGridConfig()
+    const cfg = loadConfig(id)
     const clients = createClients(env)
-    bot = new GridBot(clients, cfg)
-    botRunning = true
+    const logger = createLogger(id)
+    const bot = new GridBot(clients, cfg, logger)
+    bots.set(id, { id, bot, running: true })
     res.json({ ok: true })
-    // start is async and long-running; errors after response are logged
     bot.start().catch((e: unknown) => {
-      log.err(`Bot crashed: ${(e as Error).message}`)
-      botRunning = false
-      bot = null
+      logger.err(`Bot crashed: ${(e as Error).message}`)
+      const entry = bots.get(id)
+      if (entry) entry.running = false
     })
   } catch (e) {
-    botRunning = false
-    bot = null
+    bots.delete(id)
     res.status(500).json({ error: (e as Error).message })
   }
 })
 
-app.post('/api/stop', async (_req: Request, res: Response) => {
-  if (!bot) {
-    botRunning = false
+app.post('/api/bots/:id/stop', async (req: Request, res: Response) => {
+  const id = req.params.id
+  const entry = bots.get(id)
+  if (!entry) {
     res.json({ ok: true })
     return
   }
   try {
-    await bot.shutdown()
+    await entry.bot.shutdown()
   } catch (e) {
-    log.err(`Shutdown error: ${(e as Error).message}`)
+    log.err(`Shutdown error for ${id}: ${(e as Error).message}`)
   } finally {
-    bot = null
-    botRunning = false
+    entry.running = false
+    bots.delete(id)
   }
   res.json({ ok: true })
 })
 
-// SSE endpoint — streams log lines to the dashboard
+app.get('/api/bots/:id/stats', (req: Request, res: Response) => {
+  const id = req.params.id
+  const entry = bots.get(id)
+  if (!entry || !entry.running) {
+    res.json({ running: false })
+    return
+  }
+  try {
+    res.json({ running: true, stats: entry.bot.getStats() })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+app.get('/api/bots/:id/logs', (req: Request, res: Response) => {
+  res.json(getLogBuffer(req.params.id))
+})
+
+// ---------- Global log stream ----------
+
 app.get('/api/logs/stream', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders()
   sseClients.add(res)
-
-  // Send buffered history on connect
-  for (const line of getLogBuffer()) {
-    res.write(`data: ${JSON.stringify(line)}\n\n`)
-  }
-
   req.on('close', () => sseClients.delete(res))
 })
 
 const PORT = 3001
 createServer(app).listen(PORT, () => {
-  log.ok(`Bot dashboard → http://localhost:${PORT}`)
+  log.ok(`Bot dashboard -> http://localhost:${PORT}`)
 })

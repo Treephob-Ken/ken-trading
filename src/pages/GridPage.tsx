@@ -11,9 +11,11 @@ import {
   type GridType,
 } from '@/lib/grid'
 import { fmtPrice, fmtUsd } from '@/lib/format'
+import { analyzeRegime, isGoodForGrid } from '@/lib/markov'
 import GridChart from '@/components/GridChart'
 import GridControls from '@/components/GridControls'
 import GridStats from '@/components/GridStats'
+import NumberInput from '@/components/NumberInput'
 
 interface Props {
   symbol: string
@@ -31,14 +33,22 @@ export default function GridPage({
   onTimeframe,
 }: Props) {
   const [lookback, setLookback] = useState(150)
-  const [orderSize, setOrderSize] = useState(0.01)
   const [mode, setMode] = useState<GridMode>('arithmetic')
   const [gridType, setGridType] = useState<GridType>('neutral')
   const [minGrids, setMinGrids] = useState(3)
   const [maxGrids, setMaxGrids] = useState(50)
   const [feePct, setFeePct] = useState(0.05)
-  const [investment, setInvestment] = useState(10000)
+  const [investment, setInvestment] = useState(500)
   const [reanchor, setReanchor] = useState(true)
+
+  // Deploy-only settings (used by Export to Bot)
+  const [botName, setBotName] = useState('')
+  const [leverage, setLeverage] = useState(1)
+  const [slPct, setSlPct] = useState(2)  // % below lower
+  const [tpPct, setTpPct] = useState(2)  // % above upper
+  const [useTrigger, setUseTrigger] = useState(false)
+  const [useManualSize, setUseManualSize] = useState(false)
+  const [manualSize, setManualSize] = useState(0.01)
 
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(true)
@@ -106,17 +116,34 @@ export default function GridPage({
   const pairLabel = symbol.replace(/USDT$/, '/USDT')
   const lastPrice = candles[candles.length - 1]?.close ?? 0
 
+  // Run the Markov regime check over the same lookback window as the optimizer.
+  // Grids are mean-reversion bets — only safe in a sideways regime.
+  const regimeFit = useMemo(() => {
+    if (bars.length < 30) return null
+    const a = analyzeRegime(bars)
+    return { analysis: a, ...isGoodForGrid(a.currentLabel) }
+  }, [bars])
+
   function exportConfig() {
     if (!result || displayLines.length < 2) return
     const asset = symbol.replace(/USDT$/, '')
-    const lower = displayLines[0].price
-    const upper = displayLines[displayLines.length - 1].price
+    const lower = +displayLines[0].price.toFixed(2)
+    const upper = +displayLines[displayLines.length - 1].price.toFixed(2)
     const gridCount = displayLines.length - 1
-    const cfg = { asset, lower: +lower.toFixed(2), upper: +upper.toFixed(2), gridCount, mode, orderSize }
+    // SL/TP are always exported now — every live bot should have safety triggers.
+    const cfg: Record<string, unknown> = {
+      name: botName || `${asset} ${gridType} grid`,
+      asset, lower, upper, gridCount, mode,
+      investment, leverage,
+      stopLossPrice:   +(lower * (1 - slPct / 100)).toFixed(2),
+      takeProfitPrice: +(upper * (1 + tpPct / 100)).toFixed(2),
+    }
+    if (useManualSize) cfg.orderSize = manualSize
+    if (useTrigger) cfg.triggerPrice = lower
     const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = 'grid.config.json'
+    a.download = `grid.${asset.toLowerCase()}.json`
     a.click()
     URL.revokeObjectURL(a.href)
   }
@@ -154,6 +181,34 @@ export default function GridPage({
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-4">
+        {regimeFit && (
+          <div
+            className={`card flex items-center gap-3 border-l-4 p-3 ${
+              regimeFit.suitable
+                ? 'border-l-gain bg-gain/5'
+                : 'border-l-warn bg-warn/5'
+            }`}
+          >
+            <div
+              className={`flex h-8 w-8 items-center justify-center rounded-full font-mono text-sm font-bold ${
+                regimeFit.suitable ? 'bg-gain/20 text-gain' : 'bg-warn/20 text-warn'
+              }`}
+              title={`Markov regime: ${regimeFit.analysis.currentLabel}`}
+            >
+              {regimeFit.analysis.currentLabel?.[0] ?? '?'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-text">
+                {regimeFit.suitable ? 'Good for grids' : 'Regime mismatch'}{' '}
+                <span className="text-xs font-normal text-dim">
+                  ({regimeFit.analysis.currentLabel}, {(regimeFit.analysis.persistence * 100).toFixed(0)}% persistence)
+                </span>
+              </div>
+              <p className="text-[11px] text-dim leading-snug">{regimeFit.reason}</p>
+            </div>
+          </div>
+        )}
+
         <div className="card p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-text">
@@ -192,8 +247,23 @@ export default function GridPage({
                 displayLines={displayLines}
                 symbol={symbol}
                 mode={mode}
-                orderSize={orderSize}
-                onOrderSize={setOrderSize}
+                botName={botName}
+                onBotName={setBotName}
+                investment={investment}
+                onInvestment={setInvestment}
+                leverage={leverage}
+                onLeverage={setLeverage}
+                slPct={slPct}
+                onSlPct={setSlPct}
+                tpPct={tpPct}
+                onTpPct={setTpPct}
+                useTrigger={useTrigger}
+                onUseTrigger={setUseTrigger}
+                useManualSize={useManualSize}
+                onUseManualSize={setUseManualSize}
+                manualSize={manualSize}
+                onManualSize={setManualSize}
+                feePct={feePct}
                 onExport={exportConfig}
               />
               <HowToAnalyze />
@@ -224,16 +294,46 @@ function DeployCard({
   displayLines,
   symbol,
   mode,
-  orderSize,
-  onOrderSize,
+  botName,
+  onBotName,
+  investment,
+  onInvestment,
+  leverage,
+  onLeverage,
+  slPct,
+  onSlPct,
+  tpPct,
+  onTpPct,
+  useTrigger,
+  onUseTrigger,
+  useManualSize,
+  onUseManualSize,
+  manualSize,
+  onManualSize,
+  feePct,
   onExport,
 }: {
   result: NonNullable<ReturnType<typeof optimizeGrid>>
   displayLines: GridLine[]
   symbol: string
   mode: GridMode
-  orderSize: number
-  onOrderSize: (v: number) => void
+  botName: string
+  onBotName: (v: string) => void
+  investment: number
+  onInvestment: (v: number) => void
+  leverage: number
+  onLeverage: (v: number) => void
+  slPct: number
+  onSlPct: (v: number) => void
+  tpPct: number
+  onTpPct: (v: number) => void
+  useTrigger: boolean
+  onUseTrigger: (v: boolean) => void
+  useManualSize: boolean
+  onUseManualSize: (v: boolean) => void
+  manualSize: number
+  onManualSize: (v: number) => void
+  feePct: number
   onExport: () => void
 }) {
   if (displayLines.length < 2) return null
@@ -241,6 +341,16 @@ function DeployCard({
   const lower = displayLines[0].price
   const upper = displayLines[displayLines.length - 1].price
   const gridCount = displayLines.length - 1
+  const safety = 0.5
+  const derivedSize = (investment * leverage * safety) / (gridCount * upper)
+  const orderSize = useManualSize ? manualSize : derivedSize
+  const maxNotional = gridCount * orderSize * upper
+  const requiredMargin = maxNotional / leverage
+  const spacingPct = result.best.spacingPct
+  const profitPerGridPct = spacingPct - 2 * feePct
+  const slPrice = lower * (1 - slPct / 100)
+  const tpPrice = upper * (1 + tpPct / 100)
+  const maxRiskPct = (((lower - slPrice) * gridCount * orderSize) / investment) * 100
 
   return (
     <div className="card overflow-hidden">
@@ -250,8 +360,21 @@ function DeployCard({
         <span className="ml-auto text-xs text-dim">Step 1 of 2 — export the config</span>
       </div>
 
-      <div className="p-4">
-        <div className="mb-4 grid grid-cols-2 gap-2 rounded-lg border border-border bg-bg p-3 font-mono text-xs sm:grid-cols-3">
+      <div className="p-4 space-y-4">
+        {/* Bot name */}
+        <div>
+          <label className="label">Bot name <span className="text-dim font-normal normal-case">(optional)</span></label>
+          <input
+            type="text"
+            value={botName}
+            onChange={(e) => onBotName(e.target.value)}
+            placeholder={`${asset} ${mode} grid`}
+            className="field text-sm"
+          />
+        </div>
+
+        {/* Range summary */}
+        <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-bg p-3 font-mono text-xs sm:grid-cols-3">
           <div>
             <div className="mb-0.5 text-[10px] text-dim">Asset</div>
             <div className="font-semibold text-text">{asset}</div>
@@ -274,21 +397,123 @@ function DeployCard({
           </div>
           <div>
             <div className="mb-0.5 text-[10px] text-dim">Spacing</div>
-            <div className="text-text">{result.best.spacingPct.toFixed(2)}%</div>
+            <div className="text-text">{spacingPct.toFixed(2)}%</div>
           </div>
         </div>
 
-        <div className="mb-4 flex items-center gap-3">
-          <label className="text-xs text-dim whitespace-nowrap">Order size ({asset} per grid)</label>
-          <input
-            type="number"
-            step="0.001"
-            min="0.001"
-            value={orderSize}
-            onChange={(e) => onOrderSize(Math.max(0.001, Number(e.target.value) || 0.001))}
-            className="field w-32 font-mono text-sm"
-          />
-          <span className="text-xs text-dim">≈ ${(orderSize * ((lower + upper) / 2)).toFixed(0)} notional</span>
+        {/* Budget + Leverage */}
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-dim">Position Sizing</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label">Budget (USDC)</label>
+              <NumberInput
+                step={50}
+                min={10}
+                value={investment}
+                onChange={onInvestment}
+                className="field font-mono text-sm"
+              />
+            </div>
+            <div>
+              <label className="label">Leverage</label>
+              <NumberInput
+                step={1}
+                min={1}
+                max={50}
+                value={leverage}
+                onChange={onLeverage}
+                className="field font-mono text-sm"
+              />
+            </div>
+          </div>
+          <label className="mt-2 flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-bg p-2.5">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-brand"
+              checked={useManualSize}
+              onChange={(e) => onUseManualSize(e.target.checked)}
+            />
+            <span className="text-xs font-medium text-text">Override order size</span>
+            <NumberInput
+              step={0.001}
+              min={0.001}
+              disabled={!useManualSize}
+              value={manualSize}
+              onChange={onManualSize}
+              className="field ml-auto w-24 font-mono text-xs disabled:opacity-40"
+            />
+            <span className="text-[11px] text-dim">{asset}</span>
+          </label>
+          <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg border border-border bg-bg p-3 font-mono text-xs">
+            <div>
+              <div className="mb-0.5 text-[10px] text-dim">Order size / grid</div>
+              <div className="text-text">{orderSize.toFixed(5)} {asset}</div>
+            </div>
+            <div>
+              <div className="mb-0.5 text-[10px] text-dim">Margin needed</div>
+              <div className="text-text">${requiredMargin.toFixed(0)} USDC</div>
+            </div>
+            <div>
+              <div className="mb-0.5 text-[10px] text-dim">Max notional</div>
+              <div className="text-text">${maxNotional.toFixed(0)}</div>
+            </div>
+            <div>
+              <div className="mb-0.5 text-[10px] text-dim">Est profit / grid</div>
+              <div className={profitPerGridPct > 0 ? 'text-gain' : 'text-loss'}>
+                {profitPerGridPct >= 0 ? '+' : ''}{profitPerGridPct.toFixed(3)}%
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Safety triggers */}
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-dim">
+            Safety Triggers <span className="font-normal normal-case text-dim/70">(always included in export)</span>
+          </p>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 rounded-lg border border-loss/30 bg-loss/5 p-2.5">
+              <span className="text-xs font-semibold text-loss">Stop Loss</span>
+              <NumberInput
+                step={0.5}
+                min={0.1}
+                value={slPct}
+                onChange={onSlPct}
+                className="field w-20 font-mono text-xs"
+              />
+              <span className="text-[11px] text-dim">% below lower</span>
+              <span className="ml-auto font-mono text-xs text-loss">@ ${slPrice.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center gap-3 rounded-lg border border-gain/30 bg-gain/5 p-2.5">
+              <span className="text-xs font-semibold text-gain">Take Profit</span>
+              <NumberInput
+                step={0.5}
+                min={0.1}
+                value={tpPct}
+                onChange={onTpPct}
+                className="field w-20 font-mono text-xs"
+              />
+              <span className="text-[11px] text-dim">% above upper</span>
+              <span className="ml-auto font-mono text-xs text-gain">@ ${tpPrice.toFixed(2)}</span>
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-dim">
+            If SL hits with all grids long, max loss ≈{' '}
+            <span className="font-mono text-loss">{maxRiskPct.toFixed(1)}%</span> of budget.
+          </p>
+          <label className="mt-3 flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-bg p-2.5">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-warn"
+              checked={useTrigger}
+              onChange={(e) => onUseTrigger(e.target.checked)}
+            />
+            <div className="flex-1">
+              <div className="text-xs font-medium text-text">Wait for price to enter range</div>
+              <div className="text-[10px] text-dim">Bot stays idle until price crosses into [{lower.toFixed(2)}, {upper.toFixed(2)}]</div>
+            </div>
+          </label>
         </div>
 
         <button

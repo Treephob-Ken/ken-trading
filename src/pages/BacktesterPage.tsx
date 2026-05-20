@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity } from 'lucide-react'
 import type { Candle, Direction, StrategyId } from '@/types'
-import { fetchKlines, subscribeKline, type SymbolInfo } from '@/lib/binance'
+import { fetchKlines, MAX_BARS, subscribeKline, type SymbolInfo } from '@/lib/binance'
 import { defaultParams, generateSignals, strategyMeta } from '@/lib/strategies'
 import { runBacktest } from '@/lib/backtest'
 import { fmtPrice } from '@/lib/format'
 import ChartPanel from '@/components/ChartPanel'
 import Controls from '@/components/Controls'
+import RegimePanel from '@/components/RegimePanel'
 import Results from '@/components/Results'
 
 interface Props {
@@ -124,6 +125,7 @@ export default function BacktesterPage({
 
   const pairLabel = symbol.replace(/USDT$/, '/USDT')
   const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
+  const dataCapped = candles.length >= MAX_BARS
 
   return (
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
@@ -187,6 +189,13 @@ export default function BacktesterPage({
             </div>
           </div>
 
+          {dataCapped && (
+            <div className="mb-3 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+              Loaded the maximum {MAX_BARS.toLocaleString()} bars for this range.
+              Earlier history was truncated — pick a coarser timeframe or a shorter date range to see the full window.
+            </div>
+          )}
+
           {error ? (
             <div className="flex h-[480px] flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm font-medium text-loss">
@@ -207,6 +216,14 @@ export default function BacktesterPage({
             />
           )}
         </div>
+
+        {candles.length >= 30 && (
+          <RegimePanel
+            candles={candles}
+            currentStrategy={strategyId}
+            onApplyStrategy={handleStrategy}
+          />
+        )}
 
         {result ? (
           <Results result={result} candles={candles} stopLossPct={stopLossPct} takeProfitPct={takeProfitPct} />

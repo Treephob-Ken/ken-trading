@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react'
 import type { Direction, StrategyId } from '@/types'
 import type { SymbolInfo } from '@/lib/binance'
 import { STRATEGIES, strategyMeta } from '@/lib/strategies'
+import NumberInput from './NumberInput'
 import SymbolSearch from './SymbolSearch'
 
 const INTERVALS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']
@@ -174,17 +175,13 @@ export default function Controls(props: Props) {
           {meta.params.map((param) => (
             <div key={param.key} className="flex items-center justify-between gap-3">
               <span className="text-sm text-muted">{param.label}</span>
-              <input
-                type="number"
+              <NumberInput
                 className="field w-24 text-right"
                 value={props.params[param.key] ?? param.default}
                 min={param.min}
                 max={param.max}
                 step={param.step}
-                onChange={(e) => {
-                  const v = Number(e.target.value)
-                  if (!Number.isNaN(v)) props.onParam(param.key, v)
-                }}
+                onChange={(v) => props.onParam(param.key, v)}
               />
             </div>
           ))}
@@ -216,26 +213,22 @@ export default function Controls(props: Props) {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="label">Capital ($)</label>
-          <input
-            type="number"
+          <NumberInput
             className="field"
             value={props.initialCapital}
             min={1}
             step={100}
-            onChange={(e) =>
-              props.onCapital(Math.max(1, Number(e.target.value) || 0))
-            }
+            onChange={props.onCapital}
           />
         </div>
         <div>
           <label className="label">Fee (%)</label>
-          <input
-            type="number"
+          <NumberInput
             className="field"
             value={props.feePct}
             min={0}
             step={0.01}
-            onChange={(e) => props.onFee(Math.max(0, Number(e.target.value) || 0))}
+            onChange={props.onFee}
           />
         </div>
       </div>
@@ -267,26 +260,24 @@ export default function Controls(props: Props) {
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="mb-1 block text-[11px] text-dim">Stop Loss %</label>
-            <input
-              type="number"
+            <NumberInput
               className="field"
               value={props.stopLossPct}
               min={0}
               step={0.1}
               placeholder="0 = off"
-              onChange={(e) => props.onStopLoss(Math.max(0, Number(e.target.value) || 0))}
+              onChange={props.onStopLoss}
             />
           </div>
           <div>
             <label className="mb-1 block text-[11px] text-dim">Take Profit %</label>
-            <input
-              type="number"
+            <NumberInput
               className="field"
               value={props.takeProfitPct}
               min={0}
               step={0.1}
               placeholder="0 = off"
-              onChange={(e) => props.onTakeProfit(Math.max(0, Number(e.target.value) || 0))}
+              onChange={props.onTakeProfit}
             />
           </div>
         </div>
