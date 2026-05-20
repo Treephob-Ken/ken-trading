@@ -64,6 +64,8 @@ bot/.env
 bot/.env.*
 !bot/.env.example
 bot/dist/
+bot/configs/
+bot/grid.config.json
 
 # Editor / OS
 .claude/

@@ -1,6 +1,7 @@
 import { Download, RefreshCw, Zap } from 'lucide-react'
 import type { SymbolInfo } from '@/lib/binance'
 import type { GridMode, GridType } from '@/lib/grid'
+import NumberInput from './NumberInput'
 import SymbolSearch from './SymbolSearch'
 
 const INTERVALS = ['5m', '15m', '30m', '1h', '4h', '1d']
@@ -71,16 +72,13 @@ export default function GridControls(props: GridControlsProps) {
 
       <div>
         <label className="label">Lookback (bars)</label>
-        <input
-          type="number"
+        <NumberInput
           className="field"
           value={props.lookback}
           min={20}
           max={1000}
           step={10}
-          onChange={(e) =>
-            props.onLookback(Math.max(20, Math.min(1000, Number(e.target.value) || 20)))
-          }
+          onChange={props.onLookback}
         />
         <p className="mt-1.5 text-[11px] text-dim">
           The range high/low is taken from these recent bars.
@@ -135,28 +133,22 @@ export default function GridControls(props: GridControlsProps) {
         <label className="label">Grid Count to Test</label>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <input
-              type="number"
+            <NumberInput
               className="field"
               value={props.minGrids}
               min={2}
               max={200}
-              onChange={(e) =>
-                props.onMinGrids(Math.max(2, Number(e.target.value) || 2))
-              }
+              onChange={props.onMinGrids}
             />
             <p className="mt-1 text-center text-[10px] text-dim">min</p>
           </div>
           <div>
-            <input
-              type="number"
+            <NumberInput
               className="field"
               value={props.maxGrids}
               min={2}
               max={200}
-              onChange={(e) =>
-                props.onMaxGrids(Math.max(2, Number(e.target.value) || 2))
-              }
+              onChange={props.onMaxGrids}
             />
             <p className="mt-1 text-center text-[10px] text-dim">max</p>
           </div>
@@ -166,26 +158,22 @@ export default function GridControls(props: GridControlsProps) {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="label">Investment ($)</label>
-          <input
-            type="number"
+          <NumberInput
             className="field"
             value={props.investment}
             min={1}
             step={100}
-            onChange={(e) =>
-              props.onInvestment(Math.max(1, Number(e.target.value) || 0))
-            }
+            onChange={props.onInvestment}
           />
         </div>
         <div>
           <label className="label">Taker Fee / Side (%)</label>
-          <input
-            type="number"
+          <NumberInput
             className="field"
             value={props.feePct}
             min={0}
             step={0.01}
-            onChange={(e) => props.onFee(Math.max(0, Number(e.target.value) || 0))}
+            onChange={props.onFee}
           />
         </div>
       </div>

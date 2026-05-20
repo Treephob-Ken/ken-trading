@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Minus, Trash2 } from 'lucide-react'
 import {
   CandlestickSeries,
   ColorType,
@@ -8,6 +9,7 @@ import {
   createChart,
   createSeriesMarkers,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type SeriesMarker,
   type Time,
@@ -25,11 +27,19 @@ interface Props {
 
 const t = (n: number) => n as UTCTimestamp
 
+type Tool = null | 'hline'
+
 export default function ChartPanel({ candles, output, trades, liveCandle }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const userPriceLineRefs = useRef<IPriceLine[]>([])
 
-  // Structural rebuild — runs when the backtest inputs change (infrequent).
+  // User-placed horizontal lines — persist across chart rebuilds.
+  const [hLines, setHLines] = useState<number[]>([])
+  const [tool, setTool] = useState<Tool>(null)
+
+  // Chart structural build — rebuilds on backtest input changes (infrequent).
   useEffect(() => {
     const el = containerRef.current
     if (!el || candles.length === 0) return
@@ -67,7 +77,9 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
         close: c.close,
       })),
     )
+    chartRef.current = chart
     candleSeriesRef.current = candleSeries
+    userPriceLineRefs.current = []
 
     for (const ln of output?.mainLines ?? []) {
       const s = chart.addSeries(LineSeries, {
@@ -80,7 +92,6 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
       s.setData(ln.data.map((d) => ({ time: t(d.time), value: d.value })))
     }
 
-    // Wave labels (Elliott Wave markers)
     const waveMarkerList: SeriesMarker<Time>[] = (output?.waveMarkers ?? []).map((wm) => ({
       time: t(wm.time),
       position: wm.position,
@@ -90,7 +101,6 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
       size: 0.5,
     }))
 
-    // Trade markers
     const tradeMarkerList: SeriesMarker<Time>[] = []
     for (const tr of trades) {
       tradeMarkerList.push({
@@ -115,7 +125,6 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
       createSeriesMarkers(candleSeries, allMarkers)
     }
 
-    // Fibonacci / price lines on the candlestick series
     for (const pl of output?.priceLines ?? []) {
       candleSeries.createPriceLine({
         price: pl.price,
@@ -173,9 +182,49 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
 
     return () => {
       chart.remove()
+      chartRef.current = null
       candleSeriesRef.current = null
+      userPriceLineRefs.current = []
     }
   }, [candles, output, trades])
+
+  // Apply user horizontal lines whenever they change OR the chart is rebuilt.
+  // We diff old refs against new prices so unchanged lines aren't recreated.
+  useEffect(() => {
+    const series = candleSeriesRef.current
+    if (!series) return
+    for (const ref of userPriceLineRefs.current) {
+      try { series.removePriceLine(ref) } catch { /* series may be gone */ }
+    }
+    userPriceLineRefs.current = hLines.map((price) =>
+      series.createPriceLine({
+        price,
+        color: '#3b82f6',
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: '',
+      }),
+    )
+  }, [hLines, candles])
+
+  // Click subscription depends on the active tool and the chart instance.
+  useEffect(() => {
+    const chart = chartRef.current
+    const series = candleSeriesRef.current
+    if (!chart || !series || !tool) return
+    const handler = (param: { point?: { x: number; y: number } }) => {
+      if (!param.point) return
+      const price = series.coordinateToPrice(param.point.y)
+      if (price === null) return
+      if (tool === 'hline') {
+        setHLines((prev) => [...prev, +price.toFixed(8)])
+        setTool(null)
+      }
+    }
+    chart.subscribeClick(handler)
+    return () => chart.unsubscribeClick(handler)
+  }, [tool, candles])
 
   // Live tick — updates the forming candle without rebuilding the chart.
   useEffect(() => {
@@ -191,5 +240,52 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
     }
   }, [liveCandle])
 
-  return <div ref={containerRef} className="h-[480px] w-full" />
+  const cursorClass = tool === 'hline' ? 'cursor-crosshair' : ''
+
+  return (
+    <div className="flex flex-col">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="mr-1 text-[11px] text-dim">Drawings:</span>
+        <button
+          onClick={() => setTool((t) => (t === 'hline' ? null : 'hline'))}
+          className={`flex items-center gap-1 rounded-md border px-2 py-1 transition ${
+            tool === 'hline'
+              ? 'border-brand bg-brand/10 text-brand'
+              : 'border-border bg-panel-2 text-muted hover:border-border-strong hover:text-text'
+          }`}
+          title="Click on chart to place a horizontal price line"
+        >
+          <Minus className="h-3.5 w-3.5" />
+          Horizontal line
+        </button>
+        <button
+          disabled
+          className="flex cursor-not-allowed items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-dim opacity-50"
+          title="Coming soon"
+        >
+          ↗ Trend line
+        </button>
+        <button
+          disabled
+          className="flex cursor-not-allowed items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-dim opacity-50"
+          title="Coming soon"
+        >
+          Fib
+        </button>
+        <div className="ml-1 h-4 w-px bg-border" />
+        <button
+          onClick={() => { setHLines([]); setTool(null) }}
+          disabled={hLines.length === 0}
+          className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-muted transition hover:border-loss/40 hover:text-loss disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Clear ({hLines.length})
+        </button>
+        {tool === 'hline' && (
+          <span className="ml-2 text-[11px] text-brand">Click anywhere on the chart to place a line</span>
+        )}
+      </div>
+      <div ref={containerRef} className={`h-[480px] w-full ${cursorClass}`} />
+    </div>
+  )
 }
