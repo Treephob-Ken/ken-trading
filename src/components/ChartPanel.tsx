@@ -80,26 +80,51 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
       s.setData(ln.data.map((d) => ({ time: t(d.time), value: d.value })))
     }
 
-    if (trades.length > 0) {
-      const markers: SeriesMarker<Time>[] = []
-      for (const tr of trades) {
-        markers.push({
-          time: t(tr.entryTime),
-          position: 'belowBar',
-          color: '#26a69a',
-          shape: 'arrowUp',
-          text: 'BUY',
-        })
-        markers.push({
-          time: t(tr.exitTime),
-          position: 'aboveBar',
-          color: '#ef5350',
-          shape: 'arrowDown',
-          text: 'SELL',
-        })
-      }
-      markers.sort((a, b) => (a.time as number) - (b.time as number))
-      createSeriesMarkers(candleSeries, markers)
+    // Wave labels (Elliott Wave markers)
+    const waveMarkerList: SeriesMarker<Time>[] = (output?.waveMarkers ?? []).map((wm) => ({
+      time: t(wm.time),
+      position: wm.position,
+      color: '#a78bfa',
+      shape: 'circle' as const,
+      text: wm.label,
+      size: 0.5,
+    }))
+
+    // Trade markers
+    const tradeMarkerList: SeriesMarker<Time>[] = []
+    for (const tr of trades) {
+      tradeMarkerList.push({
+        time: t(tr.entryTime),
+        position: 'belowBar',
+        color: '#26a69a',
+        shape: 'arrowUp',
+        text: 'BUY',
+      })
+      tradeMarkerList.push({
+        time: t(tr.exitTime),
+        position: 'aboveBar',
+        color: '#ef5350',
+        shape: 'arrowDown',
+        text: 'SELL',
+      })
+    }
+
+    const allMarkers = [...waveMarkerList, ...tradeMarkerList]
+    if (allMarkers.length > 0) {
+      allMarkers.sort((a, b) => (a.time as number) - (b.time as number))
+      createSeriesMarkers(candleSeries, allMarkers)
+    }
+
+    // Fibonacci / price lines on the candlestick series
+    for (const pl of output?.priceLines ?? []) {
+      candleSeries.createPriceLine({
+        price: pl.price,
+        color: pl.color,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: pl.label,
+      })
     }
 
     const sub = output?.subPane

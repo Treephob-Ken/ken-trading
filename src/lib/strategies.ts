@@ -173,6 +173,14 @@ export const STRATEGIES: StrategyMeta[] = [
       p('mult', 'Std Dev Multiplier', 1, 4, 0.1, 2),
     ],
   },
+  {
+    id: 'elliott',
+    name: 'Elliott Wave',
+    category: 'Trend',
+    description:
+      'Detects 5-wave impulse structures using ZigZag pivot analysis. Draws wave labels (①–⑤), Fibonacci retracement zones, and extension targets. Buys at confirmed wave 2/4 lows, sells at wave 3/5 highs.',
+    params: [p('zigzag', 'ZigZag Threshold %', 1, 15, 0.5, 3)],
+  },
 ]
 
 export function strategyMeta(id: StrategyId): StrategyMeta {
@@ -202,6 +210,18 @@ export interface SeriesLine {
   data: LinePoint[]
 }
 
+export interface WaveMarker {
+  time: number
+  label: string
+  position: 'aboveBar' | 'belowBar'
+}
+
+export interface PriceLine {
+  price: number
+  color: string
+  label: string
+}
+
 export interface StrategyOutput {
   signals: Signal[]
   mainLines: SeriesLine[]
@@ -211,6 +231,8 @@ export interface StrategyOutput {
     hist?: HistPoint[]
     refLines?: number[]
   }
+  waveMarkers?: WaveMarker[]
+  priceLines?: PriceLine[]
 }
 
 function toLine(times: number[], values: number[]): LinePoint[] {
@@ -232,6 +254,121 @@ function buildSignals(
   }
   return signals
 }
+
+// ── Elliott Wave helpers ─────────────────────────────────────────────────────
+
+interface EWPivot { idx: number; time: number; price: number; kind: 'high' | 'low' }
+interface EWImpulse { pivots: EWPivot[]; dir: 'up' | 'down'; w1: number; w3: number; w5: number }
+
+function ewZigZag(candles: Candle[], threshPct: number): EWPivot[] {
+  const thresh = threshPct / 100
+  const out: EWPivot[] = []
+  if (candles.length < 10) return out
+
+  let dir: 'up' | 'down' = candles[1].close >= candles[0].close ? 'up' : 'down'
+  let extIdx = 0
+  let extPrice = dir === 'up' ? candles[0].high : candles[0].low
+
+  for (let i = 1; i < candles.length; i++) {
+    const { high, low } = candles[i]
+    if (dir === 'up') {
+      if (high >= extPrice) { extPrice = high; extIdx = i }
+      else if ((extPrice - low) / extPrice >= thresh) {
+        out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: 'high' })
+        dir = 'down'; extPrice = low; extIdx = i
+      }
+    } else {
+      if (low <= extPrice) { extPrice = low; extIdx = i }
+      else if ((high - extPrice) / extPrice >= thresh) {
+        out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: 'low' })
+        dir = 'up'; extPrice = high; extIdx = i
+      }
+    }
+  }
+  // Add the current extreme as a provisional unconfirmed pivot
+  out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: dir === 'up' ? 'high' : 'low' })
+  return out
+}
+
+function ewFindImpulse(pivots: EWPivot[]): EWImpulse | null {
+  if (pivots.length < 6) return null
+  for (let s = Math.max(0, pivots.length - 10); s <= pivots.length - 6; s++) {
+    const p = pivots.slice(s, s + 6)
+    // Upward: low,high,low,high,low,high
+    if (p[0].kind === 'low' && p[1].kind === 'high' && p[2].kind === 'low' &&
+        p[3].kind === 'high' && p[4].kind === 'low' && p[5].kind === 'high') {
+      const w1 = p[1].price - p[0].price
+      const w3 = p[3].price - p[2].price
+      const w5 = p[5].price - p[4].price
+      if (p[2].price <= p[0].price) continue   // W2 can't retrace 100%
+      if (p[4].price <= p[1].price) continue   // W4 can't overlap W1
+      if (w3 < w1 && w3 < w5) continue         // W3 can't be shortest
+      if (w1 <= 0 || w3 <= 0 || w5 <= 0) continue
+      return { pivots: p, dir: 'up', w1, w3, w5 }
+    }
+    // Downward: high,low,high,low,high,low
+    if (p[0].kind === 'high' && p[1].kind === 'low' && p[2].kind === 'high' &&
+        p[3].kind === 'low' && p[4].kind === 'high' && p[5].kind === 'low') {
+      const w1 = p[0].price - p[1].price
+      const w3 = p[2].price - p[3].price
+      const w5 = p[4].price - p[5].price
+      if (p[2].price >= p[0].price) continue
+      if (p[4].price >= p[1].price) continue
+      if (w3 < w1 && w3 < w5) continue
+      if (w1 <= 0 || w3 <= 0 || w5 <= 0) continue
+      return { pivots: p, dir: 'down', w1, w3, w5 }
+    }
+  }
+  return null
+}
+
+function ewFibLines(imp: EWImpulse): PriceLine[] {
+  const p = imp.pivots
+  const lines: PriceLine[] = []
+  if (imp.dir === 'up') {
+    const w1Len = imp.w1
+    const w2End = p[2].price
+    const w4End = p[4].price
+    const w5End = p[5].price
+    const impulseLen = w5End - p[0].price
+    // W2 retracement zone of W1
+    lines.push({ price: p[1].price - w1Len * 0.382, color: '#f59e0b', label: 'W2 38.2%' })
+    lines.push({ price: p[1].price - w1Len * 0.618, color: '#f97316', label: 'W2 61.8% ★' })
+    // W3 extension targets from W2 bottom
+    lines.push({ price: w2End + w1Len * 1.382, color: '#4ade80', label: 'W3 138.2%' })
+    lines.push({ price: w2End + w1Len * 1.618, color: '#22c55e', label: 'W3 161.8% ★' })
+    lines.push({ price: w2End + w1Len * 2.618, color: '#16a34a', label: 'W3 261.8%' })
+    // W4 retracement of W3
+    lines.push({ price: p[3].price - imp.w3 * 0.382, color: '#fb923c', label: 'W4 38.2%' })
+    // W5 targets from W4
+    lines.push({ price: w4End + w1Len * 0.618, color: '#93c5fd', label: 'W5 61.8%' })
+    lines.push({ price: w4End + w1Len * 1.000, color: '#3b82f6', label: 'W5 = W1 ★' })
+    lines.push({ price: w4End + w1Len * 1.382, color: '#1d4ed8', label: 'W5 138.2%' })
+    // Correction targets after W5
+    lines.push({ price: w5End - impulseLen * 0.382, color: '#f87171', label: 'ABC 38.2%' })
+    lines.push({ price: w5End - impulseLen * 0.618, color: '#ef4444', label: 'ABC 61.8% ★' })
+  } else {
+    const w1Len = imp.w1
+    const w2End = p[2].price
+    const w4End = p[4].price
+    const w5End = p[5].price
+    const impulseLen = p[0].price - w5End
+    lines.push({ price: p[1].price + w1Len * 0.382, color: '#f59e0b', label: 'W2 38.2%' })
+    lines.push({ price: p[1].price + w1Len * 0.618, color: '#f97316', label: 'W2 61.8% ★' })
+    lines.push({ price: w2End - w1Len * 1.382, color: '#4ade80', label: 'W3 138.2%' })
+    lines.push({ price: w2End - w1Len * 1.618, color: '#22c55e', label: 'W3 161.8% ★' })
+    lines.push({ price: w2End - w1Len * 2.618, color: '#16a34a', label: 'W3 261.8%' })
+    lines.push({ price: p[3].price + imp.w3 * 0.382, color: '#fb923c', label: 'W4 38.2%' })
+    lines.push({ price: w4End - w1Len * 0.618, color: '#93c5fd', label: 'W5 61.8%' })
+    lines.push({ price: w4End - w1Len * 1.000, color: '#3b82f6', label: 'W5 = W1 ★' })
+    lines.push({ price: w4End - w1Len * 1.382, color: '#1d4ed8', label: 'W5 138.2%' })
+    lines.push({ price: w5End + impulseLen * 0.382, color: '#f87171', label: 'ABC 38.2%' })
+    lines.push({ price: w5End + impulseLen * 0.618, color: '#ef4444', label: 'ABC 61.8% ★' })
+  }
+  return lines
+}
+
+// ── End Elliott Wave helpers ─────────────────────────────────────────────────
 
 export function generateSignals(
   id: StrategyId,
@@ -475,6 +612,44 @@ export function generateSignals(
           { id: 'bbMid', color: 'rgba(150,150,150,0.6)', data: toLine(times, b.mid) },
           { id: 'bbLower', color: 'rgba(29,191,115,0.7)', data: toLine(times, b.lower) },
         ],
+      }
+    }
+
+    case 'elliott': {
+      const pivots = ewZigZag(candles, params.zigzag ?? 3)
+      const impulse = ewFindImpulse(pivots)
+
+      // ZigZag line connecting all confirmed pivots
+      const zigzagData: LinePoint[] = pivots.map((p) => ({ time: p.time, value: p.price }))
+
+      // Wave number labels at each pivot of the identified impulse
+      const waveMarkers: WaveMarker[] = []
+      const waveLabels = ['0', '①', '②', '③', '④', '⑤']
+      if (impulse) {
+        impulse.pivots.forEach((p, i) => {
+          waveMarkers.push({
+            time: p.time,
+            label: waveLabels[i],
+            position: p.kind === 'high' ? 'aboveBar' : 'belowBar',
+          })
+        })
+      }
+
+      // Fibonacci levels based on the impulse structure
+      const priceLines: PriceLine[] = impulse ? ewFibLines(impulse) : []
+
+      // Signals: buy at confirmed zigzag lows (wave 2/4), sell at highs (wave 3/5)
+      const signals: Signal[] = candles.map(() => null)
+      for (const p of pivots) {
+        const next = p.idx + 1
+        if (next < n) signals[next] = p.kind === 'low' ? 'buy' : 'sell'
+      }
+
+      return {
+        signals,
+        mainLines: [{ id: 'zigzag', color: 'rgba(167,139,250,0.8)', data: zigzagData }],
+        waveMarkers,
+        priceLines,
       }
     }
   }

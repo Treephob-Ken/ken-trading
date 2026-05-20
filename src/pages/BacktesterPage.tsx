@@ -33,6 +33,9 @@ export default function BacktesterPage({
   const [direction, setDirection] = useState<Direction>('long')
   const [initialCapital, setInitialCapital] = useState(10000)
   const [feePct, setFeePct] = useState(0.1)
+  const [stopLossPct, setStopLossPct] = useState(0)
+  const [takeProfitPct, setTakeProfitPct] = useState(0)
+  const [positionMode, setPositionMode] = useState<'fixed' | 'compounding'>('fixed')
 
   const [candles, setCandles] = useState<Candle[]>([])
   const [liveCandle, setLiveCandle] = useState<Candle | null>(null)
@@ -107,9 +110,12 @@ export default function BacktesterPage({
       initialCapital,
       feePct / 100,
       direction,
+      stopLossPct,
+      takeProfitPct,
+      positionMode,
     )
     return { output: out, result: res }
-  }, [candles, strategyId, params, initialCapital, feePct, direction])
+  }, [candles, strategyId, params, initialCapital, feePct, direction, stopLossPct, takeProfitPct, positionMode])
 
   const handleStrategy = (id: StrategyId) => {
     setStrategyId(id)
@@ -133,6 +139,9 @@ export default function BacktesterPage({
           direction={direction}
           initialCapital={initialCapital}
           feePct={feePct}
+          stopLossPct={stopLossPct}
+          takeProfitPct={takeProfitPct}
+          positionMode={positionMode}
           loading={loading}
           onSymbol={onSymbol}
           onTimeframe={onTimeframe}
@@ -145,6 +154,9 @@ export default function BacktesterPage({
           onDirection={setDirection}
           onCapital={setInitialCapital}
           onFee={setFeePct}
+          onStopLoss={setStopLossPct}
+          onTakeProfit={setTakeProfitPct}
+          onPositionMode={setPositionMode}
           onReload={() => setReloadKey((k) => k + 1)}
         />
       </aside>
@@ -197,7 +209,7 @@ export default function BacktesterPage({
         </div>
 
         {result ? (
-          <Results result={result} candles={candles} />
+          <Results result={result} candles={candles} stopLossPct={stopLossPct} takeProfitPct={takeProfitPct} />
         ) : (
           !loading &&
           !error && (
