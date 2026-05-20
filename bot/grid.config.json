@@ -1,0 +1,8 @@
+{
+  "asset": "ETH",
+  "lower": 2800,
+  "upper": 3600,
+  "gridCount": 6,
+  "mode": "arithmetic",
+  "orderSize": 0.01
+}

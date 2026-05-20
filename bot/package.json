@@ -1,0 +1,21 @@
+{
+  "name": "hyper-grid-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hyperliquid grid trading bot — paper-trade on testnet, deploy on mainnet.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nktkas/hyperliquid": "^0.32.2",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0"
+  }
+}
