@@ -51,7 +51,7 @@ export default function SymbolSearch({ value, symbols, onChange }: Props) {
         />
       </div>
       {open && (
-        <div className="absolute z-30 mt-1 max-h-72 w-full overflow-auto rounded-md border border-border bg-panel-2 py-1 shadow-2xl">
+        <div className="absolute z-40 mt-1 max-h-72 w-full overflow-auto rounded-md border border-border bg-panel-2 py-1 shadow-2xl">
           {filtered.length === 0 ? (
             <p className="px-3 py-2 text-xs text-dim">No pairs found</p>
           ) : (

@@ -168,13 +168,27 @@ export default function Results({
               <thead className="sticky top-0 z-20 text-[11px] uppercase tracking-wider text-dim">
                 <tr>
                   <th className="sticky top-0 left-0 z-30 w-10 min-w-[40px] bg-panel px-3 py-2 text-left font-medium border-r border-b border-border/40">#</th>
-                  <th className="sticky top-0 left-[40px] z-30 w-20 min-w-[80px] bg-panel px-3 py-2 text-left font-medium border-r border-b border-border/40">Side</th>
-                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-left font-medium border-b border-border/40">Entry</th>
-                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">Entry Price</th>
-                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-left font-medium border-b border-border/40">Exit</th>
-                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">Exit Price</th>
-                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">P&amp;L</th>
-                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">Return</th>
+                  <th className="sticky top-0 left-[40px] z-30 w-20 min-w-[80px] bg-panel px-3 py-2 text-left font-medium border-r border-b border-border/40">
+                    <span className="flex items-center gap-1">Side <InfoTip term="Side" /></span>
+                  </th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-left font-medium border-b border-border/40">
+                    <span className="flex items-center gap-1">Entry <InfoTip term="Entry" /></span>
+                  </th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">
+                    <span className="flex items-center justify-end gap-1">Entry Price <InfoTip term="Entry Price" /></span>
+                  </th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-left font-medium border-b border-border/40">
+                    <span className="flex items-center gap-1">Exit <InfoTip term="Exit" /></span>
+                  </th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">
+                    <span className="flex items-center justify-end gap-1">Exit Price <InfoTip term="Exit Price" /></span>
+                  </th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">
+                    <span className="flex items-center justify-end gap-1">P&amp;L <InfoTip term="P&L" /></span>
+                  </th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">
+                    <span className="flex items-center justify-end gap-1">Return <InfoTip term="Return" /></span>
+                  </th>
                 </tr>
               </thead>
               <tbody>

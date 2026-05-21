@@ -304,7 +304,7 @@ export default function BacktesterPage({
 
   return (
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
-      <aside className="card relative z-30 h-fit w-full shrink-0 p-4 lg:sticky lg:top-[97px] lg:w-[300px]">
+      <aside className="card relative z-[35] h-fit w-full shrink-0 p-4 lg:sticky lg:top-[97px] lg:w-[300px]">
         <Controls
           symbol={symbol}
           symbols={symbols}

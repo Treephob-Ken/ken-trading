@@ -142,16 +142,18 @@ export default function GridStats({ result, windowBars, timeframe, candles }: Pr
 
       <SectionHead>Grid Setup</SectionHead>
       <Row label="Lookback" value={`${windowBars} bars`} tooltipTerm="Lookback" />
-      <Row label="Range High" value={fmtPrice(result.upper)} />
-      <Row label="Range Low" value={fmtPrice(result.lower)} />
+      <Row label="Range High" value={fmtPrice(result.upper)} tooltipTerm="Range High" />
+      <Row label="Range Low" value={fmtPrice(result.lower)} tooltipTerm="Range Low" />
       <Row
         label="Range Size"
         value={`${fmtPrice(result.upper - result.lower)} (${market.rangePct.toFixed(1)}%)`}
+        tooltipTerm="Range Size"
       />
-      <Row label="Optimal Grid Count" value={String(best.gridCount)} tone="neutral" />
+      <Row label="Optimal Grid Count" value={String(best.gridCount)} tone="neutral" tooltipTerm="Optimal Grid Count" />
       <Row
         label="Grid Spacing"
         value={`${fmtPrice(best.spacing)} (${best.spacingPct.toFixed(2)}%)`}
+        tooltipTerm="Grid Spacing"
       />
 
       <SectionHead>Simulated Performance</SectionHead>
@@ -159,23 +161,27 @@ export default function GridStats({ result, windowBars, timeframe, candles }: Pr
         label="Completed Roundtrips"
         value={String(best.completedTrades)}
         hint="buy→sell pairs"
+        tooltipTerm="Completed Roundtrips"
       />
-      <Row label="Order Fills" value={String(best.fills)} />
+      <Row label="Order Fills" value={String(best.fills)} tooltipTerm="Order Fills" />
       <Row
         label="Realized Grid Profit"
         value={`${fmtUsd(best.realizedPnl)} (${fmtPct(best.realizedPct)})`}
         tone={best.realizedPnl >= 0 ? 'gain' : 'loss'}
+        tooltipTerm="Realized Grid Profit"
       />
       <Row
         label="Unrealized PnL"
         value={`${fmtUsd(best.unrealizedPnl)} (${fmtPct(best.unrealizedPct)})`}
         tone={best.unrealizedPnl >= 0 ? 'gain' : 'loss'}
         hint="open inventory"
+        tooltipTerm="Unrealized PnL"
       />
       <Row
         label="Total PnL"
         value={`${fmtUsd(best.totalPnl)} (${fmtPct(best.totalReturnPct)})`}
         tone={pnlTone}
+        tooltipTerm="Total PnL"
       />
       <Row
         label="Realized APR"
@@ -184,14 +190,14 @@ export default function GridStats({ result, windowBars, timeframe, candles }: Pr
         hint="annualized"
         tooltipTerm="Realized APR"
       />
-      <Row label="Fees Paid" value={fmtUsd(best.feesPaid)} tone="loss" />
+      <Row label="Fees Paid" value={fmtUsd(best.feesPaid)} tone="loss" tooltipTerm="Fees Paid" />
       <Row
         label="Max Drawdown"
         value={`-${best.maxDrawdownPct.toFixed(2)}%`}
         tone="loss"
         tooltipTerm="Max Drawdown"
       />
-      <Row label="Roundtrips / Day" value={fmtNum(tradesPerDay, 1)} />
+      <Row label="Roundtrips / Day" value={fmtNum(tradesPerDay, 1)} tooltipTerm="Roundtrips / Day" />
 
       <SectionHead>Edge Check</SectionHead>
       <Row
@@ -205,11 +211,13 @@ export default function GridStats({ result, windowBars, timeframe, candles }: Pr
         value={`${fmtNum(spacingMultiple, 1)}×`}
         tone={spacingTone}
         hint="want ≥ 3×"
+        tooltipTerm="Spacing ÷ Breakeven"
       />
       <Row
         label="Net Profit / Roundtrip"
         value={fmtPct(profitPerRoundtripPct)}
         tone={profitPerRoundtripPct > 0 ? 'gain' : 'loss'}
+        tooltipTerm="Net Profit / Roundtrip"
       />
 
       <SectionHead>Market Fit</SectionHead>
@@ -231,16 +239,18 @@ export default function GridStats({ result, windowBars, timeframe, candles }: Pr
       {candles && candles.length >= 15 && (
         <>
           <SectionHead>Adaptive Grid Stats</SectionHead>
-          <Row label="Current ATR(14)" value={fmtPrice(currentAtrVal)} />
-          <Row label="Reference ATR (Avg)" value={fmtPrice(averageAtrVal)} />
+          <Row label="Current ATR(14)" value={fmtPrice(currentAtrVal)} tooltipTerm="Current ATR" />
+          <Row label="Reference ATR (Avg)" value={fmtPrice(averageAtrVal)} tooltipTerm="Average ATR" />
           <Row
             label="Spacing Scale Factor"
             value={`${scaleFactor.toFixed(2)}x`}
             tone={scaleFactor > 1.25 ? 'warn' : scaleFactor < 0.75 ? 'gain' : 'neutral'}
+            tooltipTerm="Spacing Scale Factor"
           />
           <Row
             label="Suggested Spacing"
             value={`${fmtPrice(suggestedSpacing)} (${(best.spacingPct * scaleFactor).toFixed(2)}%)`}
+            tooltipTerm="Suggested Spacing"
           />
         </>
       )}
