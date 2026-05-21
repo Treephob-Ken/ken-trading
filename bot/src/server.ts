@@ -11,7 +11,7 @@ import {
   type GridConfig,
 } from './config.js'
 import { GridBot } from './grid-bot.js'
-import { createClients } from './hyperliquid.js'
+import { createClients, getAssetMeta, roundPrice, roundSize } from './hyperliquid.js'
 import { clearLogBuffer, createLogger, getLogBuffer, log, onLog } from './logger.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -26,7 +26,21 @@ interface BotEntry {
 const bots = new Map<string, BotEntry>()
 
 const app = express()
+
+// Enable CORS for frontend web app communication
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200)
+    return
+  }
+  next()
+})
+
 app.use(express.json())
+
 
 const sseClients = new Set<Response>()
 onLog((line) => {
@@ -177,6 +191,53 @@ app.get('/api/logs/stream', (req: Request, res: Response) => {
   res.flushHeaders()
   sseClients.add(res)
   req.on('close', () => sseClients.delete(res))
+})
+
+// ---------- Direct Trade Signal Execution ----------
+
+app.post('/api/trade', async (req: Request, res: Response) => {
+  try {
+    const { asset, side, size } = req.body
+    if (!asset || !side || !size) {
+      res.status(400).json({ error: 'asset, side, and size are required' })
+      return
+    }
+    const env = loadEnv()
+    const clients = createClients(env)
+    const meta = await getAssetMeta(clients.info, asset)
+    // For market-like execution, place limit order 5% past mid-price
+    const rawPx = side === 'buy' ? meta.midPx * 1.05 : meta.midPx * 0.95
+    const roundedPx = roundPrice(rawPx, meta)
+    const roundedSz = roundSize(size, meta)
+    
+    log.info(`API Trade: ${side.toUpperCase()} ${roundedSz} ${asset} (approx mid: ${meta.midPx})`)
+    
+    const orderRes = await clients.exchange.order({
+      orders: [
+        {
+          a: meta.index,
+          b: side === 'buy',
+          p: roundedPx,
+          s: roundedSz,
+          r: false,
+          t: { limit: { tif: 'Ioc' } }, // Immediate-or-Cancel
+        },
+      ],
+      grouping: 'na',
+    })
+    
+    const status = orderRes.response.data.statuses[0]
+    if (typeof status === 'object' && 'filled' in status) {
+      log.ok(`API Trade filled: ${status.filled.totalSz} @ ${status.filled.avgPx}`)
+      res.json({ ok: true, status, msg: `Filled ${status.filled.totalSz} @ ${status.filled.avgPx}` })
+    } else {
+      log.warn(`API Trade execution status: ${JSON.stringify(status)}`)
+      res.json({ ok: true, status, msg: JSON.stringify(status) })
+    }
+  } catch (e) {
+    log.err(`API Trade failed: ${(e as Error).message}`)
+    res.status(500).json({ error: (e as Error).message })
+  }
 })
 
 const PORT = 3001

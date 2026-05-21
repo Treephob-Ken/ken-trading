@@ -233,5 +233,8 @@ export const GLOSSARY: Record<string, string> = {
   'Average ATR': 'The average value of the Average True Range over the entire lookback window, representing historical volatility.',
   'Suggested Spacing': 'Volatility-adjusted grid spacing. If current volatility is high, it widens spacing; if low, it tightens it.',
   'Spacing Scale Factor': 'The ratio of current ATR to historical average ATR. Used to dynamically scale grid spacing to match changing volatility.',
+  'Local Bot URL': 'The URL of your running local Express server. Default is http://localhost:3001.',
+  'Hyperliquid Asset': 'The asset symbol as listed on Hyperliquid. Binance symbols (like ETHUSDT) are automatically mapped to Hyperliquid asset names (like ETH).',
+  'Signal Size': 'The quantity of the asset (e.g. 0.1 ETH) to buy or sell per trade signal.',
 }
 

@@ -138,6 +138,7 @@ export default function Controls(props: Props) {
           {PRESETS.map((preset) => (
             <button
               key={preset.label}
+              type="button"
               className="flex-1 rounded-md border border-border bg-panel-2 py-1 text-xs text-muted transition-colors hover:border-border-strong hover:text-text"
               onClick={() => applyPreset(preset.days)}
             >
@@ -145,6 +146,7 @@ export default function Controls(props: Props) {
             </button>
           ))}
           <button
+            type="button"
             className="flex-1 rounded-md border border-border bg-panel-2 py-1 text-xs text-muted transition-colors hover:border-border-strong hover:text-text"
             onClick={() => {
               props.onStartDate('')
@@ -154,6 +156,20 @@ export default function Controls(props: Props) {
             Max
           </button>
         </div>
+        <button
+          type="button"
+          className={`mt-2 w-full flex items-center justify-center gap-1.5 rounded-md border py-1.5 text-xs font-semibold transition-all ${
+            props.endDate === ''
+              ? 'border-gain/40 bg-gain/10 text-gain shadow-[0_0_8px_rgba(34,197,94,0.15)]'
+              : 'border-border bg-panel hover:bg-panel-2 text-muted hover:text-text'
+          }`}
+          onClick={() => {
+            props.onEndDate('')
+          }}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${props.endDate === '' ? 'bg-gain animate-pulse' : 'bg-dim'}`} />
+          {props.endDate === '' ? 'Live Mode Active' : 'Switch to Live Mode'}
+        </button>
         {!props.startDate && (
           <p className="mt-1.5 text-[11px] text-dim">
             Showing the most recent 1000 candles.

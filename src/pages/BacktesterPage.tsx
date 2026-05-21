@@ -13,6 +13,7 @@ import WalkForwardPanel from '@/components/WalkForwardPanel'
 import MultiTFPanel from '@/components/MultiTFPanel'
 import CorrelationPanel from '@/components/CorrelationPanel'
 import Results from '@/components/Results'
+import LiveSignalController from '@/components/LiveSignalController'
 import { runEnsemble, type EnsembleConfig } from '@/lib/ensemble'
 import { analyzeRegime } from '@/lib/markov'
 import { walkForward } from '@/lib/walkforward'
@@ -298,47 +299,69 @@ export default function BacktesterPage({
     setParams(initialParams)
   }
 
+  // Extract latest completed signal for live trading integration
+  const { latestSignal, latestSignalTime } = useMemo(() => {
+    if (!output || !output.signals || output.signals.length === 0) {
+      return { latestSignal: null, latestSignalTime: null }
+    }
+    const signalIndex = output.signals.length - 1
+    const signal = output.signals[signalIndex]
+    const candle = candles[signalIndex]
+    return {
+      latestSignal: signal,
+      latestSignalTime: candle ? candle.time * 1000 : null,
+    }
+  }, [output, candles])
+
   const pairLabel = symbol.replace(/USDT$/, '/USDT')
   const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
   const dataCapped = candles.length >= MAX_BARS
 
   return (
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
-      <aside className="card relative z-[35] h-fit w-full shrink-0 p-4 lg:sticky lg:top-[97px] lg:w-[300px]">
-        <Controls
+      <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:sticky lg:top-[97px] lg:w-[300px]">
+        <div className="card p-4">
+          <Controls
+            symbol={symbol}
+            symbols={symbols}
+            timeframe={timeframe}
+            startDate={startDate}
+            endDate={endDate}
+            strategyId={strategyId}
+            params={params}
+            direction={direction}
+            initialCapital={initialCapital}
+            feePct={feePct}
+            stopLossPct={stopLossPct}
+            takeProfitPct={takeProfitPct}
+            positionMode={positionMode}
+            targetRiskPct={targetRiskPct}
+            atrMultiplier={atrMultiplier}
+            loading={loading}
+            onSymbol={onSymbol}
+            onTimeframe={onTimeframe}
+            onStartDate={setStartDate}
+            onEndDate={setEndDate}
+            onStrategy={handleStrategy}
+            onParam={(key, value) =>
+              setParams((prev) => ({ ...prev, [key]: value }))
+            }
+            onDirection={setDirection}
+            onCapital={setInitialCapital}
+            onFee={setFeePct}
+            onStopLoss={setStopLossPct}
+            onTakeProfit={setTakeProfitPct}
+            onPositionMode={setPositionMode}
+            onTargetRisk={setTargetRiskPct}
+            onAtrMultiplier={setAtrMultiplier}
+            onReload={() => setReloadKey((k) => k + 1)}
+          />
+        </div>
+        <LiveSignalController
           symbol={symbol}
-          symbols={symbols}
-          timeframe={timeframe}
-          startDate={startDate}
-          endDate={endDate}
-          strategyId={strategyId}
-          params={params}
-          direction={direction}
-          initialCapital={initialCapital}
-          feePct={feePct}
-          stopLossPct={stopLossPct}
-          takeProfitPct={takeProfitPct}
-          positionMode={positionMode}
-          targetRiskPct={targetRiskPct}
-          atrMultiplier={atrMultiplier}
-          loading={loading}
-          onSymbol={onSymbol}
-          onTimeframe={onTimeframe}
-          onStartDate={setStartDate}
-          onEndDate={setEndDate}
-          onStrategy={handleStrategy}
-          onParam={(key, value) =>
-            setParams((prev) => ({ ...prev, [key]: value }))
-          }
-          onDirection={setDirection}
-          onCapital={setInitialCapital}
-          onFee={setFeePct}
-          onStopLoss={setStopLossPct}
-          onTakeProfit={setTakeProfitPct}
-          onPositionMode={setPositionMode}
-          onTargetRisk={setTargetRiskPct}
-          onAtrMultiplier={setAtrMultiplier}
-          onReload={() => setReloadKey((k) => k + 1)}
+          latestSignal={latestSignal}
+          latestSignalTime={latestSignalTime}
+          isLiveRange={isLiveRange}
         />
       </aside>
 

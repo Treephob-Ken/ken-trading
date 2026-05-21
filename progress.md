@@ -99,15 +99,37 @@ Live grid trading bot on Hyperliquid perps (testnet + mainnet).
 
 ---
 
+---
+
+### Phase 4 — Live Auto-Trading & Indicator Triggering (current)
+Connecting React web app's live indicator signals (BUY/SELL) to the local trading bot for instant trade execution.
+
+#### Bot (bot/)
+- **Direct Trade Execution Endpoint**: Added `POST /api/trade` to place market-like orders 5% past mid-price using the Immediate-or-Cancel (`Ioc`) time-in-force for instant execution.
+- **Custom CORS Support**: Permitted frontend calls from `localhost:5173` without extra npm dependency installs.
+
+#### Web App (src/)
+- **LiveSignalController component**: Built a premium sidebar execution card with connectivity polling, manual buy/sell order placement, and live logs.
+- **Auto-Trade Toggle Switch**: Listens to Binance websocket events on candle close, extracts stable strategy signals from the backtester, and auto-routes orders to the bot.
+- **Go Live Toggle Button**: Added a dedicated toggle button inside `Controls.tsx` that instantly clears the End Date to activate websocket mode, displaying a green pulsing dot.
+- **Mock Signal Simulator**: Interactive triggers ("Simulate BUY" / "Simulate SELL") to verify the auto-trade `useEffect` hook and safety checks without waiting for candle close events.
+
+#### System Shortcuts & Batch Scripts
+- **Bot Launcher**: `start_bot.bat` + `Hyperliquid Bot.lnk` desktop shortcut (opens bot panel and starts server).
+- **Web App Launcher**: `start_website.bat` + `Crypto Strategy Lab.lnk` desktop shortcut (opens `http://localhost:5173` and starts Vite dev server).
+
+---
+
 ## Current state
 
 | Area | Status |
 |---|---|
 | Web app (Vercel) | ✅ deployed — garlic-trading.vercel.app |
 | Bot (local) | ✅ running — `cd bot && npm start` |
-| GitHub | ✅ pushed to master — Treephob-Ken/ken-trading |
+| GitHub | ✅ pushed to master & new branch `autotrade` created |
 | SL/TP on Hyperliquid | ✅ verified — correct trigger conditions confirmed in order history |
 | Multi-bot | ✅ working — manage via dashboard at `http://localhost:3001` |
+| Auto-Trading | ✅ verified — orders trigger on simulated BUY/SELL signals |
 
 ---
 
@@ -118,3 +140,4 @@ Live grid trading bot on Hyperliquid perps (testnet + mainnet).
 - No auto-restart if bot crashes mid-session
 - Backtester drawing tools: trend line and Fibonacci not yet implemented
 - No webhook / alert when SL or TP triggers
+
