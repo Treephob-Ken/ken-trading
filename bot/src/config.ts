@@ -32,6 +32,8 @@ export interface GridConfig {
   stopLossPrice?: number   // close all and halt if price <= this
   takeProfitPrice?: number // close all and halt if price >= this
   triggerPrice?: number    // don't start placing until price crosses this
+  rebalanceIntervalMs?: number // how often to re-center and adapt spacing (ms)
+  adaptiveSpacing?: boolean    // adapt spacing dynamically using ATR
 }
 
 export interface EnvConfig {
@@ -180,6 +182,9 @@ export function validateConfig(cfg: GridConfig): void {
   if (cfg.takeProfitPrice !== undefined && cfg.takeProfitPrice <= cfg.upper) {
     throw new Error('takeProfitPrice must be above the upper grid bound')
   }
+  if (cfg.rebalanceIntervalMs !== undefined && cfg.rebalanceIntervalMs <= 0) {
+    throw new Error('rebalanceIntervalMs must be > 0')
+  }
 }
 
 // Derives the per-grid order size from a USDC budget.
@@ -206,4 +211,21 @@ export function buildLines(cfg: GridConfig): number[] {
     for (let i = 0; i <= gridCount; i++) lines.push(lower + step * i)
   }
   return lines
+}
+
+export function buildCenteredGrid(
+  anchor: number,
+  spacing: number,
+  count: number,
+  mode: GridMode,
+): number[] {
+  const lines: number[] = []
+  const half = Math.floor(count / 2)
+  if (mode === 'geometric' && anchor > 0) {
+    const r = (anchor + spacing) / anchor
+    for (let i = 0; i <= count; i++) lines.push(anchor * Math.pow(r, i - half))
+  } else {
+    for (let i = 0; i <= count; i++) lines.push(anchor + (i - half) * spacing)
+  }
+  return lines.filter((x) => x > 0)
 }

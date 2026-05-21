@@ -5,6 +5,7 @@ import type { SymbolInfo } from '@/lib/binance'
 import { STRATEGIES, strategyMeta } from '@/lib/strategies'
 import NumberInput from './NumberInput'
 import SymbolSearch from './SymbolSearch'
+import InfoTip from './InfoTip'
 
 const INTERVALS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']
 const DIRECTIONS: { id: Direction; label: string }[] = [
@@ -36,7 +37,9 @@ interface Props {
   feePct: number
   stopLossPct: number
   takeProfitPct: number
-  positionMode: 'fixed' | 'compounding'
+  positionMode: 'fixed' | 'compounding' | 'volatility'
+  targetRiskPct: number
+  atrMultiplier: number
   loading: boolean
   onSymbol: (v: string) => void
   onTimeframe: (v: string) => void
@@ -49,7 +52,9 @@ interface Props {
   onFee: (v: number) => void
   onStopLoss: (v: number) => void
   onTakeProfit: (v: number) => void
-  onPositionMode: (v: 'fixed' | 'compounding') => void
+  onPositionMode: (v: 'fixed' | 'compounding' | 'volatility') => void
+  onTargetRisk: (v: number) => void
+  onAtrMultiplier: (v: number) => void
   onReload: () => void
 }
 
@@ -78,7 +83,10 @@ export default function Controls(props: Props) {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <label className="label">Market Pair</label>
+        <label className="label flex items-center gap-1">
+          Market Pair
+          <InfoTip term="Market Pair" className="text-dim hover:text-muted" />
+        </label>
         <SymbolSearch
           value={props.symbol}
           symbols={props.symbols}
@@ -87,7 +95,10 @@ export default function Controls(props: Props) {
       </div>
 
       <div>
-        <label className="label">Timeframe</label>
+        <label className="label flex items-center gap-1">
+          Timeframe
+          <InfoTip term="Timeframe" className="text-dim hover:text-muted" />
+        </label>
         <select
           className="field"
           value={props.timeframe}
@@ -102,7 +113,10 @@ export default function Controls(props: Props) {
       </div>
 
       <div>
-        <label className="label">Date Range</label>
+        <label className="label flex items-center gap-1">
+          Date Range
+          <InfoTip term="Date Range" className="text-dim hover:text-muted" />
+        </label>
         <div className="grid grid-cols-2 gap-2">
           <input
             type="date"
@@ -150,7 +164,10 @@ export default function Controls(props: Props) {
       <div className="h-px bg-border" />
 
       <div>
-        <label className="label">Strategy</label>
+        <label className="label flex items-center gap-1">
+          Strategy
+          <InfoTip term="Strategy" className="text-dim hover:text-muted" />
+        </label>
         <select
           className="field"
           value={props.strategyId}
@@ -170,11 +187,17 @@ export default function Controls(props: Props) {
       </div>
 
       <div>
-        <label className="label">Parameters</label>
+        <label className="label flex items-center gap-1">
+          Parameters
+          <InfoTip term="Parameters" className="text-dim hover:text-muted" />
+        </label>
         <div className="flex flex-col gap-2.5">
           {meta.params.map((param) => (
             <div key={param.key} className="flex items-center justify-between gap-3">
-              <span className="text-sm text-muted">{param.label}</span>
+              <span className="text-sm text-muted flex items-center gap-1">
+                {param.label}
+                <InfoTip term={param.label} className="text-dim hover:text-muted" />
+              </span>
               <NumberInput
                 className="field w-24 text-right"
                 value={props.params[param.key] ?? param.default}
@@ -189,7 +212,10 @@ export default function Controls(props: Props) {
       </div>
 
       <div>
-        <label className="label">Position Direction</label>
+        <label className="label flex items-center gap-1">
+          Position Direction
+          <InfoTip term="Position Direction" className="text-dim hover:text-muted" />
+        </label>
         <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
           {DIRECTIONS.map((d) => (
             <button
@@ -212,7 +238,10 @@ export default function Controls(props: Props) {
 
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="label">Capital ($)</label>
+          <label className="label flex items-center gap-1">
+            Capital ($)
+            <InfoTip term="Capital" className="text-dim hover:text-muted" />
+          </label>
           <NumberInput
             className="field"
             value={props.initialCapital}
@@ -222,7 +251,10 @@ export default function Controls(props: Props) {
           />
         </div>
         <div>
-          <label className="label">Fee (%)</label>
+          <label className="label flex items-center gap-1">
+            Fee (%)
+            <InfoTip term="Fee %" className="text-dim hover:text-muted" />
+          </label>
           <NumberInput
             className="field"
             value={props.feePct}
@@ -234,24 +266,62 @@ export default function Controls(props: Props) {
       </div>
 
       <div>
-        <label className="label">Position Sizing</label>
+        <label className="label flex items-center gap-1">
+          Position Sizing
+          <InfoTip term="Volatility Targeting" className="text-dim hover:text-muted" />
+        </label>
         <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
-          {(['fixed', 'compounding'] as const).map((m) => (
+          {(['fixed', 'compounding', 'volatility'] as const).map((m) => (
             <button
               key={m}
               className={`seg ${props.positionMode === m ? 'seg-active' : ''}`}
               onClick={() => props.onPositionMode(m)}
             >
-              {m === 'fixed' ? 'Fixed Size' : 'Compounding'}
+              {m === 'fixed' ? 'Fixed Size' : m === 'compounding' ? 'Compounding' : 'Volatility'}
             </button>
           ))}
         </div>
         <p className="mt-1.5 text-[11px] text-dim">
           {props.positionMode === 'fixed'
             ? 'Same $ per trade — realistic. P&L accumulates but position size stays constant.'
-            : 'Position grows with equity — each win risks more, each loss risks less.'}
+            : props.positionMode === 'compounding'
+              ? 'Position grows with equity — each win risks more, each loss risks less.'
+              : 'Sizes positions dynamically based on ATR to risk a fixed capital percentage.'}
         </p>
       </div>
+
+      {props.positionMode === 'volatility' && (
+        <div className="grid grid-cols-2 gap-2 border-l-2 border-brand/50 pl-2.5 py-1">
+          <div>
+            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+              Target Risk %
+              <InfoTip term="Volatility Targeting" className="text-dim hover:text-muted" />
+            </label>
+            <NumberInput
+              className="field"
+              value={props.targetRiskPct}
+              min={0.1}
+              max={100}
+              step={0.1}
+              onChange={props.onTargetRisk}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+              ATR Multiplier
+              <InfoTip term="ATR Multiplier" className="text-dim hover:text-muted" />
+            </label>
+            <NumberInput
+              className="field"
+              value={props.atrMultiplier}
+              min={0.5}
+              max={10}
+              step={0.1}
+              onChange={props.onAtrMultiplier}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="h-px bg-border" />
 
@@ -259,7 +329,10 @@ export default function Controls(props: Props) {
         <label className="label">Risk Controls</label>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-1 block text-[11px] text-dim">Stop Loss %</label>
+            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+              Stop Loss %
+              <InfoTip term="Stop Loss" className="text-dim hover:text-muted" />
+            </label>
             <NumberInput
               className="field"
               value={props.stopLossPct}
@@ -270,7 +343,10 @@ export default function Controls(props: Props) {
             />
           </div>
           <div>
-            <label className="mb-1 block text-[11px] text-dim">Take Profit %</label>
+            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+              Take Profit %
+              <InfoTip term="Take Profit" className="text-dim hover:text-muted" />
+            </label>
             <NumberInput
               className="field"
               value={props.takeProfitPct}

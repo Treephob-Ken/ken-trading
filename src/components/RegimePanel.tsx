@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Activity, ArrowRight, TrendingDown, TrendingUp, Wind } from 'lucide-react'
+import { Activity, ArrowRight, TrendingDown, TrendingUp, Wind, ShieldAlert, Sparkles } from 'lucide-react'
 import type { Candle, StrategyId } from '@/types'
 import {
   analyzeRegime,
@@ -7,7 +7,9 @@ import {
   STATES,
   type RegimeLabel,
 } from '@/lib/markov'
-import { strategyMeta } from '@/lib/strategies'
+import { strategyMeta, defaultParams, generateSignals } from '@/lib/strategies'
+import { runBacktest } from '@/lib/backtest'
+import InfoTip from '@/components/InfoTip'
 
 interface Props {
   candles: Candle[]
@@ -48,6 +50,138 @@ export default function RegimePanel({
   const Icon = tone.icon
   const recs = recommendStrategies(regime)
 
+  // Meta-Model Orchestrator calculations:
+  // 1. Backtest each recommended strategy on current dataset to calculate its Sharpe
+  const sharpes = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const rec of recs) {
+      try {
+        const params = defaultParams(rec.id)
+        const out = generateSignals(rec.id, candles, params)
+        const res = runBacktest(
+          candles,
+          out.signals,
+          10000,
+          0.001, // 0.1% fee
+          'both',
+          0,
+          0
+        )
+        map[rec.id] = Math.max(0.05, res.metrics.sharpeRatio) // clamp at 0.05 for positive weights
+      } catch {
+        map[rec.id] = 1.0 // fallback
+      }
+    }
+    return map
+  }, [candles, recs])
+
+  // 2. Backtest currently selected strategy for drawdown circuit breaker
+  const activeBacktest = useMemo(() => {
+    try {
+      const params = defaultParams(currentStrategy)
+      const out = generateSignals(currentStrategy, candles, params)
+      return runBacktest(candles, out.signals, 10000, 0.001, 'both', 0, 0)
+    } catch {
+      return null
+    }
+  }, [candles, currentStrategy])
+
+  // 3. Detect recent transitions (in last 20 bars)
+  const regimeTransition = useMemo(() => {
+    const labels = analysis.labels
+    if (labels.length < 40) return null
+
+    let currentRegimeIdx = -1
+    let currentPos = -1
+    for (let i = labels.length - 1; i >= 0; i--) {
+      if (labels[i] >= 0) {
+        currentRegimeIdx = labels[i]
+        currentPos = i
+        break
+      }
+    }
+
+    if (currentPos === -1) return null
+
+    let prevRegimeIdx = -1
+    for (let i = currentPos - 1; i >= 0; i--) {
+      if (labels[i] >= 0 && labels[i] !== currentRegimeIdx) {
+        prevRegimeIdx = labels[i]
+        const barsAgo = currentPos - i
+        if (barsAgo <= 20) {
+          return {
+            from: STATES[prevRegimeIdx],
+            to: STATES[currentRegimeIdx],
+            barsAgo,
+          }
+        }
+        break
+      }
+    }
+    return null
+  }, [analysis])
+
+  // 4. Calculate portfolio allocations w_i = (Sharpe_i * Boost_i) / sum(Sharpe * Boost)
+  const allocations = useMemo(() => {
+    let totalScore = 0
+    const rawAllocations = recs.map((rec) => {
+      const meta = strategyMeta(rec.id)
+      const sharpe = sharpes[rec.id] || 0.1
+
+      const isTrend = ['macd', 'ema', 'sma', 'supertrend', 'psar', 'donchian', 'elliott'].includes(rec.id)
+      const isOscillator = ['rsi', 'stochastic', 'stochrsi', 'cci', 'williamsr', 'bollinger'].includes(rec.id)
+
+      let boost = 1.0
+      if (regime === 'Bull' || regime === 'Bear') {
+        if (isTrend) boost = 2.0
+      } else if (regime === 'Sideways') {
+        if (isOscillator) boost = 2.0
+      }
+
+      const score = sharpe * boost
+      totalScore += score
+      return {
+        id: rec.id,
+        name: meta.name,
+        category: meta.category,
+        sharpe,
+        boost,
+        score,
+      }
+    })
+
+    return rawAllocations.map((item) => ({
+      ...item,
+      weight: totalScore > 0 ? item.score / totalScore : 0,
+    }))
+  }, [recs, sharpes, regime])
+
+  // 5. Drawdown safety circuit breaker status
+  const circuitBreakerStatus = useMemo(() => {
+    if (!activeBacktest) return null
+    const dd = activeBacktest.metrics.maxDrawdownPct
+    if (dd > 10) {
+      return {
+        drawdown: dd,
+        title: '🚨 Drawdown Circuit Breaker: Active',
+        description: 'Drawdown exceeds 10% risk threshold. De-risk immediately (cease trading or scale size by 80%).',
+        bg: 'bg-loss/10',
+        border: 'border-loss/30',
+        text: 'text-loss',
+      }
+    } else if (dd > 5) {
+      return {
+        drawdown: dd,
+        title: '⚠️ Risk Warning: High Drawdown',
+        description: 'Drawdown exceeds 5% threshold. Consider cutting position size by half.',
+        bg: 'bg-warn/10',
+        border: 'border-warn/30',
+        text: 'text-warn',
+      }
+    }
+    return null
+  }, [activeBacktest])
+
   return (
     <div className="card overflow-hidden">
       {/* Header band — colored to match the regime */}
@@ -57,7 +191,10 @@ export default function RegimePanel({
         </div>
         <div className="flex-1">
           <div className="flex items-baseline gap-2">
-            <h3 className="text-sm font-semibold text-text">Market Regime</h3>
+            <h3 className="text-sm font-semibold text-text flex items-center gap-1">
+              Market Regime
+              <InfoTip term="Regime" className="text-dim hover:text-muted" />
+            </h3>
             <span className={`font-mono text-sm font-semibold ${tone.tone}`}>{regime.toUpperCase()}</span>
           </div>
           <p className="text-[11px] text-dim">
@@ -65,7 +202,10 @@ export default function RegimePanel({
           </p>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-dim">Persistence</div>
+          <div className="text-[10px] uppercase tracking-wider text-dim flex items-center justify-end gap-1">
+            Persistence
+            <InfoTip term="Persistence" className="text-dim hover:text-muted" />
+          </div>
           <div className={`font-mono text-base font-semibold ${tone.tone}`}>
             {(analysis.persistence * 100).toFixed(0)}%
           </div>
@@ -85,8 +225,9 @@ export default function RegimePanel({
           </div>
 
           <div>
-            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-dim">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-dim flex items-center gap-1">
               Long-run regime mix (stationary)
+              <InfoTip term="Stationary Distribution" className="text-dim hover:text-muted" />
             </p>
             <ProbBar probs={analysis.stationary} />
           </div>
@@ -149,20 +290,138 @@ export default function RegimePanel({
           </p>
         </div>
       </div>
+
+      {/* Meta-Model Orchestration Section */}
+      <div className="border-t border-border/40 bg-panel/10 p-4 space-y-4">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-text flex items-center gap-1.5">
+          <Sparkles className="h-4 w-4 text-warn animate-pulse" />
+          Meta-Model Portfolio Orchestrator <InfoTip term="Meta-Model" />
+        </h4>
+
+        {/* Transition Alert & Circuit Breakers */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Regime Transition Alert */}
+          {regimeTransition ? (
+            <div className="rounded-lg border border-brand/30 bg-brand/5 p-3 flex items-start gap-2.5">
+              <Activity className="h-4 w-4 text-brand shrink-0 mt-0.5" />
+              <div>
+                <span className="text-xs font-semibold text-text block">Regime Shift Alert</span>
+                <p className="text-[11px] text-dim leading-relaxed mt-0.5">
+                  Trend transitioned from <strong className="text-muted">{regimeTransition.from}</strong> to{' '}
+                  <strong className="text-brand font-bold">{regimeTransition.to}</strong>{' '}
+                  {regimeTransition.barsAgo} bars ago. Allocations adjusted.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border/50 bg-panel-2/20 p-3 flex items-start gap-2.5">
+              <Activity className="h-4 w-4 text-dim shrink-0 mt-0.5" />
+              <div>
+                <span className="text-xs font-semibold text-dim block">Regime Stability</span>
+                <p className="text-[11px] text-dim leading-relaxed mt-0.5">
+                  No recent regime transitions detected in the last 20 bars. Current state is stable.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Drawdown Circuit Breaker */}
+          {circuitBreakerStatus ? (
+            <div className={`rounded-lg border p-3 flex items-start gap-2.5 ${circuitBreakerStatus.border} ${circuitBreakerStatus.bg}`}>
+              <ShieldAlert className={`h-4 w-4 shrink-0 mt-0.5 ${circuitBreakerStatus.text}`} />
+              <div>
+                <span className={`text-xs font-semibold block ${circuitBreakerStatus.text}`}>
+                  {circuitBreakerStatus.title}
+                </span>
+                <p className="text-[11px] text-dim leading-relaxed mt-0.5">
+                  {circuitBreakerStatus.description} (Current Max DD: {circuitBreakerStatus.drawdown.toFixed(1)}%)
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-gain/30 bg-gain/5 p-3 flex items-start gap-2.5">
+              <ShieldAlert className="h-4 w-4 text-gain shrink-0 mt-0.5" />
+              <div>
+                <span className="text-xs font-semibold text-gain block">Drawdown Circuit Breaker</span>
+                <p className="text-[11px] text-dim leading-relaxed mt-0.5">
+                  Selected strategy drawdown is within safe limits (under 5%). Full risk allocation permitted.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Risk Budget Allocation */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-dim flex items-center gap-1">
+              Dynamic Risk Budget Allocation
+            </span>
+            <span className="text-[9px] font-mono text-dim">
+              w_i = (Sharpe_i × Boost_i) / Σ(Sharpe × Boost)
+            </span>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-border bg-panel p-3">
+            {allocations.map((alloc) => {
+              const active = currentStrategy === alloc.id
+              return (
+                <div key={alloc.id} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => onApplyStrategy(alloc.id)}
+                        className={`font-semibold hover:underline text-left truncate max-w-[140px] sm:max-w-none ${
+                          active ? 'text-brand font-bold' : 'text-text hover:text-brand'
+                        }`}
+                      >
+                        {alloc.name}
+                      </button>
+                      <span className="text-[10px] text-dim shrink-0">({alloc.category})</span>
+                      {alloc.boost > 1 && (
+                        <span className="rounded bg-warn/10 border border-warn/30 px-1 text-[8px] font-semibold text-warn shrink-0">
+                          {alloc.boost}x Boost
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-mono text-dim flex items-center gap-2 shrink-0">
+                      <span>Sharpe: {alloc.sharpe.toFixed(2)}</span>
+                      <span className={active ? 'text-brand font-bold' : 'text-text font-medium'}>
+                        {(alloc.weight * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="h-1.5 w-full rounded-full bg-border overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        active ? 'bg-brand' : 'bg-muted'
+                      }`}
+                      style={{ width: `${alloc.weight * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
 
 function ConvictionBar({ conviction }: { conviction: number }) {
-  // Conviction range: −1 (certain bear) ... +1 (certain bull). Render as a
-  // diverging bar centered at zero.
+  // Diverging conviction bar: −1 (bearish) to +1 (bullish)
   const pct = Math.max(-1, Math.min(1, conviction))
   const widthPct = Math.abs(pct) * 50
   const isPos = pct >= 0
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-[11px]">
-        <span className="font-semibold uppercase tracking-wider text-dim">Conviction</span>
+        <span className="font-semibold uppercase tracking-wider text-dim flex items-center gap-1">
+          Conviction
+          <InfoTip term="Conviction" className="text-dim hover:text-muted" />
+        </span>
         <span className={`font-mono font-semibold ${isPos ? 'text-gain' : 'text-loss'}`}>
           {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%
         </span>
@@ -187,7 +446,6 @@ function ConvictionBar({ conviction }: { conviction: number }) {
 }
 
 function ProbBar({ probs }: { probs: number[] }) {
-  // Three segments: Bear / Sideways / Bull
   return (
     <div className="flex gap-px overflow-hidden rounded-sm">
       {STATES.map((state, i) => {
@@ -212,11 +470,12 @@ function ProbBar({ probs }: { probs: number[] }) {
 function TransitionMatrix({ P, currentState }: { P: number[][]; currentState: number }) {
   return (
     <div>
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-dim">
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-dim flex items-center gap-1">
         Transition matrix (row=from, col=to)
+        <InfoTip term="Transition Matrix" className="text-dim hover:text-muted" />
       </p>
-      <div className="overflow-hidden rounded-md border border-border bg-bg">
-        <table className="w-full font-mono text-[11px]">
+      <div className="overflow-x-auto rounded-md border border-border bg-panel">
+        <table className="w-full font-mono text-[11px] min-w-[320px]">
           <thead>
             <tr className="bg-panel-2">
               <th className="w-14 px-2 py-1 text-left font-medium text-dim"></th>

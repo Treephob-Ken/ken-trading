@@ -63,6 +63,12 @@ export interface Metrics {
   worstTradePct: number
   longTrades: number
   shortTrades: number
+  sharpeRatio: number
+  sortinoRatio: number
+  calmarRatio: number
+  returnToDrawdown: number
+  expectancy: number
+  avgHoldingBars: number
 }
 
 export interface BacktestResult {

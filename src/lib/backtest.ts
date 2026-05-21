@@ -8,10 +8,12 @@ import type {
   Trade,
   TradeSide,
 } from '@/types'
+import { atr } from '@/lib/indicators'
 
 // Fixed-size mode: every trade risks exactly `initialCapital` dollars.
 // P&L from each trade is added to a running cash total.
 // Compounding mode (legacy): position size = current equity, grows/shrinks each trade.
+// Volatility mode: position size is sized so that a stop loss of (ATR * atrMultiplier) risks (initialCapital * targetRiskPct).
 export function runBacktest(
   candles: Candle[],
   signals: Signal[],
@@ -20,7 +22,9 @@ export function runBacktest(
   direction: Direction,
   stopLossPct = 0,        // 0 = disabled
   takeProfitPct = 0,      // 0 = disabled
-  positionMode: 'fixed' | 'compounding' = 'fixed',
+  positionMode: 'fixed' | 'compounding' | 'volatility' = 'fixed',
+  targetRiskPct = 2,
+  atrMultiplier = 1.5,
 ): BacktestResult {
   let equity = initialCapital
   let position: 'flat' | TradeSide = 'flat'
@@ -35,6 +39,12 @@ export function runBacktest(
 
   const pos = (): 'flat' | TradeSide => position
 
+  // Calculate ATR for the candles (period 14)
+  const highs = candles.map((c) => c.high)
+  const lows = candles.map((c) => c.low)
+  const closes = candles.map((c) => c.close)
+  const atrValues = atr(highs, lows, closes, 14)
+
   const markToMarket = (price: number): number => {
     if (pos() === 'flat') return equity
     const afterEntryFee = entryEquity * (1 - feeRate)
@@ -42,28 +52,53 @@ export function runBacktest(
     const posValue =
       pos() === 'long' ? afterEntryFee * ratio : afterEntryFee * (2 - ratio)
     const clamped = Math.max(0, posValue)
-    // Fixed: total wealth = remaining cash + open position value (pre-exit-fee)
-    return positionMode === 'fixed' ? equity - entryEquity + clamped : clamped
+    // Fixed / Volatility: total wealth = remaining cash + open position value (pre-exit-fee)
+    return positionMode === 'compounding' ? clamped : equity - entryEquity + clamped
   }
 
-  const openPos = (side: TradeSide, price: number, time: number) => {
-    // Fixed mode: always risk the original capitalFIXED size regardless of current equity
-    entryEquity = positionMode === 'fixed' ? initialCapital : equity
-    entryPrice = price
-    entryTime = time
-    position = side
-    slPrice =
-      stopLossPct > 0
-        ? side === 'long'
-          ? price * (1 - stopLossPct / 100)
-          : price * (1 + stopLossPct / 100)
-        : 0
-    tpPrice =
-      takeProfitPct > 0
-        ? side === 'long'
-          ? price * (1 + takeProfitPct / 100)
-          : price * (1 - takeProfitPct / 100)
-        : 0
+  const openPos = (side: TradeSide, price: number, time: number, currentAtrVal: number) => {
+    if (positionMode === 'volatility') {
+      // Fallback to 2% of price if ATR is NaN
+      const currentAtr = !Number.isNaN(currentAtrVal) && currentAtrVal > 0 
+        ? currentAtrVal 
+        : price * 0.02 / atrMultiplier
+      const stopLossDist = currentAtr * atrMultiplier
+      const targetRisk = initialCapital * (targetRiskPct / 100)
+      
+      // Sizing: risk / stopLossDist = quantity of tokens. position value in USD = quantity * price
+      entryEquity = (targetRisk / stopLossDist) * price
+      // Cap at current equity to avoid exceeding account value
+      entryEquity = Math.min(entryEquity, equity)
+      
+      entryPrice = price
+      entryTime = time
+      position = side
+      
+      slPrice = side === 'long' ? price - stopLossDist : price + stopLossDist
+      tpPrice =
+        takeProfitPct > 0
+          ? side === 'long'
+            ? price * (1 + takeProfitPct / 100)
+            : price * (1 - takeProfitPct / 100)
+          : 0
+    } else {
+      entryEquity = positionMode === 'fixed' ? initialCapital : equity
+      entryPrice = price
+      entryTime = time
+      position = side
+      slPrice =
+        stopLossPct > 0
+          ? side === 'long'
+            ? price * (1 - stopLossPct / 100)
+            : price * (1 + stopLossPct / 100)
+          : 0
+      tpPrice =
+        takeProfitPct > 0
+          ? side === 'long'
+            ? price * (1 + takeProfitPct / 100)
+            : price * (1 - takeProfitPct / 100)
+          : 0
+    }
   }
 
   const closePos = (price: number, time: number) => {
@@ -84,10 +119,10 @@ export function runBacktest(
       pnl,
       pnlPct: (pnl / entryEquity) * 100,
     })
-    if (positionMode === 'fixed') {
-      equity += pnl   // accumulate P&L; position size never changes
-    } else {
+    if (positionMode === 'compounding') {
       equity = realized
+    } else {
+      equity += pnl   // fixed and volatility accumulate P&L; position size is computed dynamically next trade
     }
     position = 'flat'
     slPrice = 0
@@ -123,6 +158,7 @@ export function runBacktest(
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i]
     const sig = signals[i]
+    const currentAtrVal = atrValues[i]
 
     // SL/TP fires before the signal on the same candle
     if (checkSlTp(c)) {
@@ -132,21 +168,21 @@ export function runBacktest(
 
     if (sig === 'buy') {
       if (direction === 'long') {
-        if (pos() === 'flat') openPos('long', c.close, c.time)
+        if (pos() === 'flat') openPos('long', c.close, c.time, currentAtrVal)
       } else if (direction === 'short') {
         if (pos() === 'short') closePos(c.close, c.time)
       } else {
-        if (pos() === 'short') { closePos(c.close, c.time); openPos('long', c.close, c.time) }
-        else if (pos() === 'flat') openPos('long', c.close, c.time)
+        if (pos() === 'short') { closePos(c.close, c.time); openPos('long', c.close, c.time, currentAtrVal) }
+        else if (pos() === 'flat') openPos('long', c.close, c.time, currentAtrVal)
       }
     } else if (sig === 'sell') {
       if (direction === 'long') {
         if (pos() === 'long') closePos(c.close, c.time)
       } else if (direction === 'short') {
-        if (pos() === 'flat') openPos('short', c.close, c.time)
+        if (pos() === 'flat') openPos('short', c.close, c.time, currentAtrVal)
       } else {
-        if (pos() === 'long') { closePos(c.close, c.time); openPos('short', c.close, c.time) }
-        else if (pos() === 'flat') openPos('short', c.close, c.time)
+        if (pos() === 'long') { closePos(c.close, c.time); openPos('short', c.close, c.time, currentAtrVal) }
+        else if (pos() === 'flat') openPos('short', c.close, c.time, currentAtrVal)
       }
     }
 
@@ -201,6 +237,77 @@ function computeMetrics(
   const bestTradePct = pcts.length ? Math.max(...pcts) : 0
   const worstTradePct = pcts.length ? Math.min(...pcts) : 0
 
+  const dt = candles.length > 1 ? candles[1].time - candles[0].time : 86400
+
+  // --- Quant Upgrades: Advanced Risk Metrics ---
+  // 1. Sharpe & Sortino ratios (crypto is 24/7/365, so we use 365 daily bars or annualize based on timeframe)
+  let sharpeRatio = 0
+  let sortinoRatio = 0
+  
+  if (equity.length > 1) {
+    const returns: number[] = []
+    for (let i = 1; i < equity.length; i++) {
+      const prevVal = equity[i - 1].value
+      returns.push(prevVal > 0 ? (equity[i].value - prevVal) / prevVal : 0)
+    }
+    
+    // Calculate timeframe/bars per year
+    const barsPerYear = dt > 0 ? (365 * 24 * 3600) / dt : 365
+    
+    // Mean daily/bar return
+    const sum = returns.reduce((acc, r) => acc + r, 0)
+    const mean = sum / returns.length
+    
+    // Std deviation of daily/bar returns
+    const varSum = returns.reduce((acc, r) => acc + Math.pow(r - mean, 2), 0)
+    const std = returns.length > 1 ? Math.sqrt(varSum / (returns.length - 1)) : 0
+    
+    if (std > 0) {
+      sharpeRatio = (mean / std) * Math.sqrt(barsPerYear)
+    }
+    
+    // Downside deviation (only negative returns relative to 0 target)
+    const downsideVarSum = returns.reduce((acc, r) => acc + (r < 0 ? Math.pow(r, 2) : 0), 0)
+    const downsideStd = returns.length > 0 ? Math.sqrt(downsideVarSum / returns.length) : 0
+    if (downsideStd > 0) {
+      sortinoRatio = (mean / downsideStd) * Math.sqrt(barsPerYear)
+    }
+  }
+
+  // 2. Calmar Ratio & Return-to-Drawdown
+  const returnToDrawdown = maxDrawdownPct > 0 ? totalReturnPct / maxDrawdownPct : 0
+  let calmarRatio = 0
+  if (maxDrawdownPct > 0 && candles.length > 1) {
+    const startTime = candles[0].time
+    const endTime = candles[candles.length - 1].time
+    const durationSeconds = endTime - startTime
+    const years = durationSeconds > 0 ? durationSeconds / (365 * 24 * 3600) : 0
+    
+    // Annualized return (using simple compounding or linear if years < 1)
+    let annualizedReturnPct = totalReturnPct
+    if (years > 0) {
+      const finalValRatio = finalEquity / initialCapital
+      if (finalValRatio > 0) {
+        annualizedReturnPct = (Math.pow(finalValRatio, 1 / years) - 1) * 100
+      } else {
+        annualizedReturnPct = -100
+      }
+    }
+    calmarRatio = annualizedReturnPct / maxDrawdownPct
+  }
+
+  // 3. Expectancy
+  const expectancy = trades.length ? (winRate / 100) * avgWinPct + (1 - winRate / 100) * avgLossPct : 0
+
+  // 4. Avg holding bars
+  let totalHoldingBars = 0
+  if (dt > 0) {
+    for (const t of trades) {
+      totalHoldingBars += (t.exitTime - t.entryTime) / dt
+    }
+  }
+  const avgHoldingBars = trades.length ? totalHoldingBars / trades.length : 0
+
   return {
     initialCapital,
     finalEquity,
@@ -219,5 +326,11 @@ function computeMetrics(
     worstTradePct,
     longTrades: trades.filter((t) => t.side === 'long').length,
     shortTrades: trades.filter((t) => t.side === 'short').length,
+    sharpeRatio,
+    sortinoRatio,
+    calmarRatio,
+    returnToDrawdown,
+    expectancy,
+    avgHoldingBars,
   }
 }

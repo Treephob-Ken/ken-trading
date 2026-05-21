@@ -23,17 +23,19 @@ interface Props {
   output: StrategyOutput | null
   trades: Trade[]
   liveCandle: Candle | null
+  selectedTrade?: Trade | null
 }
 
 const t = (n: number) => n as UTCTimestamp
 
 type Tool = null | 'hline'
 
-export default function ChartPanel({ candles, output, trades, liveCandle }: Props) {
+export default function ChartPanel({ candles, output, trades, liveCandle, selectedTrade }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const userPriceLineRefs = useRef<IPriceLine[]>([])
+  const tradePriceLinesRef = useRef<IPriceLine[]>([])
 
   // User-placed horizontal lines — persist across chart rebuilds.
   const [hLines, setHLines] = useState<number[]>([])
@@ -49,7 +51,7 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#8b93a7',
-        fontFamily: 'Inter, system-ui, sans-serif',
+        fontFamily: "'Outfit', system-ui, sans-serif",
         panes: { separatorColor: '#222838', separatorHoverColor: '#2f3650' },
       },
       grid: {
@@ -62,11 +64,11 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
     })
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a',
-      downColor: '#ef5350',
+      upColor: '#10b981',
+      downColor: '#ef4444',
       borderVisible: false,
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      wickUpColor: '#10b981',
+      wickDownColor: '#ef4444',
     })
     candleSeries.setData(
       candles.map((c) => ({
@@ -106,14 +108,14 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
       tradeMarkerList.push({
         time: t(tr.entryTime),
         position: 'belowBar',
-        color: '#26a69a',
+        color: '#10b981',
         shape: 'arrowUp',
         text: 'BUY',
       })
       tradeMarkerList.push({
         time: t(tr.exitTime),
         position: 'aboveBar',
-        color: '#ef5350',
+        color: '#ef4444',
         shape: 'arrowDown',
         text: 'SELL',
       })
@@ -185,8 +187,54 @@ export default function ChartPanel({ candles, output, trades, liveCandle }: Prop
       chartRef.current = null
       candleSeriesRef.current = null
       userPriceLineRefs.current = []
+      tradePriceLinesRef.current = []
     }
   }, [candles, output, trades])
+
+  // Zoom to selected trade and add entry/exit price lines
+  useEffect(() => {
+    const series = candleSeriesRef.current
+    const chart = chartRef.current
+
+    // Clean up any existing trade price lines
+    for (const pl of tradePriceLinesRef.current) {
+      try {
+        series?.removePriceLine(pl)
+      } catch {}
+    }
+    tradePriceLinesRef.current = []
+
+    if (!series || !chart || !selectedTrade) return
+
+    // Zoom to the trade
+    const candleDiff = candles.length > 1 ? (candles[1].time - candles[0].time) : 60
+    chart.timeScale().setVisibleRange({
+      from: (selectedTrade.entryTime - candleDiff * 12) as UTCTimestamp,
+      to: (selectedTrade.exitTime + candleDiff * 25) as UTCTimestamp,
+    })
+
+    // Create entry price line (green)
+    const entryLine = series.createPriceLine({
+      price: selectedTrade.entryPrice,
+      color: '#10b981', // green
+      lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: `ENTRY (${selectedTrade.side.toUpperCase()})`,
+    })
+
+    // Create exit price line (red)
+    const exitLine = series.createPriceLine({
+      price: selectedTrade.exitPrice,
+      color: '#ef4444', // red
+      lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: 'EXIT',
+    })
+
+    tradePriceLinesRef.current = [entryLine, exitLine]
+  }, [selectedTrade, candles])
 
   // Apply user horizontal lines whenever they change OR the chart is rebuilt.
   // We diff old refs against new prices so unchanged lines aren't recreated.

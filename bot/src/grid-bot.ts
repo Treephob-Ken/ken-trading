@@ -1,4 +1,4 @@
-import { buildLines, deriveOrderSize, type GridConfig } from './config.js'
+import { buildCenteredGrid, buildLines, deriveOrderSize, type GridConfig } from './config.js'
 import {
   getAssetMeta,
   roundPrice,
@@ -95,8 +95,12 @@ export class GridBot {
   private statsTimer: NodeJS.Timeout | null = null
   private shuttingDown = false
 
-  // Exchange-side safety triggers — these are real orders on Hyperliquid that
-  // close position even if the bot/server is offline.
+  private rebalancing = false
+  private slPct: number | null = null
+  private tpPct: number | null = null
+  private referenceAtr = 0
+  private baseSpacing = 0
+  private rebalanceTimer: NodeJS.Timeout | null = null
   private slTriggerOid: number | null = null
   private tpTriggerOid: number | null = null
 
@@ -124,6 +128,19 @@ export class GridBot {
     if (this.cfg.stopLossPrice) this.log.info(`Stop loss armed at ${this.cfg.stopLossPrice}`)
     if (this.cfg.takeProfitPrice) this.log.info(`Take profit armed at ${this.cfg.takeProfitPrice}`)
 
+    // Calculate initial base spacing (average spacing across current lines)
+    let spacingSum = 0
+    for (let i = 1; i < this.lines.length; i++) {
+      spacingSum += this.lines[i] - this.lines[i - 1]
+    }
+    this.baseSpacing = spacingSum / Math.max(1, this.lines.length - 1)
+
+    // Store stop loss / take profit percentage offsets from the range bounds
+    const origLower = this.cfg.lower
+    const origUpper = this.cfg.upper
+    this.slPct = this.cfg.stopLossPrice ? (origLower - this.cfg.stopLossPrice) / origLower : null
+    this.tpPct = this.cfg.takeProfitPrice ? (this.cfg.takeProfitPrice - origUpper) / origUpper : null
+
     await this.setLeverage()
     await this.cancelExistingOrders()
 
@@ -145,6 +162,17 @@ export class GridBot {
       await this.placeSafetyTriggers()
       this.state = 'live'
       this.log.ok(`Bot live. ${this.orders.size} resting orders on ${this.cfg.asset}.`)
+    }
+
+    if (this.cfg.rebalanceIntervalMs) {
+      if (this.cfg.adaptiveSpacing) {
+        const stats = await this.fetchAtrStats()
+        if (stats) {
+          this.referenceAtr = stats.referenceAtr
+          this.log.info(`Initialized reference ATR: ${this.referenceAtr.toFixed(this.meta.pxDecimals)}`)
+        }
+      }
+      this.startRebalanceTimer()
     }
 
     this.startStatsTimer()
@@ -328,7 +356,7 @@ export class GridBot {
   }
 
   private onPriceTick(price: number): void {
-    if (this.state === 'stopped' || this.shuttingDown) return
+    if (this.state === 'stopped' || this.shuttingDown || this.rebalancing) return
 
     if (this.state === 'waiting-trigger' && this.triggerArmed(price)) {
       this.log.ok(`Trigger price reached at ${price}. Placing initial grid...`)
@@ -397,6 +425,7 @@ export class GridBot {
 
   private handleFill(fill: UserFill): void {
     if (fill.coin !== this.cfg.asset) return
+    if (this.rebalancing) return
 
     const tracked = this.orders.get(fill.oid)
     if (!tracked) return
@@ -522,6 +551,7 @@ export class GridBot {
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     if (this.statsTimer) clearInterval(this.statsTimer)
+    if (this.rebalanceTimer) clearInterval(this.rebalanceTimer)
     if (this.allMidsSub) {
       try { await this.allMidsSub.unsubscribe() } catch { /* ignore */ }
     }
@@ -536,5 +566,150 @@ export class GridBot {
       cancels: mine.map((o) => ({ a: this.meta.index, o: o.oid })),
     })
     this.log.ok(`Cancelled ${mine.length} orders.`)
+  }
+
+  private startRebalanceTimer(): void {
+    const intervalMs = this.cfg.rebalanceIntervalMs ?? 300_000 // default 5m
+    this.rebalanceTimer = setInterval(() => {
+      void this.checkRebalance()
+    }, intervalMs)
+  }
+
+  private async checkRebalance(): Promise<void> {
+    if (this.state !== 'live' || this.rebalancing || this.shuttingDown) return
+
+    const lower = this.lines[0]
+    const upper = this.lines[this.lines.length - 1]
+    if (lower === undefined || upper === undefined) return
+
+    const center = (lower + upper) / 2
+    const halfRange = (upper - lower) / 2
+    const drift = Math.abs(this.currentPrice - center)
+    const driftRatio = halfRange > 0 ? drift / halfRange : 0
+
+    if (driftRatio > 0.8) {
+      this.log.info(`Price drifted > 80% toward grid edge (driftRatio=${driftRatio.toFixed(2)}). Triggering rebalance centered at ${this.currentPrice}...`)
+      await this.triggerRebalance()
+    }
+  }
+
+  private async triggerRebalance(): Promise<void> {
+    this.rebalancing = true
+    try {
+      // 1. Cancel all orders
+      await this.cancelExistingOrders()
+      this.orders.clear()
+      this.ordersByLine.clear()
+      this.slTriggerOid = null
+      this.tpTriggerOid = null
+
+      // 2. Fetch current ATR and compute new spacing if adaptive spacing is enabled
+      let currentSpacing = this.baseSpacing
+      if (this.cfg.adaptiveSpacing && this.referenceAtr > 0) {
+        const stats = await this.fetchAtrStats()
+        if (stats) {
+          const currentAtr = stats.currentAtr
+          const scale = currentAtr / this.referenceAtr
+          currentSpacing = this.baseSpacing * scale
+          this.log.info(`Adaptive spacing: current ATR=${currentAtr.toFixed(this.meta.pxDecimals)}, reference ATR=${this.referenceAtr.toFixed(this.meta.pxDecimals)}, scale=${scale.toFixed(2)}x, spacing=${currentSpacing.toFixed(this.meta.pxDecimals)}`)
+        }
+      }
+
+      // 3. Recalculate grid centered on current price
+      const count = this.cfg.gridCount
+      const mode = this.cfg.mode
+      const newLines = buildCenteredGrid(this.currentPrice, currentSpacing, count, mode)
+      if (newLines.length < 2) {
+        throw new Error('Failed to generate valid grid lines during centering')
+      }
+      this.lines = newLines
+      const newL = newLines[0]
+      const newU = newLines[newLines.length - 1]
+
+      this.log.info(`New centered grid range: [${newL.toFixed(this.meta.pxDecimals)}, ${newU.toFixed(this.meta.pxDecimals)}] with ${count} grids`)
+
+      // 4. Update safety trigger prices if percentages are set
+      if (this.slPct !== null) {
+        this.cfg.stopLossPrice = newL * (1 - this.slPct)
+        this.log.info(`Updated Stop Loss price to ${this.cfg.stopLossPrice.toFixed(this.meta.pxDecimals)}`)
+      }
+      if (this.tpPct !== null) {
+        this.cfg.takeProfitPrice = newU * (1 + this.tpPct)
+        this.log.info(`Updated Take Profit price to ${this.cfg.takeProfitPrice.toFixed(this.meta.pxDecimals)}`)
+      }
+
+      // 5. Place initial orders & safety triggers
+      await this.placeInitialOrders()
+      await this.placeSafetyTriggers()
+      this.log.ok(`Grid rebalanced successfully. ${this.orders.size} active grid orders.`)
+    } catch (e) {
+      this.log.err(`Failed during rebalance execution: ${(e as Error).message}`)
+    } finally {
+      this.rebalancing = false
+    }
+  }
+
+  private async fetchAtrStats(): Promise<{ currentAtr: number; referenceAtr: number } | null> {
+    try {
+      // Fetch last 150 hourly candles (150 * 3600 * 1000 ms)
+      const lookbackMs = 150 * 60 * 60 * 1000
+      const startTime = Date.now() - lookbackMs
+      const response = await this.clients.info.candleSnapshot({
+        coin: this.cfg.asset,
+        interval: '1h',
+        startTime,
+      })
+
+      if (!response || response.length < 15) {
+        this.log.warn(`Not enough candles fetched to compute ATR (got ${response?.length ?? 0})`)
+        return null
+      }
+
+      // Convert to format required for ATR computation
+      const candles = response.map((c) => ({
+        high: Number(c.h),
+        low: Number(c.l),
+        close: Number(c.c),
+        open: Number(c.o),
+      }))
+
+      const atrValues: number[] = []
+      let trSum = 0
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i]
+        let tr = c.high - c.low
+        if (i > 0) {
+          const prevC = candles[i - 1]
+          tr = Math.max(
+            c.high - c.low,
+            Math.abs(c.high - prevC.close),
+            Math.abs(c.low - prevC.close),
+          )
+        }
+        trSum += tr
+        if (i >= 14) {
+          let sum = 0
+          for (let j = i - 13; j <= i; j++) {
+            let t = candles[j].high - candles[j].low
+            if (j > 0) {
+              t = Math.max(t, Math.abs(candles[j].high - candles[j - 1].close), Math.abs(candles[j].low - candles[j - 1].close))
+            }
+            sum += t
+          }
+          atrValues.push(sum / 14)
+        } else {
+          atrValues.push(trSum / (i + 1))
+        }
+      }
+
+      const currentAtr = atrValues[atrValues.length - 1] || 0
+      const sumAtr = atrValues.reduce((s, x) => s + x, 0)
+      const referenceAtr = sumAtr / atrValues.length
+
+      return { currentAtr, referenceAtr }
+    } catch (e) {
+      this.log.warn(`Failed to fetch ATR stats: ${(e as Error).message}`)
+      return null
+    }
   }
 }

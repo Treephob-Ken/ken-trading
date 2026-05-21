@@ -12,6 +12,7 @@ import {
 } from '@/lib/grid'
 import { fmtPrice, fmtUsd } from '@/lib/format'
 import { analyzeRegime, isGoodForGrid } from '@/lib/markov'
+import { getMultiTFConfluence } from '@/lib/multiTF'
 import GridChart from '@/components/GridChart'
 import GridControls from '@/components/GridControls'
 import GridStats from '@/components/GridStats'
@@ -32,28 +33,74 @@ export default function GridPage({
   onSymbol,
   onTimeframe,
 }: Props) {
-  const [lookback, setLookback] = useState(150)
-  const [mode, setMode] = useState<GridMode>('arithmetic')
-  const [gridType, setGridType] = useState<GridType>('neutral')
-  const [minGrids, setMinGrids] = useState(3)
-  const [maxGrids, setMaxGrids] = useState(50)
-  const [feePct, setFeePct] = useState(0.05)
-  const [investment, setInvestment] = useState(500)
-  const [reanchor, setReanchor] = useState(true)
+  const [lookback, setLookback] = useState(() => +(localStorage.getItem('gd_lookback') || '150'))
+  const [mode, setMode] = useState<GridMode>(() => (localStorage.getItem('gd_mode') as GridMode) || 'arithmetic')
+  const [gridType, setGridType] = useState<GridType>(() => (localStorage.getItem('gd_gridType') as GridType) || 'neutral')
+  const [minGrids, setMinGrids] = useState(() => +(localStorage.getItem('gd_minGrids') || '3'))
+  const [maxGrids, setMaxGrids] = useState(() => +(localStorage.getItem('gd_maxGrids') || '50'))
+  const [feePct, setFeePct] = useState(() => +(localStorage.getItem('gd_feePct') || '0.05'))
+  const [investment, setInvestment] = useState(() => +(localStorage.getItem('gd_investment') || '500'))
+  const [reanchor, setReanchor] = useState(() => localStorage.getItem('gd_reanchor') !== 'false')
 
   // Deploy-only settings (used by Export to Bot)
-  const [botName, setBotName] = useState('')
-  const [leverage, setLeverage] = useState(1)
-  const [slPct, setSlPct] = useState(2)  // % below lower
-  const [tpPct, setTpPct] = useState(2)  // % above upper
-  const [useTrigger, setUseTrigger] = useState(false)
-  const [useManualSize, setUseManualSize] = useState(false)
-  const [manualSize, setManualSize] = useState(0.01)
+  const [botName, setBotName] = useState(() => localStorage.getItem('gd_botName') || '')
+  const [leverage, setLeverage] = useState(() => +(localStorage.getItem('gd_leverage') || '1'))
+  const [slPct, setSlPct] = useState(() => +(localStorage.getItem('gd_slPct') || '2'))
+  const [tpPct, setTpPct] = useState(() => +(localStorage.getItem('gd_tpPct') || '2'))
+  const [useTrigger, setUseTrigger] = useState(() => localStorage.getItem('gd_useTrigger') === 'true')
+  const [useManualSize, setUseManualSize] = useState(() => localStorage.getItem('gd_useManualSize') === 'true')
+  const [manualSize, setManualSize] = useState(() => +(localStorage.getItem('gd_manualSize') || '0.01'))
 
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    localStorage.setItem('gd_lookback', String(lookback))
+  }, [lookback])
+  useEffect(() => {
+    localStorage.setItem('gd_mode', mode)
+  }, [mode])
+  useEffect(() => {
+    localStorage.setItem('gd_gridType', gridType)
+  }, [gridType])
+  useEffect(() => {
+    localStorage.setItem('gd_minGrids', String(minGrids))
+  }, [minGrids])
+  useEffect(() => {
+    localStorage.setItem('gd_maxGrids', String(maxGrids))
+  }, [maxGrids])
+  useEffect(() => {
+    localStorage.setItem('gd_feePct', String(feePct))
+  }, [feePct])
+  useEffect(() => {
+    localStorage.setItem('gd_investment', String(investment))
+  }, [investment])
+  useEffect(() => {
+    localStorage.setItem('gd_reanchor', String(reanchor))
+  }, [reanchor])
+  useEffect(() => {
+    localStorage.setItem('gd_botName', botName)
+  }, [botName])
+  useEffect(() => {
+    localStorage.setItem('gd_leverage', String(leverage))
+  }, [leverage])
+  useEffect(() => {
+    localStorage.setItem('gd_slPct', String(slPct))
+  }, [slPct])
+  useEffect(() => {
+    localStorage.setItem('gd_tpPct', String(tpPct))
+  }, [tpPct])
+  useEffect(() => {
+    localStorage.setItem('gd_useTrigger', String(useTrigger))
+  }, [useTrigger])
+  useEffect(() => {
+    localStorage.setItem('gd_useManualSize', String(useManualSize))
+  }, [useManualSize])
+  useEffect(() => {
+    localStorage.setItem('gd_manualSize', String(manualSize))
+  }, [manualSize])
 
   useEffect(() => {
     let cancelled = false
@@ -75,6 +122,18 @@ export default function GridPage({
       cancelled = true
     }
   }, [symbol, timeframe, reloadKey])
+
+  // Auto-suggest grid type based on higher timeframe confluence when symbol/timeframe changes
+  useEffect(() => {
+    if (candles.length < 30) return
+    getMultiTFConfluence(symbol, timeframe, candles)
+      .then((res) => {
+        if (res && res.suggestedGridType) {
+          setGridType(res.suggestedGridType)
+        }
+      })
+      .catch(() => {})
+  }, [symbol, timeframe, candles.length])
 
   const bars = useMemo(
     () => candles.slice(-lookback),
@@ -150,7 +209,7 @@ export default function GridPage({
 
   return (
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
-      <aside className="card h-fit w-full shrink-0 p-4 lg:sticky lg:top-[97px] lg:w-[300px]">
+      <aside className="card relative z-30 h-fit w-full shrink-0 p-4 lg:sticky lg:top-[97px] lg:w-[300px]">
         <GridControls
           symbol={symbol}
           symbols={symbols}
@@ -211,9 +270,9 @@ export default function GridPage({
 
         <div className="card p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-medium text-text">
+            <h2 className="text-sm font-semibold text-text font-display">
               Grid Optimizer
-              <span className="ml-2 text-xs text-dim">
+              <span className="ml-2 text-xs text-dim font-sans font-normal">
                 {pairLabel} · {timeframe}
               </span>
             </h2>
@@ -272,6 +331,7 @@ export default function GridPage({
               result={result}
               windowBars={bars.length}
               timeframe={timeframe}
+              candles={bars}
             />
           </div>
         ) : (

@@ -3,6 +3,7 @@ import type { SymbolInfo } from '@/lib/binance'
 import type { GridMode, GridType } from '@/lib/grid'
 import NumberInput from './NumberInput'
 import SymbolSearch from './SymbolSearch'
+import InfoTip from './InfoTip'
 
 const INTERVALS = ['5m', '15m', '30m', '1h', '4h', '1d']
 const MODES: { id: GridMode; label: string }[] = [
@@ -47,7 +48,10 @@ export default function GridControls(props: GridControlsProps) {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <label className="label">Market Pair</label>
+        <label className="label flex items-center gap-1">
+          Market Pair
+          <InfoTip term="Market Pair" className="text-dim hover:text-muted" />
+        </label>
         <SymbolSearch
           value={props.symbol}
           symbols={props.symbols}
@@ -56,7 +60,10 @@ export default function GridControls(props: GridControlsProps) {
       </div>
 
       <div>
-        <label className="label">Timeframe</label>
+        <label className="label flex items-center gap-1">
+          Timeframe
+          <InfoTip term="Timeframe" className="text-dim hover:text-muted" />
+        </label>
         <select
           className="field"
           value={props.timeframe}
@@ -71,7 +78,10 @@ export default function GridControls(props: GridControlsProps) {
       </div>
 
       <div>
-        <label className="label">Lookback (bars)</label>
+        <label className="label flex items-center gap-1">
+          Lookback (bars)
+          <InfoTip term="Lookback" className="text-dim hover:text-muted" />
+        </label>
         <NumberInput
           className="field"
           value={props.lookback}
@@ -88,7 +98,10 @@ export default function GridControls(props: GridControlsProps) {
       <div className="h-px bg-border" />
 
       <div>
-        <label className="label">Grid Spacing</label>
+        <label className="label flex items-center gap-1">
+          Grid Spacing
+          <InfoTip term="Arithmetic Grid" className="text-dim hover:text-muted" />
+        </label>
         <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
           {MODES.map((m) => (
             <button
@@ -108,7 +121,10 @@ export default function GridControls(props: GridControlsProps) {
       </div>
 
       <div>
-        <label className="label">Grid Type</label>
+        <label className="label flex items-center gap-1">
+          Grid Type
+          <InfoTip term="Regime" className="text-dim hover:text-muted" />
+        </label>
         <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
           {TYPES.map((tp) => (
             <button
@@ -130,7 +146,10 @@ export default function GridControls(props: GridControlsProps) {
       </div>
 
       <div>
-        <label className="label">Grid Count to Test</label>
+        <label className="label flex items-center gap-1">
+          Grid Count to Test
+          <InfoTip term="Grid Count" className="text-dim hover:text-muted" />
+        </label>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <NumberInput
@@ -157,7 +176,10 @@ export default function GridControls(props: GridControlsProps) {
 
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="label">Investment ($)</label>
+          <label className="label flex items-center gap-1">
+            Investment ($)
+            <InfoTip term="Investment" className="text-dim hover:text-muted" />
+          </label>
           <NumberInput
             className="field"
             value={props.investment}
@@ -167,7 +189,10 @@ export default function GridControls(props: GridControlsProps) {
           />
         </div>
         <div>
-          <label className="label">Taker Fee / Side (%)</label>
+          <label className="label flex items-center gap-1">
+            Taker Fee (%)
+            <InfoTip term="Fee %" className="text-dim hover:text-muted" />
+          </label>
           <NumberInput
             className="field"
             value={props.feePct}

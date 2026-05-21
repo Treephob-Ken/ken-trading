@@ -6,17 +6,27 @@ import {
   createChart,
   type UTCTimestamp,
 } from 'lightweight-charts'
-import type { BacktestResult, Candle } from '@/types'
+import type { BacktestResult, Candle, Trade } from '@/types'
 import { fmtNum, fmtPct, fmtPrice, fmtTime, fmtUsd } from '@/lib/format'
+import InfoTip from '@/components/InfoTip'
 
 interface Props {
   result: BacktestResult
   candles: Candle[]
   stopLossPct: number
   takeProfitPct: number
+  selectedTrade: Trade | null
+  onSelectTrade: (trade: Trade | null) => void
 }
 
-export default function Results({ result, candles, stopLossPct, takeProfitPct }: Props) {
+export default function Results({
+  result,
+  candles,
+  stopLossPct,
+  takeProfitPct,
+  selectedTrade,
+  onSelectTrade,
+}: Props) {
   const { metrics, trades, equity, openPosition } = result
   const beatBuyHold = metrics.totalReturnPct > metrics.buyHoldReturnPct
 
@@ -50,6 +60,7 @@ export default function Results({ result, candles, stopLossPct, takeProfitPct }:
           label="Win Rate"
           value={`${metrics.winRate.toFixed(1)}%`}
           sub={`${metrics.wins}W / ${metrics.losses}L`}
+          tooltipTerm="Win Rate"
         />
         <Metric
           label="Trades"
@@ -60,11 +71,46 @@ export default function Results({ result, candles, stopLossPct, takeProfitPct }:
           label="Profit Factor"
           value={fmtNum(metrics.profitFactor)}
           tone={metrics.profitFactor >= 1 ? 'gain' : 'loss'}
+          tooltipTerm="Profit Factor"
         />
         <Metric
           label="Max Drawdown"
           value={`-${metrics.maxDrawdownPct.toFixed(2)}%`}
           tone="loss"
+          tooltipTerm="Max Drawdown"
+        />
+      </div>
+
+      {/* Advanced Quant Metrics Row */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Metric
+          label="Sharpe Ratio"
+          value={fmtNum(metrics.sharpeRatio)}
+          tone={metrics.sharpeRatio >= 2 ? 'gain' : metrics.sharpeRatio >= 1 ? 'gain' : metrics.sharpeRatio > 0 ? 'warn' : 'loss'}
+          tooltipTerm="Sharpe Ratio"
+        />
+        <Metric
+          label="Sortino Ratio"
+          value={fmtNum(metrics.sortinoRatio)}
+          tone={metrics.sortinoRatio >= 2 ? 'gain' : metrics.sortinoRatio >= 1 ? 'gain' : metrics.sortinoRatio > 0 ? 'warn' : 'loss'}
+          tooltipTerm="Sortino Ratio"
+        />
+        <Metric
+          label="Calmar Ratio"
+          value={fmtNum(metrics.calmarRatio)}
+          tone={metrics.calmarRatio >= 1.5 ? 'gain' : metrics.calmarRatio >= 0.5 ? 'warn' : 'loss'}
+          tooltipTerm="Calmar Ratio"
+        />
+        <Metric
+          label="Expectancy"
+          value={`${metrics.expectancy >= 0 ? '+' : ''}${metrics.expectancy.toFixed(2)}%`}
+          tone={metrics.expectancy > 0 ? 'gain' : 'loss'}
+          tooltipTerm="Expectancy"
+        />
+        <Metric
+          label="Avg Hold Bars"
+          value={`${metrics.avgHoldingBars.toFixed(1)} bars`}
+          tooltipTerm="Avg Holding Bars"
         />
       </div>
 
@@ -117,30 +163,44 @@ export default function Results({ result, candles, stopLossPct, takeProfitPct }:
             No completed trades for this strategy, direction and date range.
           </p>
         ) : (
-          <div className="max-h-[360px] overflow-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-panel-2 text-[11px] uppercase tracking-wider text-dim">
+          <div className="max-h-[360px] overflow-auto bg-panel">
+            <table className="w-full text-sm min-w-[800px] border-collapse">
+              <thead className="sticky top-0 z-20 text-[11px] uppercase tracking-wider text-dim">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">#</th>
-                  <th className="px-3 py-2 text-left font-medium">Side</th>
-                  <th className="px-3 py-2 text-left font-medium">Entry</th>
-                  <th className="px-3 py-2 text-right font-medium">Entry Price</th>
-                  <th className="px-3 py-2 text-left font-medium">Exit</th>
-                  <th className="px-3 py-2 text-right font-medium">Exit Price</th>
-                  <th className="px-3 py-2 text-right font-medium">P&amp;L</th>
-                  <th className="px-3 py-2 text-right font-medium">Return</th>
+                  <th className="sticky top-0 left-0 z-30 w-10 min-w-[40px] bg-panel px-3 py-2 text-left font-medium border-r border-b border-border/40">#</th>
+                  <th className="sticky top-0 left-[40px] z-30 w-20 min-w-[80px] bg-panel px-3 py-2 text-left font-medium border-r border-b border-border/40">Side</th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-left font-medium border-b border-border/40">Entry</th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">Entry Price</th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-left font-medium border-b border-border/40">Exit</th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">Exit Price</th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">P&amp;L</th>
+                  <th className="sticky top-0 z-20 bg-panel px-3 py-2 text-right font-medium border-b border-border/40">Return</th>
                 </tr>
               </thead>
               <tbody>
                 {trades.map((tr, i) => {
                   const win = tr.pnl >= 0
+                  const isSelected = selectedTrade === tr
+                  const rowClass = isSelected
+                    ? 'group bg-brand/10 text-text font-medium cursor-pointer'
+                    : 'group hover:bg-panel-2 cursor-pointer'
+
+                  const borderClass = isSelected ? 'border-t border-border/70' : 'border-t border-border/40'
+
+                  const stickyCellClass = isSelected
+                    ? `sticky z-10 bg-[#0b1b33] group-hover:bg-[#122b52] border-r border-border/40 ${borderClass}`
+                    : `sticky z-10 bg-panel group-hover:bg-panel-2 border-r border-border/40 ${borderClass}`
+
                   return (
                     <tr
                       key={i}
-                      className="border-t border-border/70 hover:bg-panel-2/60"
+                      onClick={() => onSelectTrade(isSelected ? null : tr)}
+                      className={rowClass}
                     >
-                      <td className="px-3 py-2 text-dim">{i + 1}</td>
-                      <td className="px-3 py-2">
+                      <td className={`left-0 w-10 min-w-[40px] transition-colors px-3 py-2 text-dim ${stickyCellClass}`}>
+                        {isSelected ? '🎯' : i + 1}
+                      </td>
+                      <td className={`left-[40px] w-20 min-w-[80px] transition-colors px-3 py-2 ${stickyCellClass}`}>
                         <span
                           className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
                             tr.side === 'long'
@@ -151,27 +211,27 @@ export default function Results({ result, candles, stopLossPct, takeProfitPct }:
                           {tr.side.toUpperCase()}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-muted">
+                      <td className={`whitespace-nowrap px-3 py-2 text-muted ${borderClass}`}>
                         {fmtTime(tr.entryTime)}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono">
+                      <td className={`px-3 py-2 text-right font-mono ${borderClass}`}>
                         {fmtPrice(tr.entryPrice)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-muted">
+                      <td className={`whitespace-nowrap px-3 py-2 text-muted ${borderClass}`}>
                         {fmtTime(tr.exitTime)}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono">
+                      <td className={`px-3 py-2 text-right font-mono ${borderClass}`}>
                         {fmtPrice(tr.exitPrice)}
                       </td>
                       <td
-                        className={`px-3 py-2 text-right font-mono ${
+                        className={`px-3 py-2 text-right font-mono ${borderClass} ${
                           win ? 'text-gain' : 'text-loss'
                         }`}
                       >
                         {fmtUsd(tr.pnl)}
                       </td>
                       <td
-                        className={`px-3 py-2 text-right font-mono font-medium ${
+                        className={`px-3 py-2 text-right font-mono font-medium ${borderClass} ${
                           win ? 'text-gain' : 'text-loss'
                         }`}
                       >
@@ -195,18 +255,23 @@ function Metric({
   sub,
   tone,
   big,
+  tooltipTerm,
 }: {
   label: string
   value: string
   sub?: string
-  tone?: 'gain' | 'loss'
+  tone?: 'gain' | 'loss' | 'warn'
   big?: boolean
+  tooltipTerm?: string
 }) {
   const toneClass =
-    tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : 'text-text'
+    tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : tone === 'warn' ? 'text-warn' : 'text-text'
   return (
     <div className="card p-3">
-      <p className="text-[11px] uppercase tracking-wider text-dim">{label}</p>
+      <div className="flex items-center gap-1">
+        <span className="text-[11px] uppercase tracking-wider text-dim">{label}</span>
+        {tooltipTerm && <InfoTip term={tooltipTerm} className="text-dim hover:text-muted" />}
+      </div>
       <p
         className={`mt-1 font-semibold tabular-nums ${toneClass} ${
           big ? 'text-xl' : 'text-base'
@@ -245,7 +310,7 @@ function RiskManager({
 
   const rrTone = impliedRR >= 2 ? 'gain' : impliedRR >= 1 ? 'warn' : 'loss'
   const expTone = expectancyPct > 0 ? 'gain' : 'loss'
-  const rrToneClass = rrTone === 'gain' ? 'text-gain' : rrTone === 'warn' ? 'text-[#f5a623]' : 'text-loss'
+  const rrToneClass = rrTone === 'gain' ? 'text-gain' : rrTone === 'warn' ? 'text-warn' : 'text-loss'
 
   return (
     <div className="card overflow-hidden">
@@ -261,11 +326,11 @@ function RiskManager({
         <div className="p-4">
           <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-dim">Historical Edge</p>
           <div className="flex flex-col gap-2">
-            <RiskRow label="Win Rate" value={`${metrics.winRate.toFixed(1)}%`} />
+            <RiskRow label="Win Rate" value={`${metrics.winRate.toFixed(1)}%`} tooltipTerm="Win Rate" />
             <RiskRow label="Avg Win" value={`+${avgWin.toFixed(2)}%`} tone="gain" />
             <RiskRow label="Avg Loss" value={`-${avgLoss.toFixed(2)}%`} tone="loss" />
-            <RiskRow label="Implied R:R" value={`${impliedRR.toFixed(2)}:1`} tone={rrTone} />
-            <RiskRow label="Expectancy / trade" value={`${expectancyPct >= 0 ? '+' : ''}${expectancyPct.toFixed(2)}%`} tone={expTone} />
+            <RiskRow label="Implied R:R" value={`${impliedRR.toFixed(2)}:1`} tone={rrTone} tooltipTerm="R:R" />
+            <RiskRow label="Expectancy / trade" value={`${expectancyPct >= 0 ? '+' : ''}${expectancyPct.toFixed(2)}%`} tone={expTone} tooltipTerm="Expectancy" />
           </div>
         </div>
 
@@ -304,12 +369,12 @@ function RiskManager({
           <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-dim">Suggested Levels</p>
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-dim">Stop Loss (avg risk)</span>
+              <span className="text-dim flex items-center gap-1">Stop Loss (avg risk) <InfoTip term="Stop Loss" /></span>
               <span className="font-mono text-loss font-medium">-{suggestedSL.toFixed(2)}%</span>
             </div>
             {[1.5, 2, 3].map((rr) => (
               <div key={rr} className="flex items-center justify-between text-xs">
-                <span className="text-dim">TP at {rr}:1 R:R {rr === 2 ? '★' : ''}</span>
+                <span className="text-dim flex items-center gap-1">TP at {rr}:1 R:R {rr === 2 ? '★' : ''} <InfoTip term="Take Profit" /></span>
                 <span className="font-mono text-gain">+{tp(rr)}%</span>
               </div>
             ))}
@@ -317,19 +382,22 @@ function RiskManager({
               <>
                 <div className="mt-1 h-px bg-border" />
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-dim mt-1">Your Settings</p>
-                <RiskRow label="SL set" value={`-${stopLossPct.toFixed(2)}%`} tone="loss" />
+                <RiskRow label="SL set" value={`-${stopLossPct.toFixed(2)}%`} tone="loss" tooltipTerm="Stop Loss" />
                 {takeProfitPct > 0 && (
-                  <RiskRow label="TP set" value={`+${takeProfitPct.toFixed(2)}%`} tone="gain" />
+                  <RiskRow label="TP set" value={`+${takeProfitPct.toFixed(2)}%`} tone="gain" tooltipTerm="Take Profit" />
                 )}
                 {takeProfitPct > 0 && stopLossPct > 0 && (
                   <RiskRow label="Your R:R" value={`${(takeProfitPct / stopLossPct).toFixed(2)}:1`}
-                    tone={takeProfitPct / stopLossPct >= 2 ? 'gain' : takeProfitPct / stopLossPct >= 1 ? 'warn' : 'loss'} />
+                    tone={takeProfitPct / stopLossPct >= 2 ? 'gain' : takeProfitPct / stopLossPct >= 1 ? 'warn' : 'loss'} tooltipTerm="R:R" />
                 )}
               </>
             )}
             <div className="mt-1 h-px bg-border" />
             <div className="flex items-center justify-between text-xs">
-              <span className="text-dim">½ Kelly size</span>
+              <span className="text-dim flex items-center gap-1">
+                ½ Kelly size
+                <InfoTip term="Kelly Criterion" />
+              </span>
               <span className={`font-mono font-medium ${halfKelly > 0 ? 'text-text' : 'text-loss'}`}>
                 {halfKelly > 0 ? `${halfKelly.toFixed(1)}% of capital` : 'Negative edge'}
               </span>
@@ -342,11 +410,24 @@ function RiskManager({
   )
 }
 
-function RiskRow({ label, value, tone }: { label: string; value: string; tone?: 'gain' | 'loss' | 'warn' }) {
-  const cls = tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : tone === 'warn' ? 'text-[#f5a623]' : 'text-text'
+function RiskRow({
+  label,
+  value,
+  tone,
+  tooltipTerm,
+}: {
+  label: string
+  value: string
+  tone?: 'gain' | 'loss' | 'warn'
+  tooltipTerm?: string
+}) {
+  const cls = tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : tone === 'warn' ? 'text-warn' : 'text-text'
   return (
     <div className="flex items-center justify-between text-xs">
-      <span className="text-dim">{label}</span>
+      <span className="text-dim flex items-center gap-1">
+        {label}
+        {tooltipTerm && <InfoTip term={tooltipTerm} />}
+      </span>
       <span className={`font-mono font-medium ${cls}`}>{value}</span>
     </div>
   )
@@ -372,7 +453,7 @@ function EquityChart({
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#a1a1a1',
-        fontFamily: 'Geist, system-ui, sans-serif',
+        fontFamily: "'Outfit', system-ui, sans-serif",
       },
       grid: {
         vertLines: { color: 'rgba(255,255,255,0.04)' },

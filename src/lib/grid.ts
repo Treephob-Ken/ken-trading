@@ -367,3 +367,192 @@ export function annualize(returnPct: number, bars: number, timeframe: string): n
   if (durationMs <= 0) return 0
   return returnPct * (YEAR_MS / durationMs)
 }
+
+export function adaptiveGridSpacing(
+  baseSpacing: number,
+  currentATR: number,
+  referenceATR: number,
+): number {
+  if (!(referenceATR > 0)) return baseSpacing
+  return baseSpacing * (currentATR / referenceATR)
+}
+
+export function simulateAdaptiveGrid(
+  window: Candle[],
+  lower: number,
+  upper: number,
+  count: number,
+  opts: SimOpts & { rebalanceIntervalBars: number },
+): GridSim {
+  // Let's compute a simple ATR(14) sequence across the entire window
+  
+  // Calculate ATR(14)
+  const atrValues: number[] = []
+  let trSum = 0
+  for (let i = 0; i < window.length; i++) {
+    const c = window[i]
+    if (i === 0) {
+      trSum += c.high - c.low
+    } else {
+      const prevC = window[i - 1]
+      trSum += Math.max(
+        c.high - c.low,
+        Math.abs(c.high - prevC.close),
+        Math.abs(c.low - prevC.close),
+      )
+    }
+    
+    if (i >= 14) {
+      let sum = 0
+      for (let j = i - 13; j <= i; j++) {
+        const tr = j === 0 
+          ? window[0].high - window[0].low
+          : Math.max(
+              window[j].high - window[j].low,
+              Math.abs(window[j].high - window[j - 1].close),
+              Math.abs(window[j].low - window[j - 1].close)
+            )
+        sum += tr
+      }
+      atrValues.push(sum / 14)
+    } else {
+      atrValues.push(trSum / (i + 1))
+    }
+  }
+
+  // Reference ATR is the ATR at the start of the window
+  const referenceATR = atrValues[0] || (upper - lower) / count
+
+  let currentSpacing = (upper - lower) / count
+  let currentLines = buildLines(lower, upper, count, opts.mode)
+
+  const anchor = window[window.length - 1]?.close ?? (lower + upper) / 2
+  const capitalPerCell = opts.investment / count
+  const buyFee = opts.feeRate * capitalPerCell
+
+  const holding = new Array<boolean>(count).fill(false)
+  let realizedPnl = 0
+  let feesPaid = 0
+  let fills = 0
+  let completedTrades = 0
+  const equityCurve: { time: number; value: number }[] = []
+
+  const cellActive = (k: number, lns: number[], anc: number): boolean => {
+    if (opts.type === 'long') return lns[k] < anc
+    if (opts.type === 'short') return lns[k] >= anc
+    return true
+  }
+
+  const qty = (k: number, lns: number[]) => capitalPerCell / lns[k]
+
+  const unrealizedAt = (price: number, lns: number[]) => {
+    let u = 0
+    for (let k = 0; k < count; k++) {
+      if (holding[k]) {
+        u += qty(k, lns) * (price - lns[k]) - buyFee
+      }
+    }
+    return u
+  }
+
+  let prevClose = window[0]?.open ?? anchor
+
+  for (let idx = 0; idx < window.length; idx++) {
+    const c = window[idx]
+    
+    // Check if we should rebalance / re-center
+    if (idx > 0 && idx % opts.rebalanceIntervalBars === 0) {
+      const currentPrice = prevClose
+      const uPnl = unrealizedAt(currentPrice, currentLines)
+      realizedPnl += uPnl
+      holding.fill(false)
+      
+      const currentATR = atrValues[idx] || referenceATR
+      const multiplier = referenceATR > 0 ? currentATR / referenceATR : 1.0
+      const baseSpacing = (upper - lower) / count
+      currentSpacing = baseSpacing * multiplier
+      
+      currentLines = buildCenteredGrid(currentPrice, currentSpacing, count, opts.mode)
+    }
+
+    const path = c.close >= c.open
+      ? [prevClose, c.open, c.low, c.high, c.close]
+      : [prevClose, c.open, c.high, c.low, c.close]
+
+    for (let s = 0; s < path.length - 1; s++) {
+      const a = path[s]
+      const b = path[s + 1]
+      
+      if (b > a) {
+        for (let i = 1; i < currentLines.length; i++) {
+          if (currentLines[i] > a && currentLines[i] <= b) {
+            const cell = i - 1
+            if (holding[cell] && cellActive(cell, currentLines, c.close)) {
+              const sellFee = opts.feeRate * qty(cell, currentLines) * currentLines[i]
+              realizedPnl += qty(cell, currentLines) * (currentLines[i] - currentLines[cell]) - buyFee - sellFee
+              feesPaid += sellFee
+              holding[cell] = false
+              fills++
+              completedTrades++
+            }
+          }
+        }
+      } else if (b < a) {
+        for (let i = currentLines.length - 1; i >= 0; i--) {
+          if (currentLines[i] < a && currentLines[i] >= b && i < count) {
+            if (!holding[i] && cellActive(i, currentLines, c.close)) {
+              holding[i] = true
+              feesPaid += buyFee
+              fills++
+            }
+          }
+        }
+      }
+    }
+
+    equityCurve.push({
+      time: c.time,
+      value: opts.investment + realizedPnl + unrealizedAt(c.close, currentLines),
+    })
+    prevClose = c.close
+  }
+
+  const finalClose = window[window.length - 1]?.close ?? anchor
+  const unrealizedPnl = unrealizedAt(finalClose, currentLines)
+  let openInventoryValue = 0
+  for (let k = 0; k < count; k++) {
+    if (holding[k]) openInventoryValue += qty(k, currentLines) * finalClose
+  }
+
+  let peak = -Infinity
+  let maxDrawdownPct = 0
+  for (const pt of equityCurve) {
+    if (pt.value > peak) peak = pt.value
+    if (peak > 0) {
+      const dd = ((peak - pt.value) / peak) * 100
+      if (dd > maxDrawdownPct) maxDrawdownPct = dd
+    }
+  }
+
+  const totalPnl = realizedPnl + unrealizedPnl
+  const inv = opts.investment
+
+  return {
+    gridCount: count,
+    lines: currentLines,
+    spacing: currentSpacing,
+    spacingPct: anchor > 0 ? (currentSpacing / anchor) * 100 : 0,
+    completedTrades,
+    fills,
+    realizedPnl,
+    realizedPct: (realizedPnl / inv) * 100,
+    unrealizedPnl,
+    unrealizedPct: (unrealizedPnl / inv) * 100,
+    totalPnl,
+    totalReturnPct: (totalPnl / inv) * 100,
+    feesPaid,
+    openInventoryValue,
+    maxDrawdownPct,
+    equityCurve,
+  }
+}
