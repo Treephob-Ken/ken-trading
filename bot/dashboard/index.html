@@ -1254,7 +1254,7 @@
   async function loadStrategies() {
     try {
       stStrategies = await fetch('/api/strategies').then(r => r.json())
-      stStrategyCombo.setItems(stStrategies.map(s => ({ value: s.id, label: `${s.label} · ${s.category}` })))
+      stStrategyCombo.setItems(stStrategies.map(s => ({ value: s.id, label: `${s.name} · ${s.category}` })))
     } catch { showToast('Could not load strategies — is the bot running?', true) }
   }
 
@@ -1300,7 +1300,7 @@
     const panel = $('st-params-panel'); const grid = $('st-params-grid'); const title = $('st-params-title')
     if (!paramDefs || paramDefs.length === 0) { panel.style.display = 'none'; return }
     panel.style.display = 'block'
-    title.textContent = (stStrategies.find(s => s.id === stratId)?.label || stratId) + ' Parameters'
+    title.textContent = (stStrategies.find(s => s.id === stratId)?.name || stratId) + ' Parameters'
     grid.innerHTML = ''
     for (const p of paramDefs) {
       const val = currentValues[p.key] ?? p.default
@@ -1471,7 +1471,7 @@
   }
 
   function getStrategyLabel(id) {
-    return stStrategies.find(s => s.id === id)?.label || (id || '—')
+    return stStrategies.find(s => s.id === id)?.name || (id || '—')
   }
 
   function renderSignalBanner(status) {
