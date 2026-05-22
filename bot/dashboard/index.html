@@ -627,6 +627,37 @@
   //  SHARED UTILITIES
   // ════════════════════════════════════════════════════════
   const $ = (id) => document.getElementById(id)
+
+  // ── API token (only needed when the bot sets BOT_API_TOKEN) ──
+  // fetch() is wrapped so every same-origin /api call carries the token; the
+  // SSE stream gets it as a query param since EventSource can't send headers.
+  let BOT_TOKEN = localStorage.getItem('bot_api_token') || ''
+  const _fetch = window.fetch.bind(window)
+  window.fetch = (url, opts = {}) => {
+    if (typeof url === 'string' && url.startsWith('/api') && BOT_TOKEN) {
+      opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + BOT_TOKEN } }
+    }
+    return _fetch(url, opts)
+  }
+  const sseUrl = (path) =>
+    BOT_TOKEN ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(BOT_TOKEN) : path
+
+  // Probe a protected endpoint on boot; if the bot rejects us, prompt for the
+  // token and keep asking until it is accepted.
+  async function ensureToken() {
+    for (let i = 0; i < 5; i++) {
+      let status
+      try {
+        const r = await _fetch('/api/bots', BOT_TOKEN ? { headers: { Authorization: 'Bearer ' + BOT_TOKEN } } : {})
+        status = r.status
+      } catch { return }
+      if (status !== 401) return
+      const entered = prompt('This bot requires an API token (BOT_API_TOKEN). Enter it:')
+      if (!entered) return
+      BOT_TOKEN = entered.trim()
+      localStorage.setItem('bot_api_token', BOT_TOKEN)
+    }
+  }
   const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])
   const fmtUsd = (n) => (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2)
   const fmtPct = (n) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%'
@@ -1379,7 +1410,7 @@
   //  SSE — routes log lines to both panels
   // ════════════════════════════════════════════════════════
   function connectSSE() {
-    const es = new EventSource('/api/logs/stream')
+    const es = new EventSource(sseUrl('/api/logs/stream'))
     es.onmessage = (e) => {
       const line = JSON.parse(e.data)
       // Grid bot: reload on lifecycle events
@@ -1397,9 +1428,9 @@
   // ════════════════════════════════════════════════════════
   //  BOOT
   // ════════════════════════════════════════════════════════
-  checkNetwork()
-  setInterval(checkNetwork, 15000)
-  loadBots()
+  ensureToken()
+    .then(() => { checkNetwork(); setInterval(checkNetwork, 15000) })
+    .then(() => loadBots())
     .then(() => connectSSE())
     .then(() => { pollGridStats(); setInterval(pollGridStats, 2000) })
 </script>

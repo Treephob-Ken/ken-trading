@@ -34,15 +34,28 @@ const bots = new Map<string, BotEntry>()
 
 const app = express()
 
-// CORS — only reflect localhost origins. This endpoint can place real orders,
-// so a wildcard would let any website you visit trade your funds. Combined
-// with the JSON content-type requirement (which forces a preflight), this
-// keeps the API reachable only from the locally-served web app.
+// CORS — this endpoint can place real orders, so the origin allow-list is
+// strict. localhost is always allowed (local dev). For remote access (e.g. a
+// hosted dashboard reaching the bot through a Cloudflare Tunnel) add the exact
+// frontend origin(s) to ALLOWED_ORIGINS, comma-separated. A wildcard is never
+// used — that would let any website you visit trade your funds.
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
+const EXTRA_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+
+function isAllowedOrigin(origin: string): boolean {
+  return LOCALHOST_ORIGIN.test(origin) || EXTRA_ORIGINS.includes(origin)
+}
+
 app.use((req, res, next) => {
   const origin = req.headers.origin
-  if (origin && LOCALHOST_ORIGIN.test(origin)) {
+  if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin)
+    // Credentials are reflected so a same-site subdomain dashboard behind
+    // Cloudflare Access can send its auth cookie.
+    res.setHeader('Access-Control-Allow-Credentials', 'true')
     res.setHeader('Vary', 'Origin')
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -53,6 +66,30 @@ app.use((req, res, next) => {
   }
   next()
 })
+
+// Optional shared-secret gate. When BOT_API_TOKEN is set, every /api/* request
+// must carry the token — either `Authorization: Bearer <token>` or, for the SSE
+// stream (EventSource cannot send headers), a `?token=` query param. This is
+// defence-in-depth for the no-Cloudflare-Access fallback (a plain tunnel); with
+// Access in front the edge already blocks unauthenticated traffic and this can
+// be left unset.
+const API_TOKEN = process.env.BOT_API_TOKEN?.trim()
+if (API_TOKEN) {
+  app.use('/api', (req, res, next) => {
+    if (req.method === 'OPTIONS') {
+      next()
+      return
+    }
+    const header = req.headers.authorization ?? ''
+    const headerToken = header.startsWith('Bearer ') ? header.slice(7) : ''
+    const queryToken = typeof req.query.token === 'string' ? req.query.token : ''
+    if (headerToken !== API_TOKEN && queryToken !== API_TOKEN) {
+      res.status(401).json({ error: 'Unauthorized — missing or invalid API token' })
+      return
+    }
+    next()
+  })
+}
 
 app.use(express.json())
 

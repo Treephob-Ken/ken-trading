@@ -7,6 +7,12 @@ import {
   type HLClients,
 } from './hyperliquid.js'
 import { log } from './logger.js'
+import {
+  assertAssetAllowed,
+  assertNotionalAllowed,
+  assertRateLimit,
+  recordTrade,
+} from './limits.js'
 
 // Clients are expensive to build (wallet + transports) and hold a WS
 // connection, so we create them once and reuse across requests.
@@ -69,7 +75,9 @@ export function parseTradeRequest(body: unknown): TradeRequest {
     slip = Math.min(s, MAX_SLIPPAGE_PCT)
   }
 
-  return { asset: asset.trim().toUpperCase(), side, size: sizeNum, maxSlippagePct: slip }
+  const cleanAsset = asset.trim().toUpperCase()
+  assertAssetAllowed(cleanAsset)
+  return { asset: cleanAsset, side, size: sizeNum, maxSlippagePct: slip }
 }
 
 // Place an aggressively-priced IOC limit order so it behaves like a market
@@ -88,6 +96,11 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
       `size ${req.size} rounds to 0 at ${meta.szDecimals} decimals for ${req.asset}`,
     )
   }
+
+  // Hard safety caps — enforced server-side regardless of the caller.
+  const notionalUsd = Number(sizeStr) * meta.midPx
+  assertNotionalAllowed(notionalUsd)
+  assertRateLimit()
 
   log.info(
     `Trade: ${req.side.toUpperCase()} ${sizeStr} ${req.asset} ` +
@@ -121,6 +134,15 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
   if (status && typeof status === 'object' && 'filled' in status) {
     const f = status.filled
     log.ok(`Trade filled: ${f.totalSz} ${req.asset} @ ${f.avgPx}`)
+    recordTrade({
+      asset: req.asset,
+      side: req.side,
+      requestedSize: req.size,
+      filled: true,
+      filledSize: Number(f.totalSz),
+      avgPx: Number(f.avgPx),
+      notionalUsd,
+    })
     return {
       ...base,
       ok: true,
@@ -134,6 +156,15 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
   // IOC with no fill — book was empty or too far from our capped limit.
   const desc = typeof status === 'string' ? status : JSON.stringify(status)
   log.warn(`Trade not filled (${desc})`)
+  recordTrade({
+    asset: req.asset,
+    side: req.side,
+    requestedSize: req.size,
+    filled: false,
+    filledSize: 0,
+    avgPx: null,
+    notionalUsd,
+  })
   return {
     ...base,
     ok: true,

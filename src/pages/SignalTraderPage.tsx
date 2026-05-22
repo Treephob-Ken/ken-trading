@@ -3,13 +3,12 @@ import {
   Activity,
   ArrowDownCircle,
   ArrowUpCircle,
-  MonitorOff,
   Play,
   Save,
   Square,
   Wallet,
 } from 'lucide-react'
-import { DEFAULT_BOT_URL, IS_LOCAL } from '@/lib/env'
+import { getBotToken, getBotUrl, setBotToken, setBotUrl } from '@/lib/env'
 
 interface ParamDef {
   key: string
@@ -81,7 +80,8 @@ function fmtTime(ms: number | null): string {
 }
 
 export default function SignalTraderPage() {
-  const [botUrl, setBotUrl] = useState(DEFAULT_BOT_URL)
+  const [botUrl, setBotUrlState] = useState(getBotUrl())
+  const [botToken, setBotTokenState] = useState(getBotToken())
   const [online, setOnline] = useState(false)
   const [strategies, setStrategies] = useState<StrategyMeta[]>([])
   const [status, setStatus] = useState<SignalBotStatus | null>(null)
@@ -95,10 +95,21 @@ export default function SignalTraderPage() {
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
 
+  // All bot requests go through here. `credentials: 'include'` lets a
+  // same-site dashboard send its Cloudflare Access cookie; the optional Bearer
+  // token covers a plain tunnel with no Access in front.
   const api = useCallback(
-    (path: string, init?: RequestInit) =>
-      fetch(`${botUrl}${path}`, { mode: 'cors', ...init }),
-    [botUrl],
+    (path: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      if (botToken) headers.set('Authorization', `Bearer ${botToken}`)
+      return fetch(`${botUrl}${path}`, {
+        mode: 'cors',
+        credentials: 'include',
+        ...init,
+        headers,
+      })
+    },
+    [botUrl, botToken],
   )
 
   // Pull strategy catalog, bot status, account and logs from the bot. The
@@ -126,7 +137,6 @@ export default function SignalTraderPage() {
   }, [api])
 
   useEffect(() => {
-    if (!IS_LOCAL) return
     let cancelled = false
     api('/api/strategies')
       .then((r) => (r.ok ? r.json() : []))
@@ -222,31 +232,6 @@ export default function SignalTraderPage() {
     }
   }
 
-  // ---- Hosted (Vercel) build — the local bot is unreachable ----
-  if (!IS_LOCAL) {
-    return (
-      <main className="mx-auto w-full max-w-[900px] flex-1 px-6 py-10">
-        <div className="card flex flex-col gap-3 p-6">
-          <div className="flex items-center gap-2">
-            <MonitorOff className="h-5 w-5 text-dim" />
-            <h2 className="font-display text-base font-semibold text-text">Signal Trader</h2>
-          </div>
-          <p className="text-sm leading-relaxed text-muted">
-            The Signal Trader runs an indicator strategy against a trading bot on your own
-            machine. For safety it is only available when you open this app locally — the
-            hosted site cannot reach <span className="font-mono text-text">localhost</span>,
-            and a public page must never be able to move real funds.
-          </p>
-          <p className="text-sm leading-relaxed text-muted">
-            To use it: start the bot with <span className="font-mono text-text">start_bot.bat</span>,
-            then open the app locally with <span className="font-mono text-text">npm run dev</span>.
-          </p>
-        </div>
-      </main>
-    )
-  }
-
-  // ---- Local build ----
   return (
     <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-4 px-6 py-5">
       {/* Header */}
@@ -294,8 +279,8 @@ export default function SignalTraderPage() {
       {!online && (
         <div className="card flex items-center justify-between gap-3 border-loss/30 bg-loss/5 p-3">
           <span className="text-xs text-loss">
-            Cannot reach the bot server. Start it with{' '}
-            <span className="font-mono">start_bot.bat</span>, then check the URL below.
+            Cannot reach the bot server. Make sure the bot is running and the URL
+            {botToken ? ' / token' : ''} below is correct.
           </span>
           <button
             type="button"
@@ -618,16 +603,37 @@ export default function SignalTraderPage() {
       )}
 
       {/* Connection */}
-      <div className="card flex items-center gap-2 p-3">
-        <label className="text-[10px] font-bold uppercase tracking-wider text-dim">
-          Bot Server URL
-        </label>
-        <input
-          type="text"
-          value={botUrl}
-          onChange={(e) => setBotUrl(e.target.value)}
-          className="flex-1 rounded border border-border bg-bg px-2 py-1 font-mono text-xs text-text outline-none focus:border-brand"
-        />
+      <div className="card flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+        <div className="flex flex-1 items-center gap-2">
+          <label className="w-20 shrink-0 text-[10px] font-bold uppercase tracking-wider text-dim">
+            Bot URL
+          </label>
+          <input
+            type="text"
+            value={botUrl}
+            onChange={(e) => {
+              setBotUrlState(e.target.value)
+              setBotUrl(e.target.value)
+            }}
+            placeholder="http://localhost:3001"
+            className="flex-1 rounded border border-border bg-bg px-2 py-1 font-mono text-xs text-text outline-none focus:border-brand"
+          />
+        </div>
+        <div className="flex flex-1 items-center gap-2">
+          <label className="w-20 shrink-0 text-[10px] font-bold uppercase tracking-wider text-dim">
+            API Token
+          </label>
+          <input
+            type="password"
+            value={botToken}
+            onChange={(e) => {
+              setBotTokenState(e.target.value)
+              setBotToken(e.target.value)
+            }}
+            placeholder="(optional — for a tunnel without Access)"
+            className="flex-1 rounded border border-border bg-bg px-2 py-1 font-mono text-xs text-text outline-none focus:border-brand"
+          />
+        </div>
       </div>
     </main>
   )
