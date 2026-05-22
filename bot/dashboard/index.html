@@ -269,6 +269,20 @@
     .st-sidebar::-webkit-scrollbar { width: 5px; }
     .st-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+    /* ── Ensemble mode toggle ── */
+    .st-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
+    .st-mode-btn { padding: 6px 10px; border-radius: 6px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; color: var(--dim); background: transparent; font-family: inherit; transition: all .12s; text-align: center; }
+    .st-mode-btn:hover { color: var(--muted); }
+    .st-mode-btn.active { background: var(--brand-dim); color: var(--text); box-shadow: inset 0 0 0 1px rgba(139,92,246,.35); }
+    .st-mode-btn:disabled { opacity: .4; cursor: not-allowed; }
+    /* Ensemble strategy checklist */
+    .st-ensemble-list { display: flex; flex-direction: column; gap: 1px; max-height: 210px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .st-ensemble-cat { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); padding: 6px 4px 2px; }
+    .st-ensemble-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+    .st-ensemble-row:hover { background: var(--surface-2); }
+    .st-ensemble-row input[type=checkbox] { width: 13px; height: 13px; accent-color: var(--brand); cursor: pointer; flex-shrink: 0; }
+    .st-ensemble-row span { font-size: 12px; color: var(--text); cursor: pointer; }
+
   </style>
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -495,14 +509,43 @@
       <div class="panel">
         <div class="panel-title">Strategy Config</div>
         <div style="display:flex;flex-direction:column;gap:8px">
+
+          <!-- Mode toggle: Single / Ensemble -->
           <div class="field">
-            <label>Strategy / Indicator</label>
-            <div class="combo" id="st-strategy-combo">
-              <input class="combo-input" type="text" placeholder="Search strategy…" autocomplete="off" />
-              <div class="combo-caret">▼</div>
-              <div class="combo-list"></div>
+            <label>Trigger Mode</label>
+            <div class="st-mode-tabs">
+              <button id="st-mode-single" class="st-mode-btn active" onclick="setSignalMode('single')">Single Strategy</button>
+              <button id="st-mode-ensemble" class="st-mode-btn" onclick="setSignalMode('ensemble')">Ensemble Vote</button>
             </div>
           </div>
+
+          <!-- Single mode: strategy combobox -->
+          <div id="st-single-section">
+            <div class="field" style="margin-bottom:0">
+              <label>Strategy / Indicator</label>
+              <div class="combo" id="st-strategy-combo">
+                <input class="combo-input" type="text" placeholder="Search strategy…" autocomplete="off" />
+                <div class="combo-caret">▼</div>
+                <div class="combo-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Ensemble mode: checklist + threshold -->
+          <div id="st-ensemble-section" style="display:none">
+            <div style="font-size:11px;color:var(--dim);margin-bottom:6px">Check strategies to combine. Trade fires only when enough agree.</div>
+            <div class="st-ensemble-list" id="st-ensemble-list"></div>
+            <div style="margin-top:8px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">
+              <div class="field" style="margin-bottom:0">
+                <label>Min votes to trade</label>
+                <input id="st-ensemble-threshold" type="number" min="1" max="13" step="1" value="3" oninput="updateEnsemblePreview();scheduleSave()" />
+              </div>
+              <div id="st-ensemble-of" style="font-size:12px;color:var(--dim);padding-bottom:9px;white-space:nowrap">of 0</div>
+            </div>
+            <div id="st-ensemble-preview" class="preview-box" style="font-size:11px;margin-top:6px">Select 2+ strategies…</div>
+          </div>
+
+          <!-- Currency + Timeframe (shared) -->
           <div class="field">
             <label>Currency / Market</label>
             <div class="combo" id="st-currency-combo">
@@ -531,7 +574,7 @@
         </div>
       </div>
 
-      <!-- Strategy Params (dynamic) -->
+      <!-- Strategy Params (single mode only, dynamic) -->
       <div class="panel" id="st-params-panel" style="display:none">
         <div class="panel-title" id="st-params-title">Parameters</div>
         <div class="params-grid" id="st-params-grid"></div>
@@ -1321,10 +1364,77 @@
     try {
       stStrategies = await fetch('/api/strategies').then(r => r.json())
       stStrategyCombo.setItems(stStrategies.map(s => ({ value: s.id, label: `${s.name} · ${s.category}` })))
+      renderEnsembleList([])
     } catch { showToast('Could not load strategies — is the bot running?', true) }
   }
 
+  // ── Ensemble mode helpers ──────────────────────────────────────────────────
+
+  let stSignalMode = 'single'
+
+  function setSignalMode(mode) {
+    stSignalMode = mode
+    $('st-mode-single').classList.toggle('active', mode === 'single')
+    $('st-mode-ensemble').classList.toggle('active', mode === 'ensemble')
+    $('st-single-section').style.display  = mode === 'single'   ? '' : 'none'
+    $('st-ensemble-section').style.display = mode === 'ensemble' ? '' : 'none'
+    if (mode === 'ensemble') {
+      $('st-params-panel').style.display = 'none'
+    } else {
+      const stratId = stStrategyCombo?.getValue()
+      const strat = stStrategies.find(s => s.id === stratId)
+      $('st-params-panel').style.display = strat?.params?.length ? 'block' : 'none'
+    }
+    scheduleSave()
+  }
+
+  function renderEnsembleList(selectedIds) {
+    const list = $('st-ensemble-list'); list.innerHTML = ''
+    const cats = {}
+    for (const s of stStrategies) {
+      if (!cats[s.category]) cats[s.category] = []
+      cats[s.category].push(s)
+    }
+    for (const [cat, strats] of Object.entries(cats)) {
+      const header = document.createElement('div')
+      header.className = 'st-ensemble-cat'
+      header.textContent = cat
+      list.appendChild(header)
+      for (const s of strats) {
+        const row = document.createElement('label')
+        row.className = 'st-ensemble-row'
+        const checked = (selectedIds || []).includes(s.id)
+        row.innerHTML =
+          `<input type="checkbox" value="${s.id}" ${checked ? 'checked' : ''} onchange="updateEnsemblePreview();scheduleSave()" />` +
+          `<span>${s.name}</span>`
+        list.appendChild(row)
+      }
+    }
+    updateEnsemblePreview()
+  }
+
+  function getEnsembleSelectedIds() {
+    return [...($('st-ensemble-list')?.querySelectorAll('input[type=checkbox]:checked') || [])].map(el => el.value)
+  }
+
+  function updateEnsemblePreview() {
+    const ids = getEnsembleSelectedIds()
+    const threshold = parseInt($('st-ensemble-threshold')?.value) || 0
+    const ofEl = $('st-ensemble-of'); if (ofEl) ofEl.textContent = `of ${ids.length}`
+    const preview = $('st-ensemble-preview'); if (!preview) return
+    if (ids.length < 2) {
+      preview.innerHTML = 'Select 2+ strategies to enable ensemble mode'; return
+    }
+    if (threshold < 1 || threshold > ids.length) {
+      preview.innerHTML = `⚠ Threshold must be between 1 and ${ids.length}`; return
+    }
+    const names = ids.map(id => stStrategies.find(s => s.id === id)?.name || id).join(', ')
+    preview.innerHTML =
+      `Trade when <b>${threshold} of ${ids.length}</b> agree · <span style="color:var(--dim)">${names}</span>`
+  }
+
   function onStrategyChanged(id) {
+    if (stSignalMode !== 'single') return
     const strat = stStrategies.find(s => s.id === id)
     if (strat) renderStrategyParams(strat.id, strat.params, {})
     scheduleSave()
@@ -1333,7 +1443,7 @@
   // Auto-save: any config change is persisted to the selected bot after a
   // short debounce — no separate Save button.
   function wireAutoSave() {
-    ['st-timeframe', 'st-investment', 'st-leverage', 'st-size', 'st-slippage', 'st-cooldown', 'st-direction'].forEach((id) => {
+    ['st-timeframe', 'st-investment', 'st-leverage', 'st-size', 'st-slippage', 'st-cooldown', 'st-direction', 'st-ensemble-threshold'].forEach((id) => {
       const el = $(id); if (el) el.addEventListener('change', scheduleSave)
     })
     $('st-params-grid').addEventListener('change', scheduleSave)
@@ -1432,7 +1542,7 @@
       item.innerHTML =
         `<div class="bot-dot"></div><div class="bot-info">` +
         `<div class="bot-name">${escHtml(b.name)}</div>` +
-        `<div class="bot-meta">${escHtml(String(b.strategyId).toUpperCase())} · ${escHtml(b.symbol)} · ${escHtml(b.timeframe)}</div></div>`
+        `<div class="bot-meta">${b.ensembleMode ? `ENSEMBLE(${b.ensembleCount || '?'})` : escHtml(String(b.strategyId).toUpperCase())} · ${escHtml(b.symbol)} · ${escHtml(b.timeframe)}</div></div>`
       list.appendChild(item)
     }
   }
@@ -1497,7 +1607,27 @@
   // Populate the config form from a bot's saved config (only on selection).
   function populateForm(cfg) {
     if (!cfg) return
-    stStrategyCombo.setValue(cfg.strategyId)
+    // Mode toggle
+    const mode = cfg.ensembleMode ? 'ensemble' : 'single'
+    stSignalMode = mode
+    $('st-mode-single').classList.toggle('active', mode === 'single')
+    $('st-mode-ensemble').classList.toggle('active', mode === 'ensemble')
+    $('st-single-section').style.display   = mode === 'single'   ? '' : 'none'
+    $('st-ensemble-section').style.display = mode === 'ensemble' ? '' : 'none'
+
+    if (mode === 'single') {
+      stStrategyCombo.setValue(cfg.strategyId)
+      const strat = stStrategies.find(s => s.id === cfg.strategyId)
+      if (strat) renderStrategyParams(cfg.strategyId, strat.params, cfg.params || {})
+      $('st-params-panel').style.display = strat?.params?.length ? 'block' : 'none'
+    } else {
+      $('st-params-panel').style.display = 'none'
+      if (stStrategies.length) renderEnsembleList(cfg.ensembleStrategyIds || [])
+      const defaultThreshold = Math.ceil((cfg.ensembleStrategyIds?.length || 3) / 2)
+      $('st-ensemble-threshold').value = cfg.ensembleThreshold || defaultThreshold
+      updateEnsemblePreview()
+    }
+
     const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
     stCurrencyCombo.setValue(cur)
     $('st-symbol').value      = cfg.symbol || (cur + 'USDT')
@@ -1505,14 +1635,11 @@
     $('st-timeframe').value   = cfg.timeframe || '1h'
     $('st-investment').value  = cfg.investment ?? ''
     $('st-leverage').value    = cfg.leverage ?? ''
-    // size=0 is the budget-mode sentinel — show blank so the override field reads as "auto"
     $('st-size').value        = cfg.size > 0 ? cfg.size : ''
     $('st-slippage').value    = cfg.slippagePct ?? 2
     $('st-cooldown').value    = cfg.cooldownSec ?? 60
     $('st-direction').value   = cfg.tradeSide || 'both'
-    const strat = stStrategies.find(s => s.id === cfg.strategyId)
-    if (strat) renderStrategyParams(cfg.strategyId, strat.params, cfg.params || {})
-    stCurrentPrice = null   // force price re-fetch for the new asset
+    stCurrentPrice = null
     updateSignalSizingPreview()
   }
 
@@ -1547,9 +1674,16 @@
     return stStrategies.find(s => s.id === id)?.name || (id || '—')
   }
 
+  function getEnsembleLabel(cfg) {
+    if (!cfg?.ensembleMode || !cfg.ensembleStrategyIds?.length) return null
+    const total = cfg.ensembleStrategyIds.length
+    const threshold = cfg.ensembleThreshold || Math.ceil(total / 2)
+    return `Ensemble (${threshold}/${total} vote)`
+  }
+
   function renderSignalBanner(status) {
     const banner = $('st-banner')
-    const stratLabel = getStrategyLabel(status.config?.strategyId)
+    const stratLabel = getEnsembleLabel(status.config) || getStrategyLabel(status.config?.strategyId)
     const sym = status.config?.symbol || '—'
     const tf  = status.config?.timeframe || '—'
     $('st-banner-strategy').textContent = stratLabel
@@ -1582,7 +1716,13 @@
     } else {
       sigEl.textContent = '—'; sigEl.style.color = ''
     }
-    $('st-last-signal-at').textContent = fmtAgo(s.lastSignalAt)
+    // In ensemble mode show last vote breakdown instead of "X ago"
+    if (s.config?.ensembleMode && s.lastVotes) {
+      const v = s.lastVotes
+      $('st-last-signal-at').textContent = `BUY=${v.buy} SELL=${v.sell} PASS=${v.abstain} (need ${v.threshold})`
+    } else {
+      $('st-last-signal-at').textContent = fmtAgo(s.lastSignalAt)
+    }
     $('st-trades').textContent = s.tradesExecuted ?? 0
     $('st-started-at').textContent = s.running && s.startedAt ? 'since ' + fmtTime(s.startedAt) : (s.running ? 'running' : 'stopped')
     const evalEl = $('st-last-eval')
@@ -1603,6 +1743,9 @@
     document.querySelectorAll('#st-params-grid input').forEach((el) => { el.disabled = lock })
     if (stStrategyCombo) stStrategyCombo.setEnabled(!lock)
     if (stCurrencyCombo) stCurrencyCombo.setEnabled(!lock)
+    // Lock ensemble controls while running
+    document.querySelectorAll('#st-ensemble-list input, #st-ensemble-threshold').forEach(el => { el.disabled = lock })
+    ;['st-mode-single', 'st-mode-ensemble'].forEach(id => { const el = $(id); if (el) el.disabled = lock })
     const hint = $('st-running-hint'); if (hint) hint.style.display = lock ? 'block' : 'none'
     // While running, show computed size in the preview box instead of the form estimate.
     const preview = $('st-sizing-preview')
@@ -1644,25 +1787,35 @@
   // Build a config object straight from the form. Returns null if a required
   // field is missing — silent mode skips the toast (used by auto-save).
   function collectSignalConfig(silent) {
-    const stratId = stStrategyCombo.getValue()
     const asset = (stCurrencyCombo.getValue() || $('st-asset').value).trim().toUpperCase()
     const warn = (m) => { if (!silent) showToast(m, true) }
-    if (!stratId) { warn('Pick a strategy'); return null }
-    if (!asset)   { warn('Pick a currency'); return null }
+    if (!asset) { warn('Pick a currency'); return null }
+
+    let strategyId, params = {}, ensembleExtra = {}
+    if (stSignalMode === 'ensemble') {
+      const ids = getEnsembleSelectedIds()
+      if (ids.length < 2) { warn('Select at least 2 strategies for Ensemble mode'); return null }
+      const threshold = parseInt($('st-ensemble-threshold').value) || Math.ceil(ids.length / 2)
+      strategyId = ids[0]   // display / compat field
+      ensembleExtra = { ensembleMode: true, ensembleStrategyIds: ids, ensembleThreshold: threshold }
+    } else {
+      strategyId = stStrategyCombo.getValue()
+      if (!strategyId) { warn('Pick a strategy'); return null }
+      params = collectParams(strategyId)
+    }
+
     const investment = parseFloat($('st-investment').value)
     const leverage   = parseFloat($('st-leverage').value)
     const size       = parseFloat($('st-size').value)
     const hasBudget  = investment > 0 && leverage >= 1
     const hasSize    = size > 0
-    if (!hasBudget && !hasSize) {
-      warn('Set a Budget + Leverage, or a manual Order Size')
-      return null
-    }
+    if (!hasBudget && !hasSize) { warn('Set a Budget + Leverage, or a manual Order Size'); return null }
+
     return {
-      strategyId:  stratId,
+      strategyId,
       symbol:      asset + 'USDT',
       timeframe:   $('st-timeframe').value,
-      params:      collectParams(stratId),
+      params,
       asset,
       investment:  hasBudget ? investment : undefined,
       leverage:    hasBudget ? leverage   : undefined,
@@ -1670,6 +1823,7 @@
       slippagePct: parseFloat($('st-slippage').value) || 2,
       cooldownSec: parseInt($('st-cooldown').value) || 60,
       tradeSide:   $('st-direction').value,
+      ...ensembleExtra,
     }
   }
 
@@ -1682,9 +1836,13 @@
     const sizing = cfg.investment && cfg.leverage
       ? `$${cfg.investment} budget @ ${cfg.leverage}x leverage (size computed at start)`
       : `fixed size ${cfg.size} ${cfg.asset}`
+    const stratLine = cfg.ensembleMode && cfg.ensembleStrategyIds?.length
+      ? `Ensemble:  ${cfg.ensembleStrategyIds.length} strategies, need ${cfg.ensembleThreshold} votes\n` +
+        `           [${cfg.ensembleStrategyIds.map(id => getStrategyLabel(id)).join(', ')}]`
+      : `Strategy:  ${getStrategyLabel(cfg.strategyId)}`
     const ok = confirm(
       'Start auto-trading?\n\n' +
-      'Strategy:  ' + getStrategyLabel(cfg.strategyId) + '\n' +
+      stratLine + '\n' +
       'Market:    ' + cfg.symbol + '  (' + cfg.timeframe + ' candles)\n' +
       'Sizing:    ' + sizing + '\n' +
       'Direction: ' + dir + '\n\n' +

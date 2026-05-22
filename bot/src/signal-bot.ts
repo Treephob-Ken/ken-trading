@@ -20,6 +20,7 @@ import { clearLogBuffer, createLogger, type Logger } from './logger.js'
 import { fetchKlines } from './strategy/market-data.js'
 import {
   STRATEGIES,
+  defaultParams,
   generateSignals,
   type Signal,
   type StrategyId,
@@ -48,6 +49,11 @@ export interface SignalBotConfig {
   slippagePct: number
   cooldownSec: number
   tradeSide: 'both' | 'buy' | 'sell'
+  // Ensemble mode — run multiple strategies and only trade when ≥ ensembleThreshold agree.
+  // When false/absent, strategyId + params drive the single-strategy path.
+  ensembleMode?: boolean
+  ensembleStrategyIds?: StrategyId[]
+  ensembleThreshold?: number // defaults to majority (ceil(n/2))
 }
 
 export interface SignalBotStatus {
@@ -65,6 +71,8 @@ export interface SignalBotStatus {
   lastEvaluatedAt: number | null
   lastError: string | null
   tradesExecuted: number
+  // Ensemble mode: vote breakdown from the last evaluation (null in single mode).
+  lastVotes: { buy: number; sell: number; abstain: number; threshold: number } | null
 }
 
 export interface SignalBotSummary {
@@ -74,6 +82,8 @@ export interface SignalBotSummary {
   strategyId: StrategyId
   symbol: string
   timeframe: string
+  ensembleMode?: boolean
+  ensembleCount?: number
 }
 
 // Validate a raw config object into a typed SignalBotConfig. Throws on bad
@@ -140,7 +150,29 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const tradeSide =
     b.tradeSide === 'buy' || b.tradeSide === 'sell' ? b.tradeSide : 'both'
 
-  return { symbol, timeframe, strategyId, params, asset, investment, leverage, size, slippagePct, cooldownSec, tradeSide }
+  // Ensemble mode
+  const ensembleMode = b.ensembleMode === true
+  let ensembleStrategyIds: StrategyId[] | undefined
+  let ensembleThreshold: number | undefined
+  if (ensembleMode) {
+    const rawIds = Array.isArray(b.ensembleStrategyIds) ? b.ensembleStrategyIds : []
+    ensembleStrategyIds = (rawIds as unknown[])
+      .filter((id) => STRATEGIES.some((s) => s.id === id)) as StrategyId[]
+    if (ensembleStrategyIds.length < 2) {
+      throw new Error('Ensemble mode requires at least 2 valid strategy IDs in ensembleStrategyIds')
+    }
+    const tRaw = typeof b.ensembleThreshold === 'string' ? Number(b.ensembleThreshold) : b.ensembleThreshold
+    ensembleThreshold =
+      typeof tRaw === 'number' && tRaw >= 1
+        ? Math.round(tRaw)
+        : Math.ceil(ensembleStrategyIds.length / 2)
+  }
+
+  return {
+    symbol, timeframe, strategyId, params, asset,
+    investment, leverage, size, slippagePct, cooldownSec, tradeSide,
+    ...(ensembleMode ? { ensembleMode, ensembleStrategyIds, ensembleThreshold } : {}),
+  }
 }
 
 interface PersistedSignalBot {
@@ -169,6 +201,8 @@ class SignalBot {
   // In budget mode (investment + leverage set), the effective trade size is
   // computed from (investment × leverage) / currentPrice on the first tick.
   private computedSize: number | null = null
+  // Ensemble mode: vote breakdown from the last evaluation.
+  private lastVotes: SignalBotStatus['lastVotes'] = null
   // True once the first poll has recorded the current bar — only bars that
   // close after that are genuine signals we should act on.
   private primed = false
@@ -196,6 +230,8 @@ class SignalBot {
       strategyId: this.config.strategyId,
       symbol: this.config.symbol,
       timeframe: this.config.timeframe,
+      ensembleMode: this.config.ensembleMode,
+      ensembleCount: this.config.ensembleStrategyIds?.length,
     }
   }
 
@@ -213,6 +249,7 @@ class SignalBot {
       lastEvaluatedAt: this.lastEvaluatedAt,
       lastError: this.lastError,
       tradesExecuted: this.tradesExecuted,
+      lastVotes: this.lastVotes,
     }
   }
 
@@ -234,16 +271,25 @@ class SignalBot {
     this.running = true
     this.startedAt = Date.now()
     this.lastError = null
-    // Skip the very first closed bar so we don't fire on an old signal.
     this.lastClosedBarTime = null
     this.primed = false
-    // Reset so budget mode re-computes size from the live price on first tick.
     this.computedSize = null
+    this.lastVotes = null
     this.persist()
-    this.log.ok(
-      `Started — ${this.config.strategyId.toUpperCase()} on ` +
-        `${this.config.symbol} ${this.config.timeframe}`,
-    )
+    const cfg = this.config
+    if (cfg.ensembleMode && cfg.ensembleStrategyIds?.length) {
+      const total = cfg.ensembleStrategyIds.length
+      const threshold = cfg.ensembleThreshold ?? Math.ceil(total / 2)
+      this.log.ok(
+        `Started — Ensemble (${threshold}/${total} votes needed): ` +
+          `[${cfg.ensembleStrategyIds.join('+')}] on ${cfg.symbol} ${cfg.timeframe}`,
+      )
+    } else {
+      this.log.ok(
+        `Started — ${cfg.strategyId.toUpperCase()} on ` +
+          `${cfg.symbol} ${cfg.timeframe}`,
+      )
+    }
     void this.tick()
     this.timer = setInterval(() => void this.tick(), POLL_MS)
   }
@@ -300,8 +346,32 @@ class SignalBot {
       if (closedBar.time === this.lastClosedBarTime) return // no new bar yet
       this.lastClosedBarTime = closedBar.time
 
-      const signals = generateSignals(cfg.strategyId, candles, cfg.params)
-      const sig = signals[closedIdx]
+      // ── Signal evaluation: ensemble or single-strategy ──────────────────
+      let sig: Signal
+      if (cfg.ensembleMode && cfg.ensembleStrategyIds && cfg.ensembleStrategyIds.length >= 2) {
+        let buy = 0, sell = 0, abstain = 0
+        for (const stratId of cfg.ensembleStrategyIds) {
+          const sigs = generateSignals(stratId, candles, defaultParams(stratId))
+          const s = sigs[closedIdx]
+          if (s === 'buy') buy++
+          else if (s === 'sell') sell++
+          else abstain++
+        }
+        const total = cfg.ensembleStrategyIds.length
+        const threshold = cfg.ensembleThreshold ?? Math.ceil(total / 2)
+        this.lastVotes = { buy, sell, abstain, threshold }
+        sig = buy >= threshold ? 'buy' : sell >= threshold ? 'sell' : null
+        this.log.info(
+          `Ensemble [${cfg.ensembleStrategyIds.map((id) => id.toUpperCase()).join('+')}]: ` +
+            `BUY=${buy} SELL=${sell} ABSTAIN=${abstain} (need ${threshold})` +
+            (sig ? ` → ${sig.toUpperCase()} ✓` : ' → no consensus'),
+        )
+      } else {
+        this.lastVotes = null
+        const signals = generateSignals(cfg.strategyId, candles, cfg.params)
+        sig = signals[closedIdx]
+      }
+
       if (!sig) return
 
       this.lastSignal = sig
