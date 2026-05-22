@@ -7,6 +7,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
+      color-scheme: dark;
       --bg: #0a0a0f;
       --surface: #14141c;
       --surface-2: #1c1c27;
@@ -120,6 +121,19 @@
     .stat-value.warn { color: var(--warn); }
     .stat-sub { font-size: 11px; color: var(--dim); margin-top: 3px; font-family: monospace; }
     @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+
+    /* ─── Searchable combobox (custom, no library) ─── */
+    .combo { position: relative; }
+    .combo-input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 26px 7px 9px; color: var(--text); font-size: 13px; outline: none; font-family: inherit; transition: border-color .15s; }
+    .combo-input:focus { border-color: var(--brand); }
+    .combo-input:disabled { opacity: .5; cursor: not-allowed; }
+    .combo-caret { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--dim); font-size: 9px; pointer-events: none; }
+    .combo-list { display: none; position: absolute; z-index: 50; top: calc(100% + 3px); left: 0; right: 0; max-height: 240px; overflow-y: auto; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 9px; box-shadow: 0 10px 28px rgba(0,0,0,.55); scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+    .combo.open .combo-list { display: block; }
+    .combo-opt { padding: 7px 11px; font-size: 13px; color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .combo-opt:hover, .combo-opt.active { background: var(--brand-dim); }
+    .combo-opt.sel { color: var(--brand-2); font-weight: 600; }
+    .combo-empty { padding: 12px; font-size: 12px; color: var(--dim); text-align: center; }
 
     /* ─── Log shared ─── */
     .log-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,.35); }
@@ -306,14 +320,12 @@
         </div>
 
         <div class="panel" id="control-panel" style="display:none">
-          <div class="panel-title">
-            <span>Control</span>
-            <button class="btn-danger" onclick="deleteBot()">Delete</button>
-          </div>
+          <div class="panel-title">Control</div>
           <div class="btn-row">
             <button id="btn-start" class="btn btn-start" style="width:100%" onclick="startBot()">▶ Start</button>
             <button id="btn-stop"  class="btn btn-stop"  style="width:100%" onclick="stopBot()" disabled>■ Stop</button>
           </div>
+          <button class="btn" style="width:100%;margin-top:8px;background:transparent;color:var(--loss);border:1px solid rgba(239,68,68,.4)" onclick="deleteBot()">🗑 Delete this bot</button>
         </div>
 
         <div class="panel" id="edit-panel" style="display:none">
@@ -466,11 +478,19 @@
         <div style="display:flex;flex-direction:column;gap:8px">
           <div class="field">
             <label>Strategy / Indicator</label>
-            <select id="st-strategy" onchange="onStrategyChange()"></select>
+            <div class="combo" id="st-strategy-combo">
+              <input class="combo-input" type="text" placeholder="Search strategy…" autocomplete="off" />
+              <div class="combo-caret">▼</div>
+              <div class="combo-list"></div>
+            </div>
           </div>
           <div class="field">
             <label>Currency / Market</label>
-            <select id="st-currency" onchange="onCurrencyChange()"></select>
+            <div class="combo" id="st-currency-combo">
+              <input class="combo-input" type="text" placeholder="Type to search 169 markets…" autocomplete="off" />
+              <div class="combo-caret">▼</div>
+              <div class="combo-list"></div>
+            </div>
           </div>
           <input id="st-symbol" type="hidden" />
           <div class="field">
@@ -537,12 +557,10 @@
       <div class="panel">
         <div class="panel-title">Controls</div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button class="btn btn-save" style="width:100%" onclick="saveSignalConfig()">Save Config</button>
-          <div class="btn-row">
-            <button id="st-start-btn" class="btn btn-start" onclick="startSignalBot()" style="width:100%">▶ Start</button>
-            <button id="st-stop-btn"  class="btn btn-stop"  onclick="stopSignalBot()"  style="width:100%" disabled>■ Stop</button>
-          </div>
-          <div id="st-saved-badge" style="display:none;text-align:center;font-size:11px;color:var(--gain)">✓ Config saved</div>
+          <button id="st-start-btn" class="btn btn-start" style="width:100%;padding:11px" onclick="startSignalBot()">▶ Start Auto-Trading</button>
+          <button id="st-stop-btn" class="btn btn-stop" style="width:100%;padding:11px" onclick="stopSignalBot()" disabled>■ Stop</button>
+          <div id="st-running-hint" style="display:none;font-size:11px;color:var(--warn);text-align:center">● Running — press Stop to change settings</div>
+          <div style="font-size:11px;color:var(--dim);text-align:center">Start applies your settings — no separate save needed</div>
         </div>
       </div>
 
@@ -1136,10 +1154,76 @@
   let stInitialized = false
   const stLogBox  = () => $('st-log-box')
   const stJumpBtn = () => $('st-jump-btn')
+  let stStrategyCombo = null
+  let stCurrencyCombo = null
+
+  // ── Searchable combobox — type to filter, arrows + Enter to pick. No library. ──
+  function createCombo(rootId, onChange) {
+    const root = $(rootId)
+    const input = root.querySelector('.combo-input')
+    const list = root.querySelector('.combo-list')
+    let items = []        // [{value, label}]
+    let value = ''
+    let filtered = []
+    let activeIdx = -1
+
+    const labelOf = (v) => (items.find((it) => it.value === v) || {}).label || ''
+
+    function render(filter) {
+      const f = (filter || '').toLowerCase().trim()
+      filtered = f ? items.filter((it) => it.label.toLowerCase().includes(f)) : items.slice()
+      activeIdx = -1
+      list.innerHTML = ''
+      if (!filtered.length) { list.innerHTML = '<div class="combo-empty">No match</div>'; return }
+      filtered.forEach((it, i) => {
+        const el = document.createElement('div')
+        el.className = 'combo-opt' + (it.value === value ? ' sel' : '')
+        el.textContent = it.label
+        el.onmousedown = (e) => { e.preventDefault(); pick(it.value) }
+        list.appendChild(el)
+      })
+    }
+    function openList() { root.classList.add('open'); render(''); input.select() }
+    function closeList() { root.classList.remove('open'); input.value = labelOf(value) }
+    function pick(v) { value = v; input.value = labelOf(v); closeList(); if (onChange) onChange(v) }
+    function highlight(d) {
+      if (!filtered.length) return
+      activeIdx = (activeIdx + d + filtered.length) % filtered.length
+      ;[...list.children].forEach((el, i) => el.classList.toggle('active', i === activeIdx))
+      const cur = list.children[activeIdx]; if (cur) cur.scrollIntoView({ block: 'nearest' })
+    }
+
+    input.addEventListener('focus', () => { if (!input.disabled) openList() })
+    input.addEventListener('input', () => { root.classList.add('open'); render(input.value) })
+    input.addEventListener('blur', () => setTimeout(closeList, 140))
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); highlight(1) }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(-1) }
+      else if (e.key === 'Enter') {
+        e.preventDefault()
+        const choice = activeIdx >= 0 ? filtered[activeIdx] : filtered[0]
+        if (choice) pick(choice.value)
+      } else if (e.key === 'Escape') { closeList(); input.blur() }
+    })
+    root.querySelector('.combo-caret').addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      if (root.classList.contains('open')) closeList()
+      else input.focus()
+    })
+
+    return {
+      setItems(arr) { items = arr; input.value = labelOf(value) },
+      setValue(v) { value = v; input.value = labelOf(v) },
+      getValue() { return value },
+      setEnabled(on) { input.disabled = !on },
+    }
+  }
 
   async function initSignalPage() {
     if (stInitialized) return
     stInitialized = true
+    stStrategyCombo = createCombo('st-strategy-combo', onStrategyPicked)
+    stCurrencyCombo = createCombo('st-currency-combo', onCurrencyPicked)
     await Promise.all([loadStrategies(), loadAssets()])
     await Promise.all([refreshSignalStatus(), loadSignalLogs()])
     stPollInterval = setInterval(refreshSignalStatus, 5000)
@@ -1148,22 +1232,13 @@
   async function loadStrategies() {
     try {
       stStrategies = await fetch('/api/strategies').then(r => r.json())
-      const sel = $('st-strategy'); sel.innerHTML = ''
-      let lastCat = ''
-      for (const s of stStrategies) {
-        if (s.category !== lastCat) {
-          const og = document.createElement('optgroup'); og.label = s.category; sel.appendChild(og); lastCat = s.category
-        }
-        const opt = document.createElement('option'); opt.value = s.id; opt.textContent = s.label; sel.lastChild.appendChild(opt)
-      }
+      stStrategyCombo.setItems(stStrategies.map(s => ({ value: s.id, label: `${s.label} · ${s.category}` })))
     } catch { showToast('Could not load strategies — is the bot running?', true) }
   }
 
-  function onStrategyChange() {
-    const id = $('st-strategy').value
+  function onStrategyPicked(id) {
     const strat = stStrategies.find(s => s.id === id)
-    if (!strat) return
-    renderStrategyParams(strat.id, strat.params, {})
+    if (strat) renderStrategyParams(strat.id, strat.params, {})
   }
 
   function renderStrategyParams(stratId, paramDefs, currentValues) {
@@ -1197,19 +1272,11 @@
   async function loadAssets() {
     try {
       const assets = await fetch('/api/assets').then((r) => r.json())
-      const sel = $('st-currency')
-      sel.innerHTML = ''
-      for (const a of (Array.isArray(assets) ? assets : [])) {
-        const opt = document.createElement('option')
-        opt.value = a
-        opt.textContent = a
-        sel.appendChild(opt)
-      }
-    } catch { /* dropdown stays empty if the bot is unreachable */ }
+      stCurrencyCombo.setItems((Array.isArray(assets) ? assets : []).map(a => ({ value: a, label: a })))
+    } catch { /* combobox stays empty if the bot is unreachable */ }
   }
 
-  function onCurrencyChange() {
-    const asset = $('st-currency').value
+  function onCurrencyPicked(asset) {
     $('st-asset').value = asset
     $('st-symbol').value = asset + 'USDT'
   }
@@ -1226,10 +1293,9 @@
       renderSignalStats(status)
       renderSignalAccount(account)
       syncFormToStatus(status)
-      // Update manual trade buttons
-      const canTrade = !!(status.config?.asset)
-      $('st-buy-btn').disabled  = !canTrade
-      $('st-sell-btn').disabled = !canTrade
+      // Manual trade is available whenever the bot is reachable.
+      $('st-buy-btn').disabled  = false
+      $('st-sell-btn').disabled = false
       // Update Signal Trader tab dot
       const dot = $('dot-signal')
       if (status.running) { dot.style.background = '#22c55e'; dot.style.boxShadow = '0 0 6px #22c55e'; dot.style.animation = 'pulse 2s ease-in-out infinite' }
@@ -1284,6 +1350,15 @@
     // Start/Stop buttons
     $('st-start-btn').disabled = s.running
     $('st-stop-btn').disabled  = !s.running
+    // Lock the config form while running — settings only change when stopped.
+    const lock = s.running
+    ;['st-timeframe','st-asset','st-size','st-slippage','st-cooldown','st-direction'].forEach((id) => {
+      const el = $(id); if (el) el.disabled = lock
+    })
+    document.querySelectorAll('#st-params-grid input').forEach((el) => { el.disabled = lock })
+    if (stStrategyCombo) stStrategyCombo.setEnabled(!lock)
+    if (stCurrencyCombo) stCurrencyCombo.setEnabled(!lock)
+    const hint = $('st-running-hint'); if (hint) hint.style.display = lock ? 'block' : 'none'
   }
 
   function renderSignalAccount(account) {
@@ -1318,10 +1393,10 @@
     if (stFormSynced || !stStrategies.length) return
     const cfg = status.config
     if (!cfg) return
-    // Populate form only once on first load
-    $('st-strategy').value  = cfg.strategyId || 'macd'
+    // Populate the form once from the bot's saved config (re-runs after start/stop).
+    stStrategyCombo.setValue(cfg.strategyId || 'macd')
     const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
-    $('st-currency').value  = cur
+    stCurrencyCombo.setValue(cur)
     $('st-symbol').value    = cfg.symbol || (cur + 'USDT')
     $('st-timeframe').value = cfg.timeframe || '1h'
     $('st-asset').value     = cfg.asset || cur
@@ -1334,37 +1409,48 @@
     stFormSynced = true
   }
 
-  // ── Signal config save / start / stop ──
-  async function saveSignalConfig() {
-    const stratId = $('st-strategy').value
-    const cfg = {
-      strategyId: stratId,
-      symbol:     $('st-symbol').value.trim().toUpperCase(),
-      timeframe:  $('st-timeframe').value,
-      params:     collectParams(stratId),
-      asset:      $('st-asset').value.trim().toUpperCase() || $('st-symbol').value.replace(/USDT$|USDC$/,''),
-      size:       parseFloat($('st-size').value),
+  // Build a config object straight from the form. Returns null (with a toast)
+  // if anything required is missing.
+  function collectSignalConfig() {
+    const stratId = stStrategyCombo.getValue()
+    const asset = (stCurrencyCombo.getValue() || $('st-asset').value).trim().toUpperCase()
+    if (!stratId) { showToast('Pick a strategy', true); return null }
+    if (!asset)   { showToast('Pick a currency', true); return null }
+    const size = parseFloat($('st-size').value)
+    if (!(size > 0)) { showToast('Order size must be greater than 0', true); return null }
+    return {
+      strategyId:  stratId,
+      symbol:      asset + 'USDT',
+      timeframe:   $('st-timeframe').value,
+      params:      collectParams(stratId),
+      asset:       asset,
+      size:        size,
       slippagePct: parseFloat($('st-slippage').value) || 2,
       cooldownSec: parseInt($('st-cooldown').value) || 60,
-      tradeSide:  $('st-direction').value,
+      tradeSide:   $('st-direction').value,
     }
-    if (!cfg.symbol) { showToast('Symbol is required', true); return }
-    if (!(cfg.size > 0)) { showToast('Order size must be > 0', true); return }
-    try {
-      await apiCall('/api/signal/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) })
-      showToast('Config saved')
-      $('st-saved-badge').style.display = 'block'
-      setTimeout(() => { $('st-saved-badge').style.display = 'none' }, 3000)
-      stFormSynced = false  // allow re-sync on next poll
-      await refreshSignalStatus()
-    } catch (e) { showToast(e.message, true) }
   }
 
+  // ── Start / stop — no separate save step; Start applies the form directly. ──
   async function startSignalBot() {
+    const cfg = collectSignalConfig()
+    if (!cfg) return
+    const dir = { both: 'Buy & Sell signals', buy: 'Buy signals only', sell: 'Sell signals only' }[cfg.tradeSide]
+    const ok = confirm(
+      'Start auto-trading?\n\n' +
+      'Strategy:  ' + getStrategyLabel(cfg.strategyId) + '\n' +
+      'Market:    ' + cfg.symbol + '  (' + cfg.timeframe + ' candles)\n' +
+      'Trades:    ' + cfg.asset + ' perp · size ' + cfg.size + '\n' +
+      'Direction: ' + dir + '\n\n' +
+      'The bot will place REAL orders when signals fire.'
+    )
+    if (!ok) return
     $('st-start-btn').disabled = true
     try {
+      await apiCall('/api/signal/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) })
       await apiCall('/api/signal/start', { method: 'POST' })
-      showToast('Signal Trader started')
+      showToast('Auto-trading started')
+      stFormSynced = false
       await refreshSignalStatus()
       await loadSignalLogs()
     } catch (e) { showToast(e.message, true); $('st-start-btn').disabled = false }
@@ -1372,22 +1458,26 @@
 
   async function stopSignalBot() {
     $('st-stop-btn').disabled = true
-    try { await apiCall('/api/signal/stop', { method: 'POST' }); showToast('Signal Trader stopped') }
+    try { await apiCall('/api/signal/stop', { method: 'POST' }); showToast('Auto-trading stopped') }
     catch (e) { showToast(e.message, true) }
+    stFormSynced = false
     await refreshSignalStatus()
   }
 
   async function stManualTrade(side) {
-    const cfg = stStatus?.config
-    if (!cfg?.asset || !(cfg?.size > 0)) { showToast('Save a config first', true); return }
+    const asset = (stCurrencyCombo.getValue() || $('st-asset').value).trim().toUpperCase()
+    const size = parseFloat($('st-size').value)
+    const slip = parseFloat($('st-slippage').value) || 2
+    if (!asset || !(size > 0)) { showToast('Pick a currency and order size first', true); return }
+    if (!confirm(`Place a ${side.toUpperCase()} market order now?\n\n${size} ${asset}  ·  max ${slip}% slippage`)) return
     const btn = side === 'buy' ? $('st-buy-btn') : $('st-sell-btn')
     btn.disabled = true
     try {
       const result = await apiCall('/api/trade', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset: cfg.asset, side, size: cfg.size, maxSlippagePct: cfg.slippagePct }),
+        body: JSON.stringify({ asset, side, size, maxSlippagePct: slip }),
       })
-      if (result.filled) showToast(`${side.toUpperCase()} filled ${result.filledSize} ${cfg.asset} @ $${Number(result.avgPx).toFixed(2)}`)
+      if (result.filled) showToast(`${side.toUpperCase()} filled ${result.filledSize} ${asset} @ $${Number(result.avgPx).toFixed(2)}`)
       else showToast(result.message || 'Not filled — try higher slippage', true)
       await refreshSignalStatus()
     } catch (e) { showToast(e.message, true) }
