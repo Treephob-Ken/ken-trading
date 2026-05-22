@@ -175,6 +175,138 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
   }
 }
 
+// ─────────────────────────── Unified order (market + limit) ───────────────────────────
+
+export interface PlaceOrderResult {
+  ok: boolean
+  filled: boolean    // market/IOC fill happened
+  resting: boolean   // GTC limit placed and waiting
+  orderId: number | null
+  asset: string
+  side: 'buy' | 'sell'
+  requestedSize: number
+  filledSize: number
+  avgPx: number | null
+  limitPx: number | null
+  midPx: number
+  tpPlaced: boolean
+  slPlaced: boolean
+  message: string
+}
+
+// Place a market (IOC) or limit (GTC) order with optional TP/SL stops.
+// TP/SL stops are placed immediately after a market fill using the same
+// tpsl pattern as the grid bot: `isMarket:true` trigger orders, reduce-only.
+export async function placeOrder(params: {
+  asset: string
+  side: 'buy' | 'sell'
+  size: number
+  orderType: 'market' | 'limit'
+  limitPrice?: number
+  reduceOnly?: boolean
+  tpPrice?: number
+  slPrice?: number
+  maxSlippagePct?: number
+}): Promise<PlaceOrderResult> {
+  const {
+    asset, side, size, orderType, limitPrice,
+    reduceOnly = false, tpPrice, slPrice, maxSlippagePct,
+  } = params
+  const { info, exchange } = clients()
+  const meta = await getAssetMeta(info, asset)
+
+  assertAssetAllowed(asset)
+
+  const sizeStr = roundSize(size, meta)
+  if (Number(sizeStr) <= 0) {
+    throw new Error(`size ${size} rounds to 0 at ${meta.szDecimals} decimals for ${asset}`)
+  }
+  const notionalUsd = Number(sizeStr) * meta.midPx
+  assertNotionalAllowed(notionalUsd)
+  assertRateLimit()
+
+  let pxStr: string
+  let tif: 'Ioc' | 'Gtc'
+
+  if (orderType === 'market') {
+    const slip = (maxSlippagePct ?? DEFAULT_SLIPPAGE_PCT) / 100
+    const rawPx = side === 'buy' ? meta.midPx * (1 + slip) : meta.midPx * (1 - slip)
+    pxStr = roundPrice(rawPx, meta)
+    tif = 'Ioc'
+  } else {
+    if (!limitPrice || !(limitPrice > 0)) throw new Error('limitPrice is required for limit orders')
+    pxStr = roundPrice(limitPrice, meta)
+    tif = 'Gtc'
+  }
+
+  log.info(
+    `${orderType.toUpperCase()} ${side.toUpperCase()} ${sizeStr} ${asset} @ ${pxStr}` +
+      ` (${tif}${reduceOnly ? ' reduce-only' : ''})`,
+  )
+
+  const orderRes = await exchange.order({
+    orders: [{ a: meta.index, b: side === 'buy', p: pxStr, s: sizeStr, r: reduceOnly, t: { limit: { tif } } }],
+    grouping: 'na',
+  })
+
+  const status = orderRes.response.data.statuses[0]
+  const base = { asset, side, requestedSize: size, limitPx: Number(pxStr), midPx: meta.midPx }
+  let result: PlaceOrderResult
+
+  if (status && typeof status === 'object' && 'filled' in status) {
+    const f = status.filled
+    log.ok(`Filled: ${f.totalSz} ${asset} @ ${f.avgPx}`)
+    recordTrade({ asset, side, requestedSize: size, filled: true, filledSize: Number(f.totalSz), avgPx: Number(f.avgPx), notionalUsd })
+    result = { ...base, ok: true, filled: true, resting: false, orderId: null, filledSize: Number(f.totalSz), avgPx: Number(f.avgPx), tpPlaced: false, slPlaced: false, message: `Filled ${f.totalSz} ${asset} @ ${f.avgPx}` }
+  } else if (status && typeof status === 'object' && 'resting' in status) {
+    const r = status.resting
+    log.ok(`Resting limit: oid ${r.oid} @ ${pxStr}`)
+    recordTrade({ asset, side, requestedSize: size, filled: false, filledSize: 0, avgPx: null, notionalUsd })
+    result = { ...base, ok: true, filled: false, resting: true, orderId: r.oid, filledSize: 0, avgPx: null, tpPlaced: false, slPlaced: false, message: `Limit placed @ ${pxStr} (oid ${r.oid})` }
+  } else {
+    const desc = typeof status === 'string' ? status : JSON.stringify(status)
+    log.warn(`Not filled: ${desc}`)
+    recordTrade({ asset, side, requestedSize: size, filled: false, filledSize: 0, avgPx: null, notionalUsd })
+    result = { ...base, ok: true, filled: false, resting: false, orderId: null, filledSize: 0, avgPx: null, tpPlaced: false, slPlaced: false, message: `Not filled: ${desc}` }
+  }
+
+  // Chain TP/SL stops after a market fill.
+  // Both are reduce-only trigger orders using `isMarket:true`.
+  // TP uses tpsl:'tp' (fires in the favourable direction); SL uses tpsl:'sl'.
+  // limitMul places the IOC limit slightly past the trigger to guarantee fill.
+  if (result.filled && result.filledSize > 0 && (tpPrice || slPrice)) {
+    const closeSide: 'buy' | 'sell' = side === 'buy' ? 'sell' : 'buy'
+    const closeQty = roundSize(result.filledSize, meta)
+    const limitMul = closeSide === 'sell' ? 0.95 : 1.05
+
+    if (tpPrice && tpPrice > 0) {
+      try {
+        await exchange.order({
+          orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(tpPrice * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(tpPrice, meta), isMarket: true, tpsl: 'tp' } } }],
+          grouping: 'na',
+        })
+        result.tpPlaced = true
+        log.ok(`TP stop placed @ ${tpPrice}`)
+      } catch (e) { log.warn(`TP placement failed: ${(e as Error).message}`) }
+    }
+
+    if (slPrice && slPrice > 0) {
+      try {
+        await exchange.order({
+          orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(slPrice * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(slPrice, meta), isMarket: true, tpsl: 'sl' } } }],
+          grouping: 'na',
+        })
+        result.slPlaced = true
+        log.ok(`SL stop placed @ ${slPrice}`)
+      } catch (e) { log.warn(`SL placement failed: ${(e as Error).message}`) }
+    }
+  }
+
+  return result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // The Hyperliquid perp universe — asset names available to trade. The web UI
 // uses this to populate its currency picker so a user can't type an asset that
 // Hyperliquid doesn't list.

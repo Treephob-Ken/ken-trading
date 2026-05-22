@@ -268,6 +268,63 @@
     /* Scrollbar for st-sidebar */
     .st-sidebar::-webkit-scrollbar { width: 5px; }
     .st-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ═══════════════════════════════════════════
+       TRADE PAGE
+    ═══════════════════════════════════════════ */
+    #page-trade { flex-direction: row; }
+    .tr-layout { flex: 1; display: grid; grid-template-columns: 360px 1fr; gap: 0; min-height: 0; }
+    .tr-form { border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .tr-form::-webkit-scrollbar { width: 5px; }
+    .tr-form::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .tr-right { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 16px; min-height: 0; overflow: hidden; }
+
+    /* Order type tabs */
+    .tr-type-tabs { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
+    .tr-type-btn { flex: 1; padding: 6px; border-radius: 6px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--dim); background: transparent; font-family: inherit; transition: all .12s; }
+    .tr-type-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+
+    /* Buy/Sell side tabs */
+    .tr-side-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .tr-side-btn { padding: 10px; border-radius: 8px; border: 1px solid transparent; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; transition: all .15s; opacity: .45; }
+    .tr-side-btn.active { opacity: 1; }
+    .tr-side-btn.buy { background: rgba(34,197,94,.12); color: var(--gain); border-color: rgba(34,197,94,.25); }
+    .tr-side-btn.buy.active { background: var(--gain); color: #000; border-color: var(--gain); box-shadow: 0 0 12px rgba(34,197,94,.3); }
+    .tr-side-btn.sell { background: rgba(239,68,68,.12); color: var(--loss); border-color: rgba(239,68,68,.25); }
+    .tr-side-btn.sell.active { background: var(--loss); color: #fff; border-color: var(--loss); box-shadow: 0 0 12px rgba(239,68,68,.3); }
+
+    /* Account info row under the tabs */
+    .tr-acct-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .tr-acct-item { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+    .tr-acct-label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 2px; }
+    .tr-acct-value { font-size: 13px; font-weight: 600; font-family: monospace; }
+    .tr-acct-unit { font-size: 10px; color: var(--dim); margin-left: 3px; }
+
+    /* Size row — input + asset label */
+    .tr-size-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+    .tr-asset-label { font-size: 13px; font-weight: 700; color: var(--muted); padding-bottom: 8px; white-space: nowrap; }
+
+    /* % quick-fill buttons */
+    .tr-pct-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .tr-pct-row button { background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-size: 11px; font-weight: 600; padding: 5px; border-radius: 6px; cursor: pointer; font-family: inherit; transition: all .12s; }
+    .tr-pct-row button:hover { border-color: var(--brand); color: var(--brand-2); background: var(--brand-dim); }
+
+    /* Checkbox row */
+    .tr-check-row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; padding: 2px 0; user-select: none; }
+    .tr-check-row input[type=checkbox] { width: 14px; height: 14px; accent-color: var(--brand); cursor: pointer; }
+
+    /* TP/SL section */
+    .tr-tpsl-section { display: flex; flex-direction: column; gap: 8px; }
+    .tr-tpsl-section.hidden { display: none; }
+
+    /* Order preview box */
+    .tr-preview { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; }
+    .tr-preview-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+    .tr-preview-row > span:first-child { color: var(--dim); }
+    .tr-preview-row > span:last-child { font-family: monospace; font-weight: 500; }
+
+    /* Place order button — colour set dynamically */
+    #tr-place-btn { transition: background .15s, box-shadow .15s; }
   </style>
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -291,6 +348,10 @@
     <button class="tab-btn" id="tab-btn-signal" onclick="switchTab('signal')">
       <span class="dot" id="dot-signal"></span>
       Signal Trader
+    </button>
+    <button class="tab-btn" id="tab-btn-trade" onclick="switchTab('trade')">
+      <span class="dot"></span>
+      Trade
     </button>
   </nav>
 
@@ -565,14 +626,10 @@
         </div>
       </div>
 
-      <!-- Manual Trade -->
-      <div class="panel">
-        <div class="panel-title">Manual Trade</div>
-        <div style="font-size:11px;color:var(--dim);margin-bottom:8px">One-off market order using this bot's currency, size &amp; slippage.</div>
-        <div class="st-manual">
-          <button class="btn-buy" id="st-buy-btn" onclick="stManualTrade('buy')">▲ Buy</button>
-          <button class="btn-sell" id="st-sell-btn" onclick="stManualTrade('sell')">▼ Sell</button>
-        </div>
+      <!-- Manual trade has moved to the dedicated Trade tab -->
+      <div class="panel" style="text-align:center;padding:12px 14px">
+        <div style="font-size:11px;color:var(--dim);margin-bottom:8px">Manual orders have moved to the dedicated Trade page.</div>
+        <button class="btn btn-secondary" style="width:100%;font-size:12px" onclick="switchTab('trade')">↗ Go to Trade</button>
       </div>
 
       <!-- Controls -->
@@ -682,6 +739,175 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════
+     TRADE PAGE
+═══════════════════════════════════════ -->
+<div id="page-trade" class="page">
+  <div class="tr-layout">
+
+    <!-- ORDER FORM -->
+    <div class="tr-form">
+
+      <!-- Market selector -->
+      <div>
+        <div class="panel-title" style="margin-bottom:6px">Market</div>
+        <div class="combo" id="tr-currency-combo">
+          <input class="combo-input" type="text" placeholder="Search markets…" autocomplete="off" />
+          <div class="combo-caret">▼</div>
+          <div class="combo-list"></div>
+        </div>
+        <input id="tr-asset" type="hidden" />
+      </div>
+
+      <!-- Order type: Market / Limit / Pro -->
+      <div class="tr-type-tabs">
+        <button class="tr-type-btn active" id="tr-type-market" onclick="setOrderType('market')">Market</button>
+        <button class="tr-type-btn" id="tr-type-limit" onclick="setOrderType('limit')">Limit</button>
+        <button class="tr-type-btn" id="tr-type-pro" onclick="setOrderType('pro')">Pro</button>
+      </div>
+
+      <!-- Buy / Sell side -->
+      <div class="tr-side-tabs">
+        <button class="tr-side-btn buy active" id="tr-side-buy" onclick="setTrSide('buy')">▲ Buy / Long</button>
+        <button class="tr-side-btn sell" id="tr-side-sell" onclick="setTrSide('sell')">▼ Sell / Short</button>
+      </div>
+
+      <!-- Account snapshot -->
+      <div class="tr-acct-row">
+        <div class="tr-acct-item">
+          <span class="tr-acct-label">Available to Trade</span>
+          <span id="tr-available" class="tr-acct-value">—</span>
+          <span class="tr-acct-unit">USDC</span>
+        </div>
+        <div class="tr-acct-item">
+          <span class="tr-acct-label">Current Position</span>
+          <span id="tr-cur-pos" class="tr-acct-value" style="color:var(--muted)">Flat</span>
+          <span id="tr-cur-pos-asset" class="tr-acct-unit"></span>
+        </div>
+      </div>
+
+      <!-- Limit price (shown only in Limit mode) -->
+      <div id="tr-limit-row" class="field" style="display:none">
+        <label>Limit Price</label>
+        <input id="tr-limit-price" type="number" step="any" placeholder="0.00" oninput="updateTrPreview()" />
+      </div>
+
+      <!-- Size -->
+      <div class="tr-size-row">
+        <div class="field">
+          <label>Size</label>
+          <input id="tr-size" type="number" step="any" placeholder="0.00" oninput="updateTrPreview()" />
+        </div>
+        <div class="tr-asset-label" id="tr-size-asset">—</div>
+      </div>
+
+      <!-- % quick-fill -->
+      <div class="tr-pct-row">
+        <button onclick="trSetPct(25)">25%</button>
+        <button onclick="trSetPct(50)">50%</button>
+        <button onclick="trSetPct(75)">75%</button>
+        <button onclick="trSetPct(100)">Max</button>
+      </div>
+
+      <!-- Leverage + Slippage -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="field">
+          <label>Leverage</label>
+          <input id="tr-leverage" type="number" min="1" max="50" step="1" value="1" oninput="updateTrPreview()" />
+        </div>
+        <div class="field" id="tr-slippage-row">
+          <label>Max Slippage %</label>
+          <input id="tr-slippage" type="number" step="0.1" value="2" oninput="updateTrPreview()" />
+        </div>
+      </div>
+
+      <!-- Reduce Only -->
+      <label class="tr-check-row">
+        <input type="checkbox" id="tr-reduce-only" />
+        <span>Reduce Only</span>
+      </label>
+
+      <!-- TP / SL toggle -->
+      <div style="border-top:1px solid var(--border);padding-top:8px">
+        <label class="tr-check-row" style="margin-bottom:6px">
+          <input type="checkbox" id="tr-tpsl-enabled" onchange="trToggleTpSl()" />
+          <span>Take Profit / Stop Loss</span>
+        </label>
+        <div class="tr-tpsl-section hidden" id="tr-tpsl-section">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="field"><label>TP Price</label><input id="tr-tp-price" type="number" step="any" placeholder="0.00" oninput="trSyncTpFromPrice()" /></div>
+            <div class="field"><label style="color:var(--gain)">Gain %</label><input id="tr-tp-pct" type="number" step="0.1" placeholder="5" oninput="trSyncTpFromPct()" /></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="field"><label>SL Price</label><input id="tr-sl-price" type="number" step="any" placeholder="0.00" oninput="trSyncSlFromPrice()" /></div>
+            <div class="field"><label style="color:var(--loss)">Loss %</label><input id="tr-sl-pct" type="number" step="0.1" placeholder="3" oninput="trSyncSlFromPct()" /></div>
+          </div>
+          <div style="font-size:10px;color:var(--dim)">TP/SL stops are placed automatically after a market fill (not for limit orders).</div>
+        </div>
+      </div>
+
+      <!-- Order preview -->
+      <div class="tr-preview">
+        <div class="tr-preview-row"><span>Liquidation Price</span><span id="tr-liq-price" style="color:var(--dim)">N/A</span></div>
+        <div class="tr-preview-row"><span>Order Value</span><span id="tr-order-value" style="color:var(--muted)">N/A</span></div>
+        <div class="tr-preview-row"><span>Margin Required</span><span id="tr-margin" style="color:var(--muted)">N/A</span></div>
+        <div class="tr-preview-row"><span>Slippage</span><span id="tr-slip-label" style="color:var(--gain)">Est: 0% / Max: 2.00%</span></div>
+        <div class="tr-preview-row"><span>Fees</span><span style="color:var(--muted)">Taker 0.0350% / Maker 0.0100%</span></div>
+      </div>
+
+      <!-- Place Order -->
+      <button id="tr-place-btn" class="btn btn-start" style="width:100%;padding:14px;font-size:14px;background:var(--gain);color:#000" onclick="trPlaceOrder()">▲ Place Buy Order</button>
+
+    </div>
+
+    <!-- RIGHT — account + log -->
+    <div class="tr-right">
+
+      <div class="panel" style="flex-shrink:0">
+        <div class="panel-title">
+          Account · Hyperliquid
+          <span id="tr-network-badge" style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--dim)">—</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+          <div class="stat">
+            <div class="stat-label">Account Value</div>
+            <div id="tr-balance" class="stat-value" style="font-size:15px">—</div>
+            <div class="stat-sub">USDC</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Withdrawable</div>
+            <div id="tr-withdrawable" class="stat-value" style="font-size:15px">—</div>
+            <div class="stat-sub">USDC</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Open Position</div>
+            <div id="tr-pos-none" class="stat-value" style="font-size:13px;color:var(--dim)">Flat</div>
+          </div>
+        </div>
+        <div id="tr-pos-card" style="display:none;margin-top:8px">
+          <div class="position-card" id="tr-pos-card-inner">
+            <div class="pos-badge" id="tr-pos-badge">LONG</div>
+            <div class="pos-kv"><span class="pos-k">Asset</span><span class="pos-v" id="tr-pos-asset">—</span></div>
+            <div class="pos-kv"><span class="pos-k">Size</span><span class="pos-v" id="tr-pos-size">—</span></div>
+            <div class="pos-entry"><span class="pos-k">Entry</span><span class="pos-v" id="tr-pos-entry">—</span></div>
+            <div class="pos-kv"><span class="pos-k">Unrealized PnL</span><span class="pos-v" id="tr-pos-upnl">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trade log -->
+      <div class="log-wrap">
+        <div class="log-header">
+          <div class="log-title"><span class="log-live-dot"></span>Trade Log</div>
+          <button class="log-clear" onclick="clearTrLog()">Clear</button>
+        </div>
+        <div id="tr-log-box" class="log-box"><div class="log-empty">Place an order to see results here</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script>
@@ -754,6 +980,7 @@
     $('page-' + tab).classList.add('active')
     $('tab-btn-' + tab).classList.add('active')
     if (tab === 'signal') initSignalPage()
+    if (tab === 'trade')  initTradePage()
   }
 
   function showToast(msg, isError = false) {
@@ -1702,27 +1929,6 @@
     loadSignalBots()
   }
 
-  async function stManualTrade(side) {
-    const asset = (stCurrencyCombo.getValue() || $('st-asset').value).trim().toUpperCase()
-    const configSize = parseFloat($('st-size').value)
-    const size = configSize > 0 ? configSize : (stStatus?.computedSize || 0)
-    const slip = parseFloat($('st-slippage').value) || 2
-    if (!asset || !(size > 0)) { showToast('Pick a currency and set a budget or order size first', true); return }
-    if (!confirm(`Place a ${side.toUpperCase()} market order now?\n\n${size} ${asset}  ·  max ${slip}% slippage`)) return
-    const btn = side === 'buy' ? $('st-buy-btn') : $('st-sell-btn')
-    btn.disabled = true
-    try {
-      const result = await apiCall('/api/trade', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset, side, size, maxSlippagePct: slip }),
-      })
-      if (result.filled) showToast(`${side.toUpperCase()} filled ${result.filledSize} ${asset} @ $${Number(result.avgPx).toFixed(2)}`)
-      else showToast(result.message || 'Not filled — try higher slippage', true)
-      refreshAccount()
-    } catch (e) { showToast(e.message, true) }
-    finally { btn.disabled = false }
-  }
-
   // ── Signal log ──
   function stLogIsVisible(level) { if (stSignalFilter === 'all') return true; return stSignalFilter.split(' ').includes(level) }
 
@@ -1773,6 +1979,265 @@
       for (const line of (Array.isArray(logs) ? logs : [])) appendSignalLog(line)
       if (!stLogBox().children.length) stLogBox().innerHTML = '<div class="log-empty">No activity yet — start the bot to see logs</div>'
     } catch { /* ignore */ }
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  TRADE PAGE
+  // ════════════════════════════════════════════════════════
+  let trOrderType = 'market'
+  let trSide = 'buy'
+  let trCurrentPrice = null   // live mid-price for the selected asset
+  let trAvailableUsdc = 0     // withdrawable USDC — used for % buttons
+  let trCurrencyCombo = null
+  let trInitialized = false
+  let trAccountTimer = null
+
+  async function initTradePage() {
+    if (trInitialized) return
+    trInitialized = true
+    trCurrencyCombo = createCombo('tr-currency-combo', onTrAssetPicked)
+    await loadTrAssets()
+    refreshTrAccount()
+    trAccountTimer = setInterval(refreshTrAccount, 8000)
+  }
+
+  async function loadTrAssets() {
+    try {
+      const assets = await fetch('/api/assets').then(r => r.json())
+      trCurrencyCombo.setItems((Array.isArray(assets) ? assets : []).map(a => ({ value: a, label: a })))
+      const def = assets.includes('ETH') ? 'ETH' : assets[0]
+      if (def) { trCurrencyCombo.setValue(def); onTrAssetPicked(def) }
+    } catch { /* ignore */ }
+  }
+
+  async function onTrAssetPicked(asset) {
+    $('tr-asset').value = asset
+    $('tr-size-asset').textContent = asset || '—'
+    trCurrentPrice = null
+    try {
+      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`)
+      if (r.ok) { const d = await r.json(); trCurrentPrice = parseFloat(d.price) }
+    } catch { /* fallback to account mid */ }
+    updateTrPreview()
+    refreshTrAccount()
+  }
+
+  function setOrderType(type) {
+    trOrderType = type
+    ;['market','limit','pro'].forEach(t => $('tr-type-' + t).classList.toggle('active', t === type))
+    $('tr-limit-row').style.display = type === 'limit' ? '' : 'none'
+    $('tr-slippage-row').style.display = type === 'market' ? '' : 'none'
+    updateTrPreview()
+  }
+
+  function setTrSide(side) {
+    trSide = side
+    $('tr-side-buy').classList.toggle('active', side === 'buy')
+    $('tr-side-sell').classList.toggle('active', side === 'sell')
+    const btn = $('tr-place-btn')
+    if (side === 'buy') {
+      btn.style.background = 'var(--gain)'; btn.style.color = '#000'
+      btn.textContent = '▲ Place Buy Order'
+    } else {
+      btn.style.background = 'var(--loss)'; btn.style.color = '#fff'
+      btn.textContent = '▼ Place Sell Order'
+    }
+    updateTrPreview()
+  }
+
+  function trToggleTpSl() {
+    const on = $('tr-tpsl-enabled').checked
+    $('tr-tpsl-section').classList.toggle('hidden', !on)
+  }
+
+  // TP price ↔ Gain% sync
+  function trSyncTpFromPrice() {
+    if (!trCurrentPrice) return
+    const tp = parseFloat($('tr-tp-price').value)
+    if (tp > 0) $('tr-tp-pct').value = (((tp - trCurrentPrice) / trCurrentPrice) * 100).toFixed(2)
+  }
+  function trSyncTpFromPct() {
+    if (!trCurrentPrice) return
+    const pct = parseFloat($('tr-tp-pct').value)
+    if (!isNaN(pct)) $('tr-tp-price').value = (trCurrentPrice * (1 + pct / 100)).toFixed(2)
+  }
+  // SL price ↔ Loss% sync
+  function trSyncSlFromPrice() {
+    if (!trCurrentPrice) return
+    const sl = parseFloat($('tr-sl-price').value)
+    if (sl > 0) $('tr-sl-pct').value = (((trCurrentPrice - sl) / trCurrentPrice) * 100).toFixed(2)
+  }
+  function trSyncSlFromPct() {
+    if (!trCurrentPrice) return
+    const pct = parseFloat($('tr-sl-pct').value)
+    if (!isNaN(pct)) $('tr-sl-price').value = (trCurrentPrice * (1 - pct / 100)).toFixed(2)
+  }
+
+  // % quick-fill: fill size field as a fraction of max affordable position
+  function trSetPct(pct) {
+    const leverage = parseFloat($('tr-leverage').value) || 1
+    const price = (trOrderType === 'limit' ? parseFloat($('tr-limit-price').value) : null) || trCurrentPrice
+    if (!price || !trAvailableUsdc) { showToast('Select an asset and ensure account is loaded', true); return }
+    const maxSize = (trAvailableUsdc * leverage) / price
+    $('tr-size').value = (maxSize * pct / 100).toFixed(6)
+    updateTrPreview()
+  }
+
+  function updateTrPreview() {
+    const size = parseFloat($('tr-size').value) || 0
+    const leverage = parseFloat($('tr-leverage').value) || 1
+    const slip = parseFloat($('tr-slippage').value) || 2
+    const price = (trOrderType === 'limit' ? parseFloat($('tr-limit-price').value) : null) || trCurrentPrice || 0
+
+    if (size > 0 && price > 0) {
+      const orderValue = size * price
+      const margin = orderValue / leverage
+      const liqOffset = (1 / leverage) * 0.9   // rough 90% of 1/leverage
+      const liqPrice = trSide === 'buy' ? price * (1 - liqOffset) : price * (1 + liqOffset)
+      $('tr-order-value').textContent = '$' + orderValue.toFixed(2) + ' USDC'
+      $('tr-margin').textContent = '$' + margin.toFixed(2) + ' USDC'
+      if (leverage > 1) {
+        $('tr-liq-price').textContent = '$' + liqPrice.toFixed(2)
+        $('tr-liq-price').style.color = leverage > 10 ? 'var(--loss)' : 'var(--warn)'
+      } else {
+        $('tr-liq-price').textContent = 'N/A'; $('tr-liq-price').style.color = 'var(--dim)'
+      }
+    } else {
+      $('tr-order-value').textContent = 'N/A'
+      $('tr-margin').textContent = 'N/A'
+      $('tr-liq-price').textContent = 'N/A'; $('tr-liq-price').style.color = 'var(--dim)'
+    }
+    const slipLabel = $('tr-slip-label')
+    if (trOrderType === 'limit') {
+      slipLabel.textContent = 'N/A (resting limit)'; slipLabel.style.color = 'var(--gain)'
+    } else {
+      slipLabel.textContent = `Est: 0% / Max: ${slip.toFixed(2)}%`
+      slipLabel.style.color = slip > 5 ? 'var(--warn)' : 'var(--gain)'
+    }
+  }
+
+  async function refreshTrAccount() {
+    const asset = $('tr-asset')?.value
+    try {
+      const acc = await fetch('/api/account' + (asset ? '?asset=' + asset : '')).then(r => r.json())
+      if (acc.error) return
+      trAvailableUsdc = Number(acc.withdrawable) || 0
+      $('tr-available').textContent = '$' + Number(acc.withdrawable || 0).toFixed(2)
+      $('tr-balance').textContent = '$' + Number(acc.accountValue || 0).toFixed(2)
+      $('tr-withdrawable').textContent = '$' + Number(acc.withdrawable || 0).toFixed(2)
+      if (acc.network) {
+        $('tr-network-badge').textContent = acc.network === 'testnet' ? '· Testnet ⚠' : '· Mainnet'
+        $('tr-network-badge').style.color = acc.network === 'testnet' ? '#f59e0b' : '#22c55e'
+      }
+      const pos = acc.position
+      if (pos && pos.size > 0) {
+        $('tr-pos-none').style.display = 'none'; $('tr-pos-card').style.display = 'block'
+        $('tr-pos-card-inner').className = 'position-card ' + (pos.side === 'long' ? 'long' : 'short')
+        $('tr-pos-badge').className = 'pos-badge ' + pos.side; $('tr-pos-badge').textContent = pos.side.toUpperCase()
+        $('tr-pos-asset').textContent = pos.asset; $('tr-pos-size').textContent = pos.size
+        $('tr-pos-entry').textContent = pos.entryPx ? '$' + Number(pos.entryPx).toFixed(2) : '—'
+        const upnlEl = $('tr-pos-upnl')
+        const upnl = pos.unrealizedPnl
+        upnlEl.textContent = upnl != null ? (upnl >= 0 ? '+$' : '-$') + Math.abs(upnl).toFixed(2) : '—'
+        upnlEl.style.color = upnl > 0 ? '#22c55e' : upnl < 0 ? '#ef4444' : ''
+        $('tr-cur-pos').textContent = pos.size + (pos.side === 'short' ? ' S' : ' L')
+        $('tr-cur-pos').style.color = pos.side === 'long' ? 'var(--gain)' : 'var(--loss)'
+        $('tr-cur-pos-asset').textContent = pos.asset
+      } else {
+        $('tr-pos-none').style.display = 'block'; $('tr-pos-card').style.display = 'none'
+        $('tr-cur-pos').textContent = 'Flat'; $('tr-cur-pos').style.color = 'var(--muted)'
+        $('tr-cur-pos-asset').textContent = ''
+      }
+    } catch { /* ignore */ }
+  }
+
+  function trAppendLog(level, msg) {
+    const box = $('tr-log-box')
+    const empty = box.querySelector('.log-empty'); if (empty) empty.remove()
+    const row = document.createElement('div')
+    row.className = 'log-row ' + level
+    const time = new Date().toLocaleTimeString()
+    row.innerHTML = `<span class="log-time">${escHtml(time)}</span><span class="log-badge"></span><span class="log-msg"></span>`
+    row.querySelector('.log-msg').textContent = msg
+    box.appendChild(row)
+    box.scrollTop = box.scrollHeight
+  }
+
+  function clearTrLog() { $('tr-log-box').innerHTML = '<div class="log-empty">Cleared</div>' }
+
+  async function trPlaceOrder() {
+    const asset = $('tr-asset').value
+    const size  = parseFloat($('tr-size').value)
+    const slip  = parseFloat($('tr-slippage').value) || 2
+    if (!asset) { showToast('Select a market first', true); return }
+    if (!(size > 0)) { showToast('Enter a size', true); return }
+    if (trOrderType === 'pro') { showToast('Pro mode coming soon', true); return }
+    if (trOrderType === 'limit' && !(parseFloat($('tr-limit-price').value) > 0)) {
+      showToast('Enter a limit price', true); return
+    }
+    const tpslOn = $('tr-tpsl-enabled').checked
+    const tpPrice = tpslOn ? (parseFloat($('tr-tp-price').value) || undefined) : undefined
+    const slPrice = tpslOn ? (parseFloat($('tr-sl-price').value) || undefined) : undefined
+    const reduceOnly = $('tr-reduce-only').checked
+    const leverage = parseFloat($('tr-leverage').value) || 1
+    const midPrice = trCurrentPrice || 0
+    const limitPrice = trOrderType === 'limit' ? parseFloat($('tr-limit-price').value) : undefined
+    const refPrice = limitPrice || midPrice
+
+    const lines = [
+      `${trOrderType.toUpperCase()} ${trSide.toUpperCase()} order?`,
+      '',
+      `Asset:    ${asset} perp`,
+      `Size:     ${size} ${asset}`,
+      trOrderType === 'limit' ? `Price:    $${limitPrice}` : `Mid price: $${midPrice.toFixed(2)}`,
+      refPrice > 0 ? `Value:    ~$${(size * refPrice).toFixed(2)} USDC` : '',
+      leverage > 1 ? `Leverage: ${leverage}x · Margin: ~$${((size * refPrice) / leverage).toFixed(2)}` : '',
+      tpPrice ? `TP:       $${tpPrice}` : '',
+      slPrice ? `SL:       $${slPrice}` : '',
+      reduceOnly ? 'Reduce Only: YES' : '',
+      '',
+      'This places a REAL order on Hyperliquid.',
+    ].filter(Boolean).join('\n')
+
+    if (!confirm(lines)) return
+
+    const btn = $('tr-place-btn'); btn.disabled = true
+    trAppendLog('info', `Placing ${trOrderType} ${trSide.toUpperCase()} ${size} ${asset}…`)
+
+    try {
+      const body = {
+        asset, side: trSide, size, orderType: trOrderType,
+        ...(limitPrice ? { limitPrice } : {}),
+        reduceOnly, maxSlippagePct: slip,
+        ...(tpPrice ? { tpPrice } : {}),
+        ...(slPrice ? { slPrice } : {}),
+      }
+      const result = await apiCall('/api/order', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      if (result.filled) {
+        trAppendLog('fill', result.message)
+        if (result.tpPlaced) trAppendLog('ok', `TP stop placed @ $${tpPrice}`)
+        if (result.slPlaced) trAppendLog('ok', `SL stop placed @ $${slPrice}`)
+        if (tpslOn && !result.tpPlaced && tpPrice) trAppendLog('warn', 'TP not placed — check logs')
+        if (tpslOn && !result.slPlaced && slPrice) trAppendLog('warn', 'SL not placed — check logs')
+        showToast(result.message)
+        $('tr-size').value = ''
+        updateTrPreview()
+      } else if (result.resting) {
+        trAppendLog('ok', result.message)
+        showToast('Limit order placed')
+      } else {
+        trAppendLog('warn', result.message)
+        showToast(result.message || 'Not filled — try higher slippage', true)
+      }
+      setTimeout(refreshTrAccount, 1500)
+    } catch (e) {
+      trAppendLog('err', e.message)
+      showToast(e.message, true)
+    } finally {
+      btn.disabled = false
+    }
   }
 
   // ════════════════════════════════════════════════════════

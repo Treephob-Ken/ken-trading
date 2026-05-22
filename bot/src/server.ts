@@ -18,6 +18,7 @@ import {
   getAccountState,
   listAssets,
   parseTradeRequest,
+  placeOrder,
 } from './trade.js'
 import {
   createSignalBot,
@@ -279,6 +280,37 @@ app.post('/api/trade', async (req: Request, res: Response) => {
     res.json({ ...result, msg: result.message })
   } catch (e) {
     log.err(`API Trade failed: ${(e as Error).message}`)
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Unified order endpoint — market or limit, with optional TP/SL stops.
+app.post('/api/order', async (req: Request, res: Response) => {
+  const b = (req.body ?? {}) as Record<string, unknown>
+  const asset = typeof b.asset === 'string' ? b.asset.trim().toUpperCase() : ''
+  const side = b.side === 'buy' || b.side === 'sell' ? b.side : null
+  const sizeRaw = typeof b.size === 'string' ? Number(b.size) : b.size
+  const size = typeof sizeRaw === 'number' && sizeRaw > 0 ? sizeRaw : null
+  const orderType: 'market' | 'limit' = b.orderType === 'limit' ? 'limit' : 'market'
+
+  if (!asset || !side || !size) {
+    res.status(400).json({ error: 'asset, side (buy|sell), and size are required' })
+    return
+  }
+
+  const num = (k: string) => { const v = b[k]; const n = typeof v === 'string' ? Number(v) : v; return typeof n === 'number' && n > 0 ? n : undefined }
+  try {
+    const result = await placeOrder({
+      asset, side, size, orderType,
+      limitPrice: num('limitPrice'),
+      reduceOnly: Boolean(b.reduceOnly),
+      tpPrice: num('tpPrice'),
+      slPrice: num('slPrice'),
+      maxSlippagePct: num('maxSlippagePct'),
+    })
+    res.json(result)
+  } catch (e) {
+    log.err(`Order failed: ${(e as Error).message}`)
     res.status(500).json({ error: (e as Error).message })
   }
 })

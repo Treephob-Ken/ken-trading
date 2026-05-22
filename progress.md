@@ -208,6 +208,35 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 
 ### Phase 7 — Signal Trader position sizing (current)
 
+#### Bot (`bot/src/trade.ts`, `bot/src/server.ts`)
+
+- **`placeOrder()`** — unified market + limit order function with optional TP/SL.
+  Market orders use IOC at mid ± slippage%. Limit orders use GTC at specified price.
+  After a market fill, TP and SL reduce-only stops are placed automatically using
+  the same `isMarket:true` + `tpsl:'tp'/'sl'` pattern as the grid bot.
+- **`POST /api/order`** — new endpoint wrapping `placeOrder`; accepts `{ asset, side, size, orderType, limitPrice?, reduceOnly?, tpPrice?, slPrice?, maxSlippagePct? }`.
+
+#### Dashboard (`bot/dashboard/index.html`)
+
+- **New "Trade" tab** (3rd tab) with a full Hyperliquid-style order form:
+  - Asset combobox (same searchable widget, 169 markets)
+  - Market / Limit / Pro tab switcher (Pro is a placeholder)
+  - Buy/Long | Sell/Short side selector (green/red highlight)
+  - "Available to Trade" and "Current Position" pulled live from account
+  - Size input + asset label; **25/50/75/Max %** quick-fill buttons
+    (scales to available USDC × leverage ÷ current price)
+  - Leverage and Max Slippage inputs
+  - Reduce Only checkbox
+  - Take Profit / Stop Loss toggle: TP/SL Price inputs with bidirectional
+    Gain%/Loss% sync (entering a price auto-fills the %, and vice versa)
+  - Order preview: Liquidation Price (est), Order Value, Margin Required,
+    Slippage, Fees
+  - Place Order button (colour matches side); confirms before sending
+  - Trade Log panel showing fills, resting orders, and TP/SL placement results
+  - Right panel: Account Value, Withdrawable, Open Position card
+- **Manual Trade removed from Signal Trader sidebar** — replaced with a
+  "↗ Go to Trade" link button; `stManualTrade()` function removed.
+
 #### Bot (`bot/src/signal-bot.ts`)
 
 - **Budget mode**: `SignalBotConfig` now accepts optional `investment` (USDC) and `leverage` alongside the existing `size`. When both are provided, `size` is set to `0` (sentinel) and the effective trade size is computed on the first tick as `(investment × leverage) / currentPrice`. The size is frozen for the session so price drift doesn't silently change position size mid-run.
@@ -244,6 +273,7 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 | SL/TP on Hyperliquid | ✅ verified — correct trigger conditions confirmed in order history |
 | Multi-bot (grid) | ✅ working — manage via dashboard at `http://localhost:3001` |
 | Signal Trader | ✅ multi-bot + budget sizing — budget × leverage → size computed at live price on start |
+| Trade page | ✅ dedicated order form — Market/Limit, TP/SL stops, % fill, order preview |
 | Trade API security | ✅ verified — CORS locked; API token gate; server safety caps; audit log |
 | Remote access | ✅ live — Cloudflare Tunnel + Access at `bot.garlic-trading.net` (running from local PC) |
 | 24/7 VPS hosting | ⏳ next — deploy to Hetzner (see `futureplan.md` / `bot/DEPLOY_VPS.md`) |

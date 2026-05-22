@@ -10,6 +10,8 @@ Remote access is built and working from the local PC:
 - **Multiple concurrent signal traders** (multi-bot manager)
 - **Signal Trader position sizing** — budget (USDC) + leverage inputs; effective order
   size computed from live price on start, shown in dashboard sizing preview box
+- **Dedicated Trade page** — Hyperliquid-style order form with Market/Limit,
+  TP/SL stops, % fill, order preview; manual trade removed from Signal Trader sidebar
 
 The tunnel currently runs from the local PC — it only works while the PC is awake.
 
