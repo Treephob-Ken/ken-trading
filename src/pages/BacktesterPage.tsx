@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity } from 'lucide-react'
+import { Activity, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Candle, Direction, StrategyId, Trade } from '@/types'
 import { fetchKlines, MAX_BARS, subscribeKline, type SymbolInfo } from '@/lib/binance'
 import { defaultParams, generateSignals, strategyMeta, type StrategyOutput } from '@/lib/strategies'
@@ -13,6 +13,7 @@ import WalkForwardPanel from '@/components/WalkForwardPanel'
 import MultiTFPanel from '@/components/MultiTFPanel'
 import CorrelationPanel from '@/components/CorrelationPanel'
 import Results from '@/components/Results'
+import SummaryPanel from '@/components/SummaryPanel'
 import { runEnsemble, type EnsembleConfig } from '@/lib/ensemble'
 import { analyzeRegime } from '@/lib/markov'
 import { walkForward } from '@/lib/walkforward'
@@ -96,6 +97,8 @@ export default function BacktesterPage({
   useEffect(() => {
     localStorage.setItem('bt_atrMultiplier', String(atrMultiplier))
   }, [atrMultiplier])
+
+  const [showAdvanced, setShowAdvanced] = useState(() => localStorage.getItem('bt_showAdvanced') === 'true')
 
   // Ensemble states
   const [ensembleActive, setEnsembleActive] = useState(false)
@@ -399,52 +402,6 @@ export default function BacktesterPage({
           )}
         </div>
 
-        {candles.length >= 30 && (
-          <MultiTFPanel
-            confluence={confluence}
-            loading={confluenceLoading}
-            currentTF={timeframe}
-          />
-        )}
-
-        {candles.length >= 30 && (
-          <RegimePanel
-            candles={candles}
-            currentStrategy={strategyId}
-            onApplyStrategy={handleStrategy}
-          />
-        )}
-
-        {candles.length >= 30 && (
-          <EnsemblePanel
-            candles={candles}
-            regime={regime}
-            activeStrategyId={strategyId}
-            ensembleActive={ensembleActive}
-            onToggleEnsemble={setEnsembleActive}
-            onApplyEnsembleConfig={(ids, config) => {
-              setEnsembleStrategies(ids)
-              setEnsembleConfig(config)
-            }}
-          />
-        )}
-
-         {candles.length >= 30 && (
-          <CorrelationPanel
-            candles={candles}
-            currentStrategyId={strategyId}
-            initialCapital={initialCapital}
-            feePct={feePct}
-            direction={direction}
-            positionMode={positionMode}
-            targetRiskPct={targetRiskPct}
-            atrMultiplier={atrMultiplier}
-            onApplyStrategy={handleStrategy}
-            ensembleActive={ensembleActive}
-            ensembleStrategies={ensembleStrategies}
-          />
-        )}
-
         {result ? (
           <>
             <Results
@@ -455,9 +412,13 @@ export default function BacktesterPage({
               selectedTrade={selectedTrade}
               onSelectTrade={setSelectedTrade}
             />
-            {!ensembleActive && (
-              <WalkForwardPanel result={walkForwardResult} loading={loading} />
-            )}
+            <SummaryPanel
+              result={result}
+              regime={regime}
+              strategyName={strategyMeta(strategyId).name}
+              direction={direction}
+              symbol={symbol.replace(/USDT$/, '/USDT')}
+            />
           </>
         ) : (
           !loading &&
@@ -466,6 +427,68 @@ export default function BacktesterPage({
               Not enough candles in this range to run a backtest.
             </div>
           )
+        )}
+
+        {/* ── Advanced analysis tools (collapsed by default) ─────────────── */}
+        {candles.length >= 30 && (
+          <div className="card overflow-hidden">
+            <button
+              onClick={() => {
+                const next = !showAdvanced
+                setShowAdvanced(next)
+                localStorage.setItem('bt_showAdvanced', String(next))
+              }}
+              className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-text hover:bg-panel-2 transition-colors font-display"
+            >
+              <span>Advanced Analysis Tools</span>
+              <span className="flex items-center gap-1.5 text-xs text-dim font-sans font-normal">
+                {showAdvanced ? 'Hide' : 'Show'}
+                {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </span>
+            </button>
+
+            {showAdvanced && (
+              <div className="flex flex-col gap-4 border-t border-border p-4">
+                <MultiTFPanel
+                  confluence={confluence}
+                  loading={confluenceLoading}
+                  currentTF={timeframe}
+                />
+                <RegimePanel
+                  candles={candles}
+                  currentStrategy={strategyId}
+                  onApplyStrategy={handleStrategy}
+                />
+                <EnsemblePanel
+                  candles={candles}
+                  regime={regime}
+                  activeStrategyId={strategyId}
+                  ensembleActive={ensembleActive}
+                  onToggleEnsemble={setEnsembleActive}
+                  onApplyEnsembleConfig={(ids, config) => {
+                    setEnsembleStrategies(ids)
+                    setEnsembleConfig(config)
+                  }}
+                />
+                <CorrelationPanel
+                  candles={candles}
+                  currentStrategyId={strategyId}
+                  initialCapital={initialCapital}
+                  feePct={feePct}
+                  direction={direction}
+                  positionMode={positionMode}
+                  targetRiskPct={targetRiskPct}
+                  atrMultiplier={atrMultiplier}
+                  onApplyStrategy={handleStrategy}
+                  ensembleActive={ensembleActive}
+                  ensembleStrategies={ensembleStrategies}
+                />
+                {result && !ensembleActive && (
+                  <WalkForwardPanel result={walkForwardResult} loading={loading} />
+                )}
+              </div>
+            )}
+          </div>
         )}
       </section>
     </main>

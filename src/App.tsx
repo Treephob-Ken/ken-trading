@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import { CandlestickChart, LayoutGrid, LineChart, Zap } from 'lucide-react'
+import { CandlestickChart, LayoutGrid, LineChart } from 'lucide-react'
 import { fetchSymbols, type SymbolInfo } from '@/lib/binance'
 import BacktesterPage from '@/pages/BacktesterPage'
 import GridPage from '@/pages/GridPage'
-import SignalTraderPage from '@/pages/SignalTraderPage'
 
 const FALLBACK_SYMBOLS: SymbolInfo[] = [
   { symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' },
@@ -13,16 +12,18 @@ const FALLBACK_SYMBOLS: SymbolInfo[] = [
   { symbol: 'XRPUSDT', base: 'XRP', quote: 'USDT' },
 ]
 
-type Page = 'backtest' | 'grid' | 'signal'
+type Page = 'backtest' | 'grid'
 
 const TABS: { id: Page; label: string; icon: typeof LineChart }[] = [
   { id: 'backtest', label: 'Strategy Backtester', icon: LineChart },
   { id: 'grid', label: 'Grid Optimizer', icon: LayoutGrid },
-  { id: 'signal', label: 'Signal Trader', icon: Zap },
 ]
 
 export default function App() {
-  const [page, setPage] = useState<Page>(() => (localStorage.getItem('lab_page') as Page) || 'backtest')
+  const [page, setPage] = useState<Page>(() => {
+    const saved = localStorage.getItem('lab_page') as Page
+    return saved === 'backtest' || saved === 'grid' ? saved : 'backtest'
+  })
   const [symbol, setSymbol] = useState(() => localStorage.getItem('lab_symbol') || 'ETHUSDT')
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('lab_timeframe') || '1h')
   const [symbols, setSymbols] = useState<SymbolInfo[]>(FALLBACK_SYMBOLS)
@@ -121,8 +122,6 @@ export default function App() {
           onTimeframe={setTimeframe}
         />
       )}
-      {page === 'signal' && <SignalTraderPage />}
-
       <footer className="border-t border-border px-6 py-4 text-center text-[11px] text-dim">
         Backtests are simulations on historical data and do not predict future
         results. Not financial advice. Market data from Binance.
