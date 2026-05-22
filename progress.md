@@ -206,7 +206,7 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 
 ---
 
-### Phase 7 — Signal Trader position sizing (current)
+### Phase 7 — Signal Trader position sizing + Vercel simplification (current)
 
 #### Bot (`bot/src/trade.ts`, `bot/src/server.ts`)
 
@@ -218,24 +218,10 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 
 #### Dashboard (`bot/dashboard/index.html`)
 
-- **New "Trade" tab** (3rd tab) with a full Hyperliquid-style order form:
-  - Asset combobox (same searchable widget, 169 markets)
-  - Market / Limit / Pro tab switcher (Pro is a placeholder)
-  - Buy/Long | Sell/Short side selector (green/red highlight)
-  - "Available to Trade" and "Current Position" pulled live from account
-  - Size input + asset label; **25/50/75/Max %** quick-fill buttons
-    (scales to available USDC × leverage ÷ current price)
-  - Leverage and Max Slippage inputs
-  - Reduce Only checkbox
-  - Take Profit / Stop Loss toggle: TP/SL Price inputs with bidirectional
-    Gain%/Loss% sync (entering a price auto-fills the %, and vice versa)
-  - Order preview: Liquidation Price (est), Order Value, Margin Required,
-    Slippage, Fees
-  - Place Order button (colour matches side); confirms before sending
-  - Trade Log panel showing fills, resting orders, and TP/SL placement results
-  - Right panel: Account Value, Withdrawable, Open Position card
-- **Manual Trade removed from Signal Trader sidebar** — replaced with a
-  "↗ Go to Trade" link button; `stManualTrade()` function removed.
+- **Dedicated Trade tab removed** — the separate Trade page (with full order form,
+  TP/SL sync, %, account panel, trade log) was removed at user request.
+- **Manual Trade panel restored** to Signal Trader sidebar — simple asset + size +
+  slippage inputs with Buy/Sell buttons calling `POST /api/trade` (market IOC).
 
 #### Bot (`bot/src/signal-bot.ts`)
 
@@ -261,6 +247,15 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 - **`bot/DEPLOY_VPS.md`**:
   - Step-by-step walkthrough to deploy the bot on a fresh Ubuntu VPS (Hetzner), install Node, clone the repository, configure Zero Trust, configure `.env` safety limits, and configure `pm2` autostart.
 
+#### Vercel web app (src/)
+
+- **Signal Trader tab removed** — Vercel can't host the bot, so the Signal Trader page served no purpose there. Tabs now: Strategy Backtester · Grid Optimizer.
+- **`SummaryPanel` component** (`src/components/SummaryPanel.tsx`) — plain-English verdict panel shown below the backtest `Results`:
+  - Strategy performance row: return %, number of trades, win rate, vs buy-and-hold
+  - Regime row: current Bull/Bear/Sideways label + conviction %, grid trading suitability (✓ Good / ⚠ Risky)
+  - One combined recommendation sentence (strategy verdict + direction hint + grid note)
+- **Advanced Analysis collapsible** — `MultiTFPanel`, `RegimePanel`, `EnsemblePanel`, `CorrelationPanel`, and `WalkForwardPanel` are now wrapped in a collapsible "Advanced Analysis Tools" toggle, collapsed by default. Preference persisted in `localStorage`. `SummaryPanel` is always visible so users get a quick read without digging into the quant tools.
+
 ---
 
 ## Current state
@@ -273,7 +268,7 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 | SL/TP on Hyperliquid | ✅ verified — correct trigger conditions confirmed in order history |
 | Multi-bot (grid) | ✅ working — manage via dashboard at `http://localhost:3001` |
 | Signal Trader | ✅ multi-bot + budget sizing — budget × leverage → size computed at live price on start |
-| Trade page | ✅ dedicated order form — Market/Limit, TP/SL stops, % fill, order preview |
+| Trade page | ➖ removed — manual IOC trade restored as simple Buy/Sell in Signal Trader sidebar |
 | Trade API security | ✅ verified — CORS locked; API token gate; server safety caps; audit log |
 | Remote access | ✅ live — Cloudflare Tunnel + Access at `bot.garlic-trading.net` (running from local PC) |
 | 24/7 VPS hosting | ⏳ next — deploy to Hetzner (see `futureplan.md` / `bot/DEPLOY_VPS.md`) |
