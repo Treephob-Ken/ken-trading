@@ -522,10 +522,7 @@
       <div class="panel">
         <div class="panel-title">Trade Settings</div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <div class="field">
-            <label>Hyperliquid Asset</label>
-            <input id="st-asset" type="text" placeholder="ETH" />
-          </div>
+          <input id="st-asset" type="hidden" />
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             <div class="field"><label>Order Size</label><input id="st-size" type="number" step="any" placeholder="0.01" /></div>
             <div class="field"><label>Max Slippage %</label><input id="st-slippage" type="number" step="0.1" placeholder="2" /></div>
@@ -1352,7 +1349,7 @@
     $('st-stop-btn').disabled  = !s.running
     // Lock the config form while running — settings only change when stopped.
     const lock = s.running
-    ;['st-timeframe','st-asset','st-size','st-slippage','st-cooldown','st-direction'].forEach((id) => {
+    ;['st-timeframe','st-size','st-slippage','st-cooldown','st-direction'].forEach((id) => {
       const el = $(id); if (el) el.disabled = lock
     })
     document.querySelectorAll('#st-params-grid input').forEach((el) => { el.disabled = lock })
