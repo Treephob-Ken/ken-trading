@@ -204,6 +204,26 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 - **Searchable comboboxes** (vanilla JS, no library) for the strategy and 169-market currency pickers — type to filter, arrows + Enter to select. Replaces the native `<select>` (also fixes the black-text and long-scroll issues).
 - **No-save Start flow** — the separate "Save Config" step is gone; config auto-saves, and **Start** applies the form after a confirmation popup. Manual Buy/Sell confirm first too. The form locks while a bot runs; the redundant Hyperliquid Asset field was removed (the currency picker is the single source).
 
+---
+
+### Phase 7 — Signal Trader position sizing (current)
+
+#### Bot (`bot/src/signal-bot.ts`)
+
+- **Budget mode**: `SignalBotConfig` now accepts optional `investment` (USDC) and `leverage` alongside the existing `size`. When both are provided, `size` is set to `0` (sentinel) and the effective trade size is computed on the first tick as `(investment × leverage) / currentPrice`. The size is frozen for the session so price drift doesn't silently change position size mid-run.
+- Computed size is logged on start (e.g. `Budget mode: $500 × 3x = $1,500 notional / 42000 = 0.035714 ETH per trade`) and exposed in `SignalBotStatus.computedSize` for the UI.
+- `parseSignalConfig` validates: either `investment + leverage` or a positive `size` must be present (not both required — override size is still optional).
+
+#### Dashboard (`bot/dashboard/index.html`)
+
+- **Trade Settings panel** split into "Position Sizing" and "Execution" sub-sections, mirroring the Grid Bot config panel.
+- New inputs: **Budget (USDC)** and **Leverage**. The Order Size field becomes an optional override ("auto from budget" placeholder).
+- **Live sizing preview box**: fetches the current Binance price once per selected currency; shows estimated order size, notional, and required margin. Falls back to formula-only when price is unavailable.
+- While the bot is running, the preview box is replaced by the actual computed size (e.g. `Effective size 0.035714 ETH per trade (computed at start)`).
+- Start confirmation dialog shows the sizing method (`$500 budget @ 3x leverage (size computed at start)` vs `fixed size 0.01 ETH`).
+- Manual Buy/Sell buttons use `computedSize` from status when no override size is set.
+- Strategy banner subtitle shows the effective size/trade when running.
+
 #### Guides & Documentation
 
 - **`bot/REMOTE_ACCESS.md`**:
@@ -223,7 +243,7 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 | GitHub | ✅ pushed to master & new branch `trigger-bot` created |
 | SL/TP on Hyperliquid | ✅ verified — correct trigger conditions confirmed in order history |
 | Multi-bot (grid) | ✅ working — manage via dashboard at `http://localhost:3001` |
-| Signal Trader | ✅ multi-bot — multiple concurrent indicator traders, each independently configured |
+| Signal Trader | ✅ multi-bot + budget sizing — budget × leverage → size computed at live price on start |
 | Trade API security | ✅ verified — CORS locked; API token gate; server safety caps; audit log |
 | Remote access | ✅ live — Cloudflare Tunnel + Access at `bot.garlic-trading.net` (running from local PC) |
 | 24/7 VPS hosting | ⏳ next — deploy to Hetzner (see `futureplan.md` / `bot/DEPLOY_VPS.md`) |
@@ -237,4 +257,5 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 - Grid bot has no auto-restart on crash (the Signal Trader does — resumes from saved state)
 - Signal Trader polls candles every 30s rather than streaming on candle close
 - No webhook / alert when SL or TP triggers
+- Signal Trader budget mode freezes size at start; no periodic recalculation as price drifts
 

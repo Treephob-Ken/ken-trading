@@ -8,6 +8,8 @@ Remote access is built and working from the local PC:
   caps (`bot/src/limits.ts`), NDJSON audit log
 - Dashboard: searchable comboboxes, no-save Start flow, violet restyle
 - **Multiple concurrent signal traders** (multi-bot manager)
+- **Signal Trader position sizing** — budget (USDC) + leverage inputs; effective order
+  size computed from live price on start, shown in dashboard sizing preview box
 
 The tunnel currently runs from the local PC — it only works while the PC is awake.
 

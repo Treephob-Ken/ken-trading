@@ -538,22 +538,29 @@
 
       <!-- Trade Settings -->
       <div class="panel">
-        <div class="panel-title">Trade Settings</div>
+        <div class="panel-title">Position Sizing</div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <input id="st-asset" type="hidden" />
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div class="field"><label>Order Size</label><input id="st-size" type="number" step="any" placeholder="0.01" /></div>
-            <div class="field"><label>Max Slippage %</label><input id="st-slippage" type="number" step="0.1" placeholder="2" /></div>
+            <div class="field"><label>Budget (USDC)</label><input id="st-investment" type="number" step="any" placeholder="e.g. 500" oninput="scheduleSignalSizingPreview()" /></div>
+            <div class="field"><label>Leverage</label><input id="st-leverage" type="number" min="1" step="any" placeholder="1" oninput="scheduleSignalSizingPreview()" /></div>
           </div>
+          <div class="field"><label>Or override Order Size (per trade)</label><input id="st-size" type="number" step="any" placeholder="(auto from budget)" oninput="scheduleSignalSizingPreview()" /></div>
+          <div id="st-sizing-preview" class="preview-box">Enter budget + leverage, or a fixed order size…</div>
+        </div>
+
+        <div class="panel-title" style="margin-top:12px">Execution</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="field"><label>Max Slippage %</label><input id="st-slippage" type="number" step="0.1" placeholder="2" /></div>
             <div class="field"><label>Cooldown (s)</label><input id="st-cooldown" type="number" step="1" placeholder="60" /></div>
-            <div class="field"><label>Trade Direction</label>
-              <select id="st-direction">
-                <option value="both">Both signals</option>
-                <option value="buy">Buy only (Long)</option>
-                <option value="sell">Sell only (Short)</option>
-              </select>
-            </div>
+          </div>
+          <div class="field"><label>Trade Direction</label>
+            <select id="st-direction">
+              <option value="both">Both signals</option>
+              <option value="buy">Buy only (Long)</option>
+              <option value="sell">Sell only (Short)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -1240,6 +1247,57 @@
     }
   }
 
+  // ── Sizing preview (signal trader) ──
+  let stCurrentPrice = null
+  let stSizingTimer = null
+
+  function scheduleSignalSizingPreview() {
+    clearTimeout(stSizingTimer)
+    stSizingTimer = setTimeout(updateSignalSizingPreview, 300)
+    scheduleSave()
+  }
+
+  async function updateSignalSizingPreview() {
+    const box = $('st-sizing-preview'); if (!box) return
+    const inv  = parseFloat($('st-investment').value)
+    const lev  = parseFloat($('st-leverage').value)
+    const sz   = parseFloat($('st-size').value)
+    const asset = (stCurrencyCombo?.getValue() || $('st-asset')?.value || '').toUpperCase()
+
+    if (sz > 0) {
+      // Manual override mode — show what we know
+      const priceHint = stCurrentPrice ? ` ≈ <b>$${(sz * stCurrentPrice).toFixed(2)}</b> notional` : ''
+      box.innerHTML = `Fixed size <b>${sz}</b> ${asset}${priceHint} <span style="color:var(--dim)">(manual override)</span>`
+      return
+    }
+
+    if (!(inv > 0) || !(lev >= 1)) {
+      box.innerHTML = 'Enter <b>Budget + Leverage</b>, or a fixed <b>Order Size</b>…'
+      return
+    }
+
+    const notional = inv * lev
+    // Fetch current price once per asset so the estimate is meaningful.
+    if (asset && !stCurrentPrice) {
+      try {
+        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`)
+        if (r.ok) { const d = await r.json(); stCurrentPrice = parseFloat(d.price) }
+      } catch { /* ignore; preview degrades gracefully */ }
+    }
+
+    if (stCurrentPrice) {
+      const estSize = notional / stCurrentPrice
+      box.innerHTML =
+        `Budget <b>$${inv}</b> × <b>${lev}x</b> = <b>$${notional.toFixed(0)}</b> notional<br>` +
+        `Est. order size ≈ <b>${estSize.toFixed(6)}</b> ${asset} <span style="color:var(--dim)">(at $${stCurrentPrice.toFixed(2)})</span><br>` +
+        `Required margin ≈ <b>$${inv.toFixed(0)} USDC</b> · size computed at actual price on start`
+    } else {
+      box.innerHTML =
+        `Budget <b>$${inv}</b> × <b>${lev}x</b> = <b>$${notional.toFixed(0)}</b> notional<br>` +
+        `<span style="color:var(--dim)">Select a currency to see estimated order size</span>`
+    }
+  }
+
   async function initSignalPage() {
     if (stInitialized) return
     stInitialized = true
@@ -1267,7 +1325,7 @@
   // Auto-save: any config change is persisted to the selected bot after a
   // short debounce — no separate Save button.
   function wireAutoSave() {
-    ['st-timeframe', 'st-size', 'st-slippage', 'st-cooldown', 'st-direction'].forEach((id) => {
+    ['st-timeframe', 'st-investment', 'st-leverage', 'st-size', 'st-slippage', 'st-cooldown', 'st-direction'].forEach((id) => {
       const el = $(id); if (el) el.addEventListener('change', scheduleSave)
     })
     $('st-params-grid').addEventListener('change', scheduleSave)
@@ -1334,6 +1392,8 @@
   function onCurrencyPicked(asset) {
     $('st-asset').value = asset
     $('st-symbol').value = asset + 'USDT'
+    stCurrentPrice = null   // stale price no longer valid for the new asset
+    updateSignalSizingPreview()
     scheduleSave()
   }
 
@@ -1432,15 +1492,20 @@
     stStrategyCombo.setValue(cfg.strategyId)
     const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
     stCurrencyCombo.setValue(cur)
-    $('st-symbol').value    = cfg.symbol || (cur + 'USDT')
-    $('st-asset').value     = cfg.asset || cur
-    $('st-timeframe').value = cfg.timeframe || '1h'
-    $('st-size').value      = cfg.size ?? 0.01
-    $('st-slippage').value  = cfg.slippagePct ?? 2
-    $('st-cooldown').value  = cfg.cooldownSec ?? 60
-    $('st-direction').value = cfg.tradeSide || 'both'
+    $('st-symbol').value      = cfg.symbol || (cur + 'USDT')
+    $('st-asset').value       = cfg.asset || cur
+    $('st-timeframe').value   = cfg.timeframe || '1h'
+    $('st-investment').value  = cfg.investment ?? ''
+    $('st-leverage').value    = cfg.leverage ?? ''
+    // size=0 is the budget-mode sentinel — show blank so the override field reads as "auto"
+    $('st-size').value        = cfg.size > 0 ? cfg.size : ''
+    $('st-slippage').value    = cfg.slippagePct ?? 2
+    $('st-cooldown').value    = cfg.cooldownSec ?? 60
+    $('st-direction').value   = cfg.tradeSide || 'both'
     const strat = stStrategies.find(s => s.id === cfg.strategyId)
     if (strat) renderStrategyParams(cfg.strategyId, strat.params, cfg.params || {})
+    stCurrentPrice = null   // force price re-fetch for the new asset
+    updateSignalSizingPreview()
   }
 
   // ── Polling — refreshes the list and the selected bot's status ──
@@ -1480,7 +1545,14 @@
     const sym = status.config?.symbol || '—'
     const tf  = status.config?.timeframe || '—'
     $('st-banner-strategy').textContent = stratLabel
-    $('st-banner-meta').textContent = `${sym} · ${tf} · ${status.running ? 'RUNNING' : 'stopped'}`
+    const sizeInfo = status.computedSize != null
+      ? `${Number(status.computedSize).toFixed(5)} ${status.config?.asset || ''}/trade`
+      : status.config?.size > 0
+        ? `${status.config.size} ${status.config?.asset || ''}/trade`
+        : status.config?.investment
+          ? `$${status.config.investment}@${status.config.leverage}x`
+          : ''
+    $('st-banner-meta').textContent = `${sym} · ${tf} · ${status.running ? 'RUNNING' : 'stopped'}` + (sizeInfo ? ` · ${sizeInfo}` : '')
 
     banner.className = 'st-banner ' + (status.running ? 'running' : status.lastError ? 'error' : 'stopped')
     const pill = $('st-state-pill')
@@ -1517,13 +1589,21 @@
     $('st-stop-btn').disabled  = !s.running
     // Lock the config form while running — settings only change when stopped.
     const lock = s.running
-    ;['st-timeframe','st-size','st-slippage','st-cooldown','st-direction'].forEach((id) => {
+    ;['st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown','st-direction'].forEach((id) => {
       const el = $(id); if (el) el.disabled = lock
     })
     document.querySelectorAll('#st-params-grid input').forEach((el) => { el.disabled = lock })
     if (stStrategyCombo) stStrategyCombo.setEnabled(!lock)
     if (stCurrencyCombo) stCurrencyCombo.setEnabled(!lock)
     const hint = $('st-running-hint'); if (hint) hint.style.display = lock ? 'block' : 'none'
+    // While running, show computed size in the preview box instead of the form estimate.
+    const preview = $('st-sizing-preview')
+    if (lock && s.computedSize != null) {
+      const asset = s.config?.asset || ''
+      preview.innerHTML = `Effective size <b>${Number(s.computedSize).toFixed(6)}</b> ${asset} per trade <span style="color:var(--dim)">(computed at start)</span>`
+    } else if (!lock) {
+      updateSignalSizingPreview()
+    }
   }
 
   function renderSignalAccount(account) {
@@ -1561,15 +1641,24 @@
     const warn = (m) => { if (!silent) showToast(m, true) }
     if (!stratId) { warn('Pick a strategy'); return null }
     if (!asset)   { warn('Pick a currency'); return null }
-    const size = parseFloat($('st-size').value)
-    if (!(size > 0)) { warn('Order size must be greater than 0'); return null }
+    const investment = parseFloat($('st-investment').value)
+    const leverage   = parseFloat($('st-leverage').value)
+    const size       = parseFloat($('st-size').value)
+    const hasBudget  = investment > 0 && leverage >= 1
+    const hasSize    = size > 0
+    if (!hasBudget && !hasSize) {
+      warn('Set a Budget + Leverage, or a manual Order Size')
+      return null
+    }
     return {
       strategyId:  stratId,
       symbol:      asset + 'USDT',
       timeframe:   $('st-timeframe').value,
       params:      collectParams(stratId),
-      asset:       asset,
-      size:        size,
+      asset,
+      investment:  hasBudget ? investment : undefined,
+      leverage:    hasBudget ? leverage   : undefined,
+      size:        hasSize   ? size       : 0,
       slippagePct: parseFloat($('st-slippage').value) || 2,
       cooldownSec: parseInt($('st-cooldown').value) || 60,
       tradeSide:   $('st-direction').value,
@@ -1582,11 +1671,14 @@
     const cfg = collectSignalConfig()
     if (!cfg) return
     const dir = { both: 'Buy & Sell signals', buy: 'Buy signals only', sell: 'Sell signals only' }[cfg.tradeSide]
+    const sizing = cfg.investment && cfg.leverage
+      ? `$${cfg.investment} budget @ ${cfg.leverage}x leverage (size computed at start)`
+      : `fixed size ${cfg.size} ${cfg.asset}`
     const ok = confirm(
       'Start auto-trading?\n\n' +
       'Strategy:  ' + getStrategyLabel(cfg.strategyId) + '\n' +
       'Market:    ' + cfg.symbol + '  (' + cfg.timeframe + ' candles)\n' +
-      'Trades:    ' + cfg.asset + ' perp · size ' + cfg.size + '\n' +
+      'Sizing:    ' + sizing + '\n' +
       'Direction: ' + dir + '\n\n' +
       'The bot will place REAL orders when signals fire.'
     )
@@ -1612,9 +1704,10 @@
 
   async function stManualTrade(side) {
     const asset = (stCurrencyCombo.getValue() || $('st-asset').value).trim().toUpperCase()
-    const size = parseFloat($('st-size').value)
+    const configSize = parseFloat($('st-size').value)
+    const size = configSize > 0 ? configSize : (stStatus?.computedSize || 0)
     const slip = parseFloat($('st-slippage').value) || 2
-    if (!asset || !(size > 0)) { showToast('Pick a currency and order size first', true); return }
+    if (!asset || !(size > 0)) { showToast('Pick a currency and set a budget or order size first', true); return }
     if (!confirm(`Place a ${side.toUpperCase()} market order now?\n\n${size} ${asset}  ·  max ${slip}% slippage`)) return
     const btn = side === 'buy' ? $('st-buy-btn') : $('st-sell-btn')
     btn.disabled = true

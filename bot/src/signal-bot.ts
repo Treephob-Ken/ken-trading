@@ -40,7 +40,11 @@ export interface SignalBotConfig {
   strategyId: StrategyId
   params: Record<string, number>
   asset: string // Hyperliquid asset, e.g. ETH
-  size: number
+  // Budget mode: size is computed at start as (investment × leverage) / currentPrice.
+  // Manual mode: size is specified directly. Exactly one must be provided.
+  investment?: number // USDC budget
+  leverage?: number   // multiplier (used only when investment is set)
+  size: number        // fixed size; 0 signals budget mode (size computed at runtime)
   slippagePct: number
   cooldownSec: number
   tradeSide: 'both' | 'buy' | 'sell'
@@ -52,6 +56,9 @@ export interface SignalBotStatus {
   running: boolean
   startedAt: number | null
   config: SignalBotConfig
+  // Effective size actually used for trades. Equals config.size in manual mode;
+  // in budget mode it is computed from (investment × leverage) / price on first tick.
+  computedSize: number | null
   lastSignal: Signal
   lastSignalAt: number | null
   lastClosedBarTime: number | null
@@ -102,9 +109,22 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ? b.asset.trim().toUpperCase()
     : symbol.replace(/USDT$/, '')
 
-  const size = typeof b.size === 'string' ? Number(b.size) : b.size
-  if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) {
-    throw new Error('size must be a positive number')
+  // Budget mode — investment + leverage derive size at runtime from live price.
+  const invRaw = typeof b.investment === 'string' ? Number(b.investment) : b.investment
+  const investment =
+    typeof invRaw === 'number' && Number.isFinite(invRaw) && invRaw > 0 ? invRaw : undefined
+
+  const levRaw = typeof b.leverage === 'string' ? Number(b.leverage) : b.leverage
+  const leverage =
+    typeof levRaw === 'number' && Number.isFinite(levRaw) && levRaw >= 1 ? levRaw : undefined
+
+  const sizeRaw = typeof b.size === 'string' ? Number(b.size) : b.size
+  const sizeOk = typeof sizeRaw === 'number' && Number.isFinite(sizeRaw) && sizeRaw > 0
+  // size = 0 is the sentinel for "budget mode — compute at runtime".
+  const size = sizeOk ? sizeRaw : 0
+
+  if (!investment && !sizeOk) {
+    throw new Error('Provide either investment + leverage (budget mode) or a positive size')
   }
 
   const slipRaw = typeof b.slippagePct === 'string' ? Number(b.slippagePct) : b.slippagePct
@@ -120,7 +140,7 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const tradeSide =
     b.tradeSide === 'buy' || b.tradeSide === 'sell' ? b.tradeSide : 'both'
 
-  return { symbol, timeframe, strategyId, params, asset, size, slippagePct, cooldownSec, tradeSide }
+  return { symbol, timeframe, strategyId, params, asset, investment, leverage, size, slippagePct, cooldownSec, tradeSide }
 }
 
 interface PersistedSignalBot {
@@ -146,6 +166,9 @@ class SignalBot {
   private lastTradeAt = 0
   private tradesExecuted = 0
   private evaluating = false
+  // In budget mode (investment + leverage set), the effective trade size is
+  // computed from (investment × leverage) / currentPrice on the first tick.
+  private computedSize: number | null = null
   // True once the first poll has recorded the current bar — only bars that
   // close after that are genuine signals we should act on.
   private primed = false
@@ -183,6 +206,7 @@ class SignalBot {
       running: this.running,
       startedAt: this.startedAt,
       config: this.config,
+      computedSize: this.computedSize,
       lastSignal: this.lastSignal,
       lastSignalAt: this.lastSignalAt,
       lastClosedBarTime: this.lastClosedBarTime,
@@ -213,6 +237,8 @@ class SignalBot {
     // Skip the very first closed bar so we don't fire on an old signal.
     this.lastClosedBarTime = null
     this.primed = false
+    // Reset so budget mode re-computes size from the live price on first tick.
+    this.computedSize = null
     this.persist()
     this.log.ok(
       `Started — ${this.config.strategyId.toUpperCase()} on ` +
@@ -242,6 +268,19 @@ class SignalBot {
       if (candles.length < 30) {
         this.log.warn(`Only ${candles.length} candles — not enough to evaluate`)
         return
+      }
+
+      // Budget mode: derive order size from investment × leverage / current price.
+      // Computed once per session (resets on restart) so price drift doesn't
+      // silently change position size mid-run.
+      if (this.computedSize === null && cfg.investment && cfg.leverage) {
+        const livePrice = candles[candles.length - 1].close
+        this.computedSize = (cfg.investment * cfg.leverage) / livePrice
+        this.log.info(
+          `Budget mode: $${cfg.investment} × ${cfg.leverage}x` +
+            ` = $${(cfg.investment * cfg.leverage).toFixed(2)} notional` +
+            ` / ${livePrice} = ${this.computedSize.toFixed(6)} ${cfg.asset} per trade`,
+        )
       }
 
       // The last element is the still-forming bar; the one before it is the
@@ -283,13 +322,16 @@ class SignalBot {
         return
       }
 
+      const tradeSize = (cfg.investment && cfg.leverage && this.computedSize !== null)
+        ? this.computedSize
+        : cfg.size
       this.log.info(`${sig.toUpperCase()} signal on ${cfg.symbol} ${cfg.timeframe} close — executing`)
       this.lastTradeAt = Date.now()
       try {
         const result = await executeMarketTrade({
           asset: cfg.asset,
           side: sig,
-          size: cfg.size,
+          size: tradeSize,
           maxSlippagePct: cfg.slippagePct,
         })
         if (result.filled) this.tradesExecuted++
