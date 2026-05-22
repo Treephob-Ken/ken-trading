@@ -45,6 +45,7 @@ export type StrategyId =
   | 'cci'
   | 'williamsr'
   | 'elliott'
+  | 'traderxo'
 
 export interface ParamDef {
   key: string
@@ -199,6 +200,19 @@ export const STRATEGIES: StrategyMeta[] = [
     description: 'Buys at confirmed ZigZag pivot lows, sells at pivot highs.',
     params: [p('zigzag', 'ZigZag Threshold %', 1, 15, 0.5, 3)],
   },
+  {
+    id: 'traderxo',
+    name: 'Trader XO Macro Trend',
+    category: 'Trend',
+    description: 'EMA trend bias + StochRSI confirmation + long MA filter. Buys when price > MA, fast > slow EMA, and StochRSI K crosses above D below 50.',
+    params: [
+      p('fast', 'Fast EMA', 2, 50, 1, 12),
+      p('slow', 'Slow EMA', 5, 100, 1, 25),
+      p('maLen', 'MA Filter', 50, 500, 10, 200),
+      p('rsiLen', 'RSI Length', 2, 50, 1, 14),
+      p('stochLen', 'Stoch Length', 2, 50, 1, 14),
+    ],
+  },
 ]
 
 export function strategyMeta(id: StrategyId): StrategyMeta {
@@ -351,6 +365,27 @@ export function generateSignals(
         if (next < n) signals[next] = piv.kind === 'low' ? 'buy' : 'sell'
       }
       return signals
+    }
+    case 'traderxo': {
+      const fastEma = ema(closes, params.fast)
+      const slowEma = ema(closes, params.slow)
+      const maFilter = ema(closes, params.maLen)
+      const sr = stochRsi(closes, params.rsiLen, params.stochLen, 3, 3)
+      return buildSignals(
+        n,
+        (i) =>
+          fastEma[i] > slowEma[i] &&
+          crossUp(sr.k, sr.d, i) &&
+          sr.k[i] < 50 &&
+          sr.d[i] < 50 &&
+          closes[i] > maFilter[i],
+        (i) =>
+          fastEma[i] < slowEma[i] &&
+          crossDown(sr.k, sr.d, i) &&
+          sr.k[i] > 50 &&
+          sr.d[i] > 50 &&
+          closes[i] < maFilter[i],
+      )
     }
   }
 }

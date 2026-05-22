@@ -23,6 +23,7 @@ export type StrategyId =
   | 'cci'
   | 'williamsr'
   | 'elliott'
+  | 'traderxo'
 
 // Which side(s) the backtest is allowed to take.
 export type Direction = 'long' | 'short' | 'both'

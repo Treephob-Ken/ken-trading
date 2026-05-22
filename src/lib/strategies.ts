@@ -181,6 +181,20 @@ export const STRATEGIES: StrategyMeta[] = [
       'Detects 5-wave impulse structures using ZigZag pivot analysis. Draws wave labels (①–⑤), Fibonacci retracement zones, and extension targets. Buys at confirmed wave 2/4 lows, sells at wave 3/5 highs.',
     params: [p('zigzag', 'ZigZag Threshold %', 1, 15, 0.5, 3)],
   },
+  {
+    id: 'traderxo',
+    name: 'Trader XO Macro Trend',
+    category: 'Trend',
+    description:
+      'EMA trend bias (fast/slow) combined with StochRSI confirmation and a long-period MA filter. Buys when price is above the MA filter, fast EMA is above slow EMA, and StochRSI K crosses above D below 50. Sells on the mirror conditions.',
+    params: [
+      p('fast', 'Fast EMA', 2, 50, 1, 12),
+      p('slow', 'Slow EMA', 5, 100, 1, 25),
+      p('maLen', 'MA Filter', 50, 500, 10, 200),
+      p('rsiLen', 'RSI Length', 2, 50, 1, 14),
+      p('stochLen', 'Stoch Length', 2, 50, 1, 14),
+    ],
+  },
 ]
 
 export function strategyMeta(id: StrategyId): StrategyMeta {
@@ -650,6 +664,43 @@ export function generateSignals(
         mainLines: [{ id: 'zigzag', color: 'rgba(167,139,250,0.8)', data: zigzagData }],
         waveMarkers,
         priceLines,
+      }
+    }
+
+    case 'traderxo': {
+      const fastEma = ema(closes, params.fast)
+      const slowEma = ema(closes, params.slow)
+      const maFilter = ema(closes, params.maLen)
+      const sr = stochRsi(closes, params.rsiLen, params.stochLen, 3, 3)
+      return {
+        signals: buildSignals(
+          n,
+          (i) =>
+            fastEma[i] > slowEma[i] &&
+            crossUp(sr.k, sr.d, i) &&
+            sr.k[i] < 50 &&
+            sr.d[i] < 50 &&
+            closes[i] > maFilter[i],
+          (i) =>
+            fastEma[i] < slowEma[i] &&
+            crossDown(sr.k, sr.d, i) &&
+            sr.k[i] > 50 &&
+            sr.d[i] > 50 &&
+            closes[i] < maFilter[i],
+        ),
+        mainLines: [
+          { id: 'txoFast', color: '#3b9eff', data: toLine(times, fastEma) },
+          { id: 'txoSlow', color: '#ff9f43', data: toLine(times, slowEma) },
+          { id: 'txoMA', color: 'rgba(167,139,250,0.6)', data: toLine(times, maFilter) },
+        ],
+        subPane: {
+          title: 'StochRSI',
+          lines: [
+            { id: 'txoK', color: '#3b9eff', data: toLine(times, sr.k) },
+            { id: 'txoD', color: '#ff9f43', data: toLine(times, sr.d) },
+          ],
+          refLines: [20, 50, 80],
+        },
       }
     }
   }

@@ -33,6 +33,7 @@ const SHORT_NAMES: Record<StrategyId, string> = {
   williamsr: 'W%R',
   bollinger: 'BB',
   elliott: 'EW',
+  traderxo: 'TXO',
 }
 
 export default function CorrelationPanel({
