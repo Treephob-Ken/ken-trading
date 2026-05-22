@@ -13,7 +13,12 @@ import {
 import { GridBot } from './grid-bot.js'
 import { createClients } from './hyperliquid.js'
 import { clearLogBuffer, createLogger, getLogBuffer, log, onLog } from './logger.js'
-import { executeMarketTrade, getAccountState, parseTradeRequest } from './trade.js'
+import {
+  executeMarketTrade,
+  getAccountState,
+  listAssets,
+  parseTradeRequest,
+} from './trade.js'
 import {
   maybeAutostartSignalBot,
   parseSignalConfig,
@@ -281,6 +286,15 @@ app.post('/api/trade', async (req: Request, res: Response) => {
 // parameter inputs without duplicating the strategy definitions.
 app.get('/api/strategies', (_req: Request, res: Response) => {
   res.json(STRATEGIES)
+})
+
+// Tradeable Hyperliquid assets — populates the web UI currency picker.
+app.get('/api/assets', async (_req: Request, res: Response) => {
+  try {
+    res.json(await listAssets())
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
 })
 
 app.get('/api/signal/status', (_req: Request, res: Response) => {

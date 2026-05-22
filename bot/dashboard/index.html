@@ -81,6 +81,10 @@
     .field label { display: block; font-size: 10px; color: var(--dim); margin-bottom: 3px; letter-spacing: .03em; text-transform: uppercase; font-weight: 600; }
     .field input, .field select { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; color: var(--text); font-size: 13px; outline: none; font-family: inherit; transition: border-color .15s; }
     .field input:focus, .field select:focus { border-color: var(--brand); }
+    /* The native dropdown list renders with OS defaults (black on white) unless
+       option/optgroup colours are set explicitly — force the dark theme. */
+    select, select option, select optgroup { background: var(--surface-2); color: var(--text); }
+    select optgroup { font-weight: 600; }
     .field.full { grid-column: span 2; }
     .btn { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: opacity .15s, transform .08s; font-family: inherit; }
     .btn:active { transform: scale(.97); }
@@ -451,9 +455,10 @@
             <select id="st-strategy" onchange="onStrategyChange()"></select>
           </div>
           <div class="field">
-            <label>Binance Symbol</label>
-            <input id="st-symbol" type="text" placeholder="ETHUSDT" oninput="onSymbolInput()" />
+            <label>Currency / Market</label>
+            <select id="st-currency" onchange="onCurrencyChange()"></select>
           </div>
+          <input id="st-symbol" type="hidden" />
           <div class="field">
             <label>Timeframe</label>
             <select id="st-timeframe">
@@ -1121,7 +1126,7 @@
   async function initSignalPage() {
     if (stInitialized) return
     stInitialized = true
-    await loadStrategies()
+    await Promise.all([loadStrategies(), loadAssets()])
     await Promise.all([refreshSignalStatus(), loadSignalLogs()])
     stPollInterval = setInterval(refreshSignalStatus, 5000)
   }
@@ -1172,10 +1177,27 @@
     return params
   }
 
-  function onSymbolInput() {
-    const sym = $('st-symbol').value.trim().toUpperCase()
-    const asset = sym.replace(/USDT$|USDC$|BUSD$/, '')
-    if (asset && asset !== sym) $('st-asset').value = asset
+  // Currency picker — populated from the bot's Hyperliquid asset list so a user
+  // can only pick markets that actually exist. Candles are fetched from Binance
+  // as <asset>USDT; the order is placed on the <asset> Hyperliquid perp.
+  async function loadAssets() {
+    try {
+      const assets = await fetch('/api/assets').then((r) => r.json())
+      const sel = $('st-currency')
+      sel.innerHTML = ''
+      for (const a of (Array.isArray(assets) ? assets : [])) {
+        const opt = document.createElement('option')
+        opt.value = a
+        opt.textContent = a
+        sel.appendChild(opt)
+      }
+    } catch { /* dropdown stays empty if the bot is unreachable */ }
+  }
+
+  function onCurrencyChange() {
+    const asset = $('st-currency').value
+    $('st-asset').value = asset
+    $('st-symbol').value = asset + 'USDT'
   }
 
   // ── Status polling ──
@@ -1284,9 +1306,11 @@
     if (!cfg) return
     // Populate form only once on first load
     $('st-strategy').value  = cfg.strategyId || 'macd'
-    $('st-symbol').value    = cfg.symbol || 'ETHUSDT'
+    const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
+    $('st-currency').value  = cur
+    $('st-symbol').value    = cfg.symbol || (cur + 'USDT')
     $('st-timeframe').value = cfg.timeframe || '1h'
-    $('st-asset').value     = cfg.asset || ''
+    $('st-asset').value     = cfg.asset || cur
     $('st-size').value      = cfg.size ?? 0.1
     $('st-slippage').value  = cfg.slippagePct ?? 2
     $('st-cooldown').value  = cfg.cooldownSec ?? 60

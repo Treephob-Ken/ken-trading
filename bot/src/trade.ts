@@ -175,6 +175,18 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
   }
 }
 
+// The Hyperliquid perp universe — asset names available to trade. The web UI
+// uses this to populate its currency picker so a user can't type an asset that
+// Hyperliquid doesn't list.
+export async function listAssets(): Promise<string[]> {
+  const { info } = clients()
+  const [meta] = await info.metaAndAssetCtxs()
+  return meta.universe
+    .filter((u) => !u.isDelisted)
+    .map((u) => u.name)
+    .sort()
+}
+
 export interface AccountState {
   network: 'testnet' | 'mainnet'
   user: string
