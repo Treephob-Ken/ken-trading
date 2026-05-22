@@ -40,24 +40,24 @@ This is the key detail that makes login work cleanly. Use two subdomains of the
 
 | Subdomain | Serves | Hosted on |
 |---|---|---|
-| `app.yourdomain.com`  | the dashboard | Vercel (add it as a custom domain) |
-| `bot.yourdomain.com`  | the bot API   | Cloudflare Tunnel → your PC |
+| `app.garlic-trading.net`  | the dashboard | Vercel (add it as a custom domain) |
+| `bot.garlic-trading.net`  | the bot API   | Cloudflare Tunnel → your PC |
 
-Because both are under `yourdomain.com`, the Access login cookie covers both,
+Because both are under `garlic-trading.net`, the Access login cookie covers both,
 and `app → bot` requests are *same-site* so the cookie is sent.
 
 ### 2. Create the tunnel for the bot
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create trading-bot
-cloudflared tunnel route dns trading-bot bot.yourdomain.com
+cloudflared tunnel route dns trading-bot bot.garlic-trading.net
 ```
 Create `~/.cloudflared/config.yml`:
 ```yaml
 tunnel: trading-bot
 credentials-file: /path/to/<tunnel-id>.json
 ingress:
-  - hostname: bot.yourdomain.com
+  - hostname: bot.garlic-trading.net
     service: http://localhost:3001
   - service: http_status:404
 ```
@@ -69,7 +69,7 @@ cloudflared tunnel run trading-bot
 ### 3. Add the login with Cloudflare Access
 In the Cloudflare dashboard → **Zero Trust → Access → Applications → Add an
 application → Self-hosted**:
-- Application domain: `bot.yourdomain.com` (and add `app.yourdomain.com` too)
+- Application domain: `bot.garlic-trading.net` (and add `app.garlic-trading.net` too)
 - Add a policy → Action **Allow** → Include → **Emails** → list your email and
   your friend's email
 - Save.
@@ -80,7 +80,7 @@ whitelisted emails get through. **This is your login — you wrote no auth code.
 ### 4. Configure the bot
 In `bot/.env`:
 ```ini
-ALLOWED_ORIGINS=https://app.yourdomain.com
+ALLOWED_ORIGINS=https://app.garlic-trading.net
 # Trade safety caps — strongly recommended once the bot is remote-reachable:
 MAX_TRADE_NOTIONAL_USD=500
 ALLOWED_ASSETS=ETH,BTC,SOL
@@ -90,12 +90,12 @@ MAX_TRADES_PER_HOUR=20
 Restart the bot.
 
 ### 5. Point the dashboard at the bot
-- Build the Vercel frontend with `VITE_BOT_URL=https://bot.yourdomain.com`
+- Build the Vercel frontend with `VITE_BOT_URL=https://bot.garlic-trading.net`
   (set it in Vercel → Project → Settings → Environment Variables), **or**
 - Just type the URL into the **Bot URL** field on the Signal Trader page — it
   is saved in your browser.
 
-Done. Open `app.yourdomain.com`, log in via Cloudflare, and the dashboard drives
+Done. Open `app.garlic-trading.net`, log in via Cloudflare, and the dashboard drives
 your local bot.
 
 ---
@@ -114,7 +114,7 @@ This prints a random `https://<random>.trycloudflare.com` URL.
 ### 2. Set a token in `bot/.env`
 ```ini
 BOT_API_TOKEN=<paste-a-long-random-string-here>
-ALLOWED_ORIGINS=https://your-frontend.vercel.app
+ALLOWED_ORIGINS=https://app.garlic-trading.net
 MAX_TRADE_NOTIONAL_USD=500
 ALLOWED_ASSETS=ETH,BTC,SOL
 MAX_TRADES_PER_HOUR=20

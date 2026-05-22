@@ -69,7 +69,7 @@ HL_AGENT_PRIVATE_KEY=0x...your agent key...
 HL_USER_ADDRESS=0x...your main wallet...
 HL_NETWORK=testnet
 
-ALLOWED_ORIGINS=https://app.yourdomain.com
+ALLOWED_ORIGINS=https://app.garlic-trading.net
 MAX_TRADE_NOTIONAL_USD=500
 ALLOWED_ASSETS=ETH,BTC,SOL
 MAX_TRADES_PER_HOUR=20
@@ -92,7 +92,7 @@ Save with `Ctrl+O`, `Enter`, `Ctrl+X`.
    ```bash
    cloudflared tunnel login          # opens a URL — approve your domain
    cloudflared tunnel create trading-bot
-   cloudflared tunnel route dns trading-bot bot.yourdomain.com
+   cloudflared tunnel route dns trading-bot bot.garlic-trading.net
    ```
 
 4. **Tunnel config** — `nano ~/.cloudflared/config.yml`:
@@ -100,7 +100,7 @@ Save with `Ctrl+O`, `Enter`, `Ctrl+X`.
    tunnel: trading-bot
    credentials-file: /root/.cloudflared/<tunnel-id>.json
    ingress:
-     - hostname: bot.yourdomain.com
+     - hostname: bot.garlic-trading.net
        service: http://localhost:3001
      - service: http_status:404
    ```
@@ -108,7 +108,7 @@ Save with `Ctrl+O`, `Enter`, `Ctrl+X`.
 
 5. **Add the login** — Cloudflare dashboard → **Zero Trust → Access →
    Applications → Add an application → Self-hosted**:
-   - Domain: `bot.yourdomain.com` (add `app.yourdomain.com` too)
+   - Domain: `bot.garlic-trading.net` (add `app.garlic-trading.net` too)
    - Add a policy → Action **Allow** → Include → **Emails** → your email and
      your friend's email
    - Save.
@@ -129,12 +129,12 @@ The bot and the tunnel now restart on crash and after a server reboot.
 
 In **Vercel → your project → Settings → Environment Variables** add:
 ```
-VITE_BOT_URL = https://bot.yourdomain.com
+VITE_BOT_URL = https://bot.garlic-trading.net
 ```
 Redeploy. (Or skip this and just type the URL into the **Bot URL** field on the
 Signal Trader page — it is saved in your browser.)
 
-Optionally add `app.yourdomain.com` to Vercel as a custom domain, so the
+Optionally add `app.garlic-trading.net` to Vercel as a custom domain, so the
 dashboard and the bot share one parent domain and one Cloudflare login.
 
 ---
