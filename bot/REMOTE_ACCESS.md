@@ -131,6 +131,48 @@ can trade.
 
 ---
 
+## Running the bot 24/7
+
+The bot trades only while its process is alive. If the host sleeps or shuts
+down, the bot stops. A bot you rely on needs a host that stays on **and** a
+process manager that restarts it after a crash or reboot.
+
+### Best options, cheapest first
+
+| Host | Cost | Reliability | Notes |
+|---|---|---|---|
+| **Oracle Cloud "Always Free" VM** | **$0/mo** | High | A real Linux VPS, free forever. A card is needed at signup (not charged). Best zero-cost option. |
+| Old laptop / Raspberry Pi at home | one-time ~$0–50 | Medium–High | You own it, near-zero running cost. Pair with Cloudflare Tunnel — no router config needed. |
+| Cheap VPS (Hetzner ~€4/mo, DigitalOcean ~$6/mo) | ~$4–6/mo | High | Simplest and most reliable. Worth it if the free options frustrate you. |
+| Your own PC, always on | $0 + electricity | Low | Windows updates reboot it, sleep stops it. Fine for testing, not for real money. |
+
+**Recommendation:** start with **Oracle Cloud Always Free** — a genuine
+always-on server for $0. If its signup or ARM-capacity limits annoy you, a
+~€4/mo Hetzner VPS is the no-hassle choice. Avoid free hosts that "sleep on
+idle" (e.g. Render free tier) — a sleeping bot misses trades.
+
+### Keep it alive with pm2 (any Linux host)
+
+`pm2` restarts the bot if it crashes and relaunches it after a reboot:
+```bash
+npm install -g pm2
+cd bot
+pm2 start "npm run serve" --name trading-bot
+pm2 start "cloudflared tunnel run trading-bot" --name tunnel
+pm2 save
+pm2 startup        # run the line it prints — enables start-on-boot
+```
+Both the bot and the tunnel are now supervised. Use `pm2 logs` to watch them
+and `pm2 restart trading-bot` to bounce the bot.
+
+### Windows PC always-on (testing only)
+
+If you keep it on your PC: disable sleep (Settings → Power → Sleep → Never) and
+add `start_bot.bat` to Task Scheduler set to run "at log on". This survives
+reboots but not Windows updates — don't trust it with real funds.
+
+---
+
 ## Security checklist
 
 - [ ] **Agent wallet only.** `HL_AGENT_PRIVATE_KEY` must be a Hyperliquid *API
