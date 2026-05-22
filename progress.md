@@ -120,7 +120,7 @@ Connecting React web app's live indicator signals (BUY/SELL) to the local tradin
 
 ---
 
-### Phase 5 — Signal Trader: autonomous indicator bot + dedicated page (current)
+### Phase 5 — Signal Trader: autonomous indicator bot + dedicated page
 
 Re-architected the Phase 4 live-trading feature. The strategy now runs **inside the
 bot** (autonomous, server-side) instead of in the browser, and it has its own page
@@ -160,17 +160,73 @@ view/control layer — closing and reopening the tab re-fetches all state from t
 
 ---
 
+### Phase 6 — Remote Access, VPS Hosting, & Security Hardening (current)
+
+Connecting and securing the local bot for 24/7 VPS hosting and remote control from a hosted/published dashboard.
+
+#### Bot (bot/)
+
+- **Strict CORS & SameSite Cookie Credentials**:
+  - Restricts origins to `localhost` by default, but allows arbitrary domains/origins via the `ALLOWED_ORIGINS` environment variable.
+  - Reflects `Access-Control-Allow-Credentials: true` to support Zero Trust (e.g. Cloudflare Access) authentication cookies.
+- **API Token Shared-Secret Protection**:
+  - Added optional `BOT_API_TOKEN` environment variable security gate.
+  - Requests to `/api/*` are blocked unless authenticated with `Authorization: Bearer <token>` or a `?token=` query parameter (allowing EventSource SSE streams).
+- **Server-Side Safety Caps (`bot/src/limits.ts`)**:
+  - Enforced strict trade execution limits server-side to limit financial exposure:
+    - `MAX_TRADE_NOTIONAL_USD`: Caps the maximum allowed USD value of a single order.
+    - `ALLOWED_ASSETS`: Configures a whitelist of tradeable perp assets.
+    - `MAX_TRADES_PER_HOUR`: Limits the hourly trade frequency using a rolling 60-minute window.
+- **NDJSON Trade Audit Log**:
+  - Appends detailed records of every trade execution (both fills and failures) with timestamps, sizes, fill prices, and notional USD amounts to a persistent `bot/trade-audit.log`.
+- **Live Asset Endpoint**:
+  - Added `GET /api/assets` to query the active, non-delisted perp markets directly from Hyperliquid.
+
+#### Web App & Dashboard (src/)
+
+- **Dynamic Currency Picker**:
+  - Replaced the free-text `Binance Symbol` field with a dropdown populated from the bot's dynamic asset list, ensuring only tradeable Hyperliquid assets are chosen.
+- **Persistent Connection Credentials**:
+  - Added `Bot URL` and `API Token` inputs stored locally in the browser (`localStorage`) so users can securely direct the dashboard to their VPS tunnel without exposing credentials.
+  - Replaced the hard-coded localhost logic so the hosted dashboard (Vercel) can interact with remote bots.
+- **Dropdown Readability & Styling Polish**:
+  - Fixed native dropdown text rendering black-on-black or black-on-dark in Chrome/OS defaults by explicitly styling `<select>`, `<option>`, and `<optgroup>` with dark theme colors.
+  - Added `color-scheme: dark` to the dashboard `:root` style.
+  - Polished the dashboard buttons and panels with violet glow effects, shadow depth, and scale-down active click transitions.
+
+#### Multiple concurrent signal traders + UX overhaul
+
+- **Multi-bot signal manager (`bot/src/signal-bot.ts`)**:
+  - Refactored the single signal bot into a multi-bot manager mirroring the grid-bot pattern — each `SignalBot` has its own id, config, scoped logger (`signal-<id>`), and persisted state file in `bot/signal-bots/`.
+  - Legacy `signal-bot.json` is auto-migrated on first boot; every bot that was running resumes on restart.
+  - New API: `/api/signal/bots` CRUD plus per-bot `start` / `stop` / `logs`.
+- **Dashboard Signal Trader rebuilt** with a bot-list sidebar — add / select / delete bots, each with independent config, status, account, and activity log.
+- **Searchable comboboxes** (vanilla JS, no library) for the strategy and 169-market currency pickers — type to filter, arrows + Enter to select. Replaces the native `<select>` (also fixes the black-text and long-scroll issues).
+- **No-save Start flow** — the separate "Save Config" step is gone; config auto-saves, and **Start** applies the form after a confirmation popup. Manual Buy/Sell confirm first too. The form locks while a bot runs; the redundant Hyperliquid Asset field was removed (the currency picker is the single source).
+
+#### Guides & Documentation
+
+- **`bot/REMOTE_ACCESS.md`**:
+  - Full instructions for tunneling the bot to the web: Setup A (Cloudflare Tunnel + Zero Trust Access for passwordless email login) and Setup B (plain tunnel + API token authorization).
+  - Guides on choosing a 24/7 host (Oracle Cloud Free Tier vs. cheap VPS) and managing the process via `pm2`.
+- **`bot/DEPLOY_VPS.md`**:
+  - Step-by-step walkthrough to deploy the bot on a fresh Ubuntu VPS (Hetzner), install Node, clone the repository, configure Zero Trust, configure `.env` safety limits, and configure `pm2` autostart.
+
+---
+
 ## Current state
 
 | Area | Status |
 |---|---|
 | Web app (Vercel) | ✅ deployed — garlic-trading.vercel.app |
 | Bot (local) | ✅ running — `cd bot && npm start` |
-| GitHub | ✅ pushed to master & new branch `autotrade` created |
+| GitHub | ✅ pushed to master & new branch `trigger-bot` created |
 | SL/TP on Hyperliquid | ✅ verified — correct trigger conditions confirmed in order history |
-| Multi-bot | ✅ working — manage via dashboard at `http://localhost:3001` |
-| Signal Trader | ✅ verified — autonomous indicator bot, 3rd tab, localhost-gated |
-| Trade API security | ✅ CORS locked to localhost; input validated; slippage capped |
+| Multi-bot (grid) | ✅ working — manage via dashboard at `http://localhost:3001` |
+| Signal Trader | ✅ multi-bot — multiple concurrent indicator traders, each independently configured |
+| Trade API security | ✅ verified — CORS locked; API token gate; server safety caps; audit log |
+| Remote access | ✅ live — Cloudflare Tunnel + Access at `bot.garlic-trading.net` (running from local PC) |
+| 24/7 VPS hosting | ⏳ next — deploy to Hetzner (see `futureplan.md` / `bot/DEPLOY_VPS.md`) |
 
 ---
 
@@ -179,7 +235,6 @@ view/control layer — closing and reopening the tab re-fetches all state from t
 - Grid lines not visible on bot dashboard chart (GridChart not re-rendering after config load)
 - No position sizing for "both" direction grids (current formula assumes long-only)
 - Grid bot has no auto-restart on crash (the Signal Trader does — resumes from saved state)
-- Signal Trader supports one bot at a time (grid bots support many)
 - Signal Trader polls candles every 30s rather than streaming on candle close
 - No webhook / alert when SL or TP triggers
 
