@@ -472,6 +472,24 @@
     <!-- SIGNAL SIDEBAR -->
     <div class="st-sidebar">
 
+      <!-- Signal Bot list -->
+      <div class="panel">
+        <div class="panel-title">
+          <span>Signal Bots</span>
+          <span id="st-bot-count" style="font-family:monospace;font-weight:500;color:var(--text)">0</span>
+        </div>
+        <div id="st-bot-list" class="bot-list"></div>
+        <button class="btn btn-new" style="width:100%;margin-top:10px" onclick="newSignalBot()">+ New Signal Bot</button>
+      </div>
+
+      <!-- Empty state when no bot is selected -->
+      <div id="st-no-selection" class="bot-empty" style="display:none">
+        Pick a signal bot above, or create one with + New Signal Bot.
+      </div>
+
+      <!-- Config section (for the selected bot) -->
+      <div id="st-config-section">
+
       <!-- Strategy Config Panel -->
       <div class="panel">
         <div class="panel-title">Strategy Config</div>
@@ -543,10 +561,10 @@
       <!-- Manual Trade -->
       <div class="panel">
         <div class="panel-title">Manual Trade</div>
-        <div style="font-size:11px;color:var(--dim);margin-bottom:8px">One-off order at current price (uses saved asset + size + slippage)</div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:8px">One-off market order using this bot's currency, size &amp; slippage.</div>
         <div class="st-manual">
-          <button class="btn-buy" id="st-buy-btn" onclick="stManualTrade('buy')" disabled>▲ Buy</button>
-          <button class="btn-sell" id="st-sell-btn" onclick="stManualTrade('sell')" disabled>▼ Sell</button>
+          <button class="btn-buy" id="st-buy-btn" onclick="stManualTrade('buy')">▲ Buy</button>
+          <button class="btn-sell" id="st-sell-btn" onclick="stManualTrade('sell')">▼ Sell</button>
         </div>
       </div>
 
@@ -557,9 +575,12 @@
           <button id="st-start-btn" class="btn btn-start" style="width:100%;padding:11px" onclick="startSignalBot()">▶ Start Auto-Trading</button>
           <button id="st-stop-btn" class="btn btn-stop" style="width:100%;padding:11px" onclick="stopSignalBot()" disabled>■ Stop</button>
           <div id="st-running-hint" style="display:none;font-size:11px;color:var(--warn);text-align:center">● Running — press Stop to change settings</div>
-          <div style="font-size:11px;color:var(--dim);text-align:center">Start applies your settings — no separate save needed</div>
+          <div id="st-autosave-hint" style="font-size:11px;color:var(--dim);text-align:center">Changes save automatically · Start asks to confirm</div>
+          <button class="btn" style="width:100%;margin-top:2px;background:transparent;color:var(--loss);border:1px solid rgba(239,68,68,.4)" onclick="deleteSignalBot()">🗑 Delete this bot</button>
         </div>
       </div>
+
+      </div><!-- /st-config-section -->
 
     </div>
 
@@ -1144,6 +1165,9 @@
   // ════════════════════════════════════════════════════════
   let stStrategies = []
   let stStatus = null
+  let stBots = []
+  let stSelectedId = null
+  let stSaveTimer = null
   let stSignalAutoScroll = true
   let stSignalFilter = 'all'
   let stSignalLogCount = 0
@@ -1219,11 +1243,12 @@
   async function initSignalPage() {
     if (stInitialized) return
     stInitialized = true
-    stStrategyCombo = createCombo('st-strategy-combo', onStrategyPicked)
+    stStrategyCombo = createCombo('st-strategy-combo', onStrategyChanged)
     stCurrencyCombo = createCombo('st-currency-combo', onCurrencyPicked)
+    wireAutoSave()
     await Promise.all([loadStrategies(), loadAssets()])
-    await Promise.all([refreshSignalStatus(), loadSignalLogs()])
-    stPollInterval = setInterval(refreshSignalStatus, 5000)
+    await loadSignalBots()
+    stPollInterval = setInterval(pollSignal, 5000)
   }
 
   async function loadStrategies() {
@@ -1233,9 +1258,42 @@
     } catch { showToast('Could not load strategies — is the bot running?', true) }
   }
 
-  function onStrategyPicked(id) {
+  function onStrategyChanged(id) {
     const strat = stStrategies.find(s => s.id === id)
     if (strat) renderStrategyParams(strat.id, strat.params, {})
+    scheduleSave()
+  }
+
+  // Auto-save: any config change is persisted to the selected bot after a
+  // short debounce — no separate Save button.
+  function wireAutoSave() {
+    ['st-timeframe', 'st-size', 'st-slippage', 'st-cooldown', 'st-direction'].forEach((id) => {
+      const el = $(id); if (el) el.addEventListener('change', scheduleSave)
+    })
+    $('st-params-grid').addEventListener('change', scheduleSave)
+  }
+  function scheduleSave() {
+    if (!stSelectedId || (stStatus && stStatus.running)) return
+    clearTimeout(stSaveTimer)
+    stSaveTimer = setTimeout(saveCurrentBot, 450)
+  }
+  async function saveCurrentBot() {
+    if (!stSelectedId) return
+    const cfg = collectSignalConfig(true)
+    if (!cfg) return
+    try {
+      await apiCall('/api/signal/bots/' + stSelectedId, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: cfg }),
+      })
+      const hint = $('st-autosave-hint')
+      hint.textContent = '✓ Saved'; hint.style.color = 'var(--gain)'
+      setTimeout(() => {
+        hint.textContent = 'Changes save automatically · Start asks to confirm'
+        hint.style.color = 'var(--dim)'
+      }, 1500)
+      loadSignalBots()
+    } catch (e) { showToast(e.message, true) }
   }
 
   function renderStrategyParams(stratId, paramDefs, currentValues) {
@@ -1276,30 +1334,140 @@
   function onCurrencyPicked(asset) {
     $('st-asset').value = asset
     $('st-symbol').value = asset + 'USDT'
+    scheduleSave()
   }
 
-  // ── Status polling ──
-  async function refreshSignalStatus() {
+  // ── Bot list ──
+  async function loadSignalBots() {
+    try { stBots = await fetch('/api/signal/bots').then(r => r.json()) }
+    catch { stBots = [] }
+    if (!Array.isArray(stBots)) stBots = []
+    renderSignalBotList()
+    if (stSelectedId && stBots.find(b => b.id === stSelectedId)) return
+    if (stBots.length) { selectSignalBot(stBots[0].id); return }
+    stSelectedId = null
+    showSignalEmpty()
+  }
+
+  function renderSignalBotList() {
+    const list = $('st-bot-list'); list.innerHTML = ''
+    $('st-bot-count').textContent = stBots.length
+    const anyRunning = stBots.some(b => b.running)
+    const dot = $('dot-signal')
+    if (anyRunning) { dot.style.background = '#22c55e'; dot.style.boxShadow = '0 0 6px #22c55e'; dot.style.animation = 'pulse 2s ease-in-out infinite' }
+    else { dot.style.background = ''; dot.style.boxShadow = ''; dot.style.animation = '' }
+    if (!stBots.length) { list.innerHTML = '<div class="bot-empty">No signal bots yet</div>'; return }
+    for (const b of stBots) {
+      const item = document.createElement('div')
+      item.className = 'bot-item' + (b.id === stSelectedId ? ' active' : '') + (b.running ? ' running' : '')
+      item.onclick = () => selectSignalBot(b.id)
+      item.innerHTML =
+        `<div class="bot-dot"></div><div class="bot-info">` +
+        `<div class="bot-name">${escHtml(b.name)}</div>` +
+        `<div class="bot-meta">${escHtml(String(b.strategyId).toUpperCase())} · ${escHtml(b.symbol)} · ${escHtml(b.timeframe)}</div></div>`
+      list.appendChild(item)
+    }
+  }
+
+  function showSignalEmpty() {
+    $('st-config-section').style.display = 'none'
+    $('st-no-selection').style.display = 'block'
+    $('st-banner').className = 'st-banner stopped'
+    $('st-banner-strategy').textContent = 'No signal bot selected'
+    $('st-banner-meta').textContent = 'Create one with + New Signal Bot'
+    $('st-state-pill').className = 'pill stopped'
+    $('st-state-pill').textContent = '—'
+    $('st-log-context').style.display = 'none'
+    stLogBox().innerHTML = '<div class="log-empty">Select a signal bot to see its activity</div>'
+  }
+
+  async function selectSignalBot(id) {
+    stSelectedId = id
+    $('st-config-section').style.display = ''
+    $('st-no-selection').style.display = 'none'
+    renderSignalBotList()
     try {
-      const [status, account] = await Promise.all([
-        fetch('/api/signal/status').then(r => r.json()),
-        fetch('/api/account' + (stStatus?.config?.asset ? '?asset=' + stStatus.config.asset : '')).then(r => r.json()),
-      ])
+      const status = await fetch('/api/signal/bots/' + id).then(r => r.json())
+      if (status.error) { showToast(status.error, true); return }
       stStatus = status
+      populateForm(status.config)
       renderSignalBanner(status)
       renderSignalStats(status)
+      await loadSignalLogs()
+      refreshAccount()
+    } catch (e) { showToast(e.message, true) }
+  }
+
+  async function newSignalBot() {
+    try {
+      const status = await apiCall('/api/signal/bots', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: '', config: {
+          strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {},
+          asset: 'ETH', size: 0.01, slippagePct: 2, cooldownSec: 60, tradeSide: 'both',
+        } }),
+      })
+      showToast('Signal bot created')
+      stSelectedId = status.id
+      await loadSignalBots()
+      selectSignalBot(status.id)
+    } catch (e) { showToast(e.message, true) }
+  }
+
+  async function deleteSignalBot() {
+    if (!stSelectedId) return
+    const b = stBots.find(x => x.id === stSelectedId)
+    if (!confirm(`Delete signal bot "${b ? b.name : stSelectedId}"?\n\nThis stops it and removes it permanently.`)) return
+    try {
+      await apiCall('/api/signal/bots/' + stSelectedId, { method: 'DELETE' })
+      showToast('Signal bot deleted')
+      stSelectedId = null
+      await loadSignalBots()
+    } catch (e) { showToast(e.message, true) }
+  }
+
+  // Populate the config form from a bot's saved config (only on selection).
+  function populateForm(cfg) {
+    if (!cfg) return
+    stStrategyCombo.setValue(cfg.strategyId)
+    const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
+    stCurrencyCombo.setValue(cur)
+    $('st-symbol').value    = cfg.symbol || (cur + 'USDT')
+    $('st-asset').value     = cfg.asset || cur
+    $('st-timeframe').value = cfg.timeframe || '1h'
+    $('st-size').value      = cfg.size ?? 0.01
+    $('st-slippage').value  = cfg.slippagePct ?? 2
+    $('st-cooldown').value  = cfg.cooldownSec ?? 60
+    $('st-direction').value = cfg.tradeSide || 'both'
+    const strat = stStrategies.find(s => s.id === cfg.strategyId)
+    if (strat) renderStrategyParams(cfg.strategyId, strat.params, cfg.params || {})
+  }
+
+  // ── Polling — refreshes the list and the selected bot's status ──
+  async function pollSignal() {
+    await loadSignalBots()
+    if (!stSelectedId) return
+    try {
+      const status = await fetch('/api/signal/bots/' + stSelectedId).then(r => r.json())
+      if (status && !status.error) {
+        stStatus = status
+        renderSignalBanner(status)
+        renderSignalStats(status)
+      }
+    } catch { /* ignore */ }
+    refreshAccount()
+  }
+
+  async function refreshAccount() {
+    const asset = stStatus?.config?.asset
+    try {
+      const account = await fetch('/api/account' + (asset ? '?asset=' + asset : '')).then(r => r.json())
       renderSignalAccount(account)
-      syncFormToStatus(status)
-      // Manual trade is available whenever the bot is reachable.
-      $('st-buy-btn').disabled  = false
-      $('st-sell-btn').disabled = false
-      // Update Signal Trader tab dot
-      const dot = $('dot-signal')
-      if (status.running) { dot.style.background = '#22c55e'; dot.style.boxShadow = '0 0 6px #22c55e'; dot.style.animation = 'pulse 2s ease-in-out infinite' }
-      else { dot.style.background = ''; dot.style.boxShadow = ''; dot.style.animation = '' }
-      // Network badge
-      if (account.network) { $('st-network-badge').textContent = account.network === 'testnet' ? '· Testnet ⚠' : '· Mainnet'; $('st-network-badge').style.color = account.network === 'testnet' ? '#f59e0b' : '#22c55e' }
-    } catch { /* ignore transient errors */ }
+      if (account.network) {
+        $('st-network-badge').textContent = account.network === 'testnet' ? '· Testnet ⚠' : '· Mainnet'
+        $('st-network-badge').style.color = account.network === 'testnet' ? '#f59e0b' : '#22c55e'
+      }
+    } catch { /* ignore */ }
   }
 
   function getStrategyLabel(id) {
@@ -1385,36 +1553,16 @@
     }
   }
 
-  let stFormSynced = false
-  function syncFormToStatus(status) {
-    if (stFormSynced || !stStrategies.length) return
-    const cfg = status.config
-    if (!cfg) return
-    // Populate the form once from the bot's saved config (re-runs after start/stop).
-    stStrategyCombo.setValue(cfg.strategyId || 'macd')
-    const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
-    stCurrencyCombo.setValue(cur)
-    $('st-symbol').value    = cfg.symbol || (cur + 'USDT')
-    $('st-timeframe').value = cfg.timeframe || '1h'
-    $('st-asset').value     = cfg.asset || cur
-    $('st-size').value      = cfg.size ?? 0.1
-    $('st-slippage').value  = cfg.slippagePct ?? 2
-    $('st-cooldown').value  = cfg.cooldownSec ?? 60
-    $('st-direction').value = cfg.tradeSide || 'both'
-    const strat = stStrategies.find(s => s.id === cfg.strategyId)
-    if (strat) renderStrategyParams(cfg.strategyId, strat.params, cfg.params || {})
-    stFormSynced = true
-  }
-
-  // Build a config object straight from the form. Returns null (with a toast)
-  // if anything required is missing.
-  function collectSignalConfig() {
+  // Build a config object straight from the form. Returns null if a required
+  // field is missing — silent mode skips the toast (used by auto-save).
+  function collectSignalConfig(silent) {
     const stratId = stStrategyCombo.getValue()
     const asset = (stCurrencyCombo.getValue() || $('st-asset').value).trim().toUpperCase()
-    if (!stratId) { showToast('Pick a strategy', true); return null }
-    if (!asset)   { showToast('Pick a currency', true); return null }
+    const warn = (m) => { if (!silent) showToast(m, true) }
+    if (!stratId) { warn('Pick a strategy'); return null }
+    if (!asset)   { warn('Pick a currency'); return null }
     const size = parseFloat($('st-size').value)
-    if (!(size > 0)) { showToast('Order size must be greater than 0', true); return null }
+    if (!(size > 0)) { warn('Order size must be greater than 0'); return null }
     return {
       strategyId:  stratId,
       symbol:      asset + 'USDT',
@@ -1428,8 +1576,9 @@
     }
   }
 
-  // ── Start / stop — no separate save step; Start applies the form directly. ──
+  // ── Start / stop the selected bot ──
   async function startSignalBot() {
+    if (!stSelectedId) { showToast('Select a signal bot first', true); return }
     const cfg = collectSignalConfig()
     if (!cfg) return
     const dir = { both: 'Buy & Sell signals', buy: 'Buy signals only', sell: 'Sell signals only' }[cfg.tradeSide]
@@ -1444,21 +1593,21 @@
     if (!ok) return
     $('st-start-btn').disabled = true
     try {
-      await apiCall('/api/signal/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) })
-      await apiCall('/api/signal/start', { method: 'POST' })
+      await apiCall('/api/signal/bots/' + stSelectedId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: cfg }) })
+      await apiCall('/api/signal/bots/' + stSelectedId + '/start', { method: 'POST' })
       showToast('Auto-trading started')
-      stFormSynced = false
-      await refreshSignalStatus()
-      await loadSignalLogs()
+      await selectSignalBot(stSelectedId)
+      loadSignalBots()
     } catch (e) { showToast(e.message, true); $('st-start-btn').disabled = false }
   }
 
   async function stopSignalBot() {
+    if (!stSelectedId) return
     $('st-stop-btn').disabled = true
-    try { await apiCall('/api/signal/stop', { method: 'POST' }); showToast('Auto-trading stopped') }
+    try { await apiCall('/api/signal/bots/' + stSelectedId + '/stop', { method: 'POST' }); showToast('Auto-trading stopped') }
     catch (e) { showToast(e.message, true) }
-    stFormSynced = false
-    await refreshSignalStatus()
+    await selectSignalBot(stSelectedId)
+    loadSignalBots()
   }
 
   async function stManualTrade(side) {
@@ -1476,7 +1625,7 @@
       })
       if (result.filled) showToast(`${side.toUpperCase()} filled ${result.filledSize} ${asset} @ $${Number(result.avgPx).toFixed(2)}`)
       else showToast(result.message || 'Not filled — try higher slippage', true)
-      await refreshSignalStatus()
+      refreshAccount()
     } catch (e) { showToast(e.message, true) }
     finally { btn.disabled = false }
   }
@@ -1485,8 +1634,9 @@
   function stLogIsVisible(level) { if (stSignalFilter === 'all') return true; return stSignalFilter.split(' ').includes(level) }
 
   function appendSignalLog(line) {
-    // Show signal-bot lines and global server lines (trade.ts uses _server logger)
-    if (line.botId && line.botId !== 'signal' && line.botId !== '_server') return
+    // Only the selected bot's lines, plus global trade logs (trade.ts → _server).
+    if (!stSelectedId) return
+    if (line.botId !== 'signal-' + stSelectedId && line.botId !== '_server') return
     const empty = stLogBox().querySelector('.log-empty'); if (empty) empty.remove()
     const row = document.createElement('div')
     const level = line.level || 'info'
@@ -1523,11 +1673,12 @@
   })
 
   async function loadSignalLogs() {
+    if (!stSelectedId) return
     try {
-      const logs = await fetch('/api/signal/logs').then(r => r.json())
+      const logs = await fetch('/api/signal/bots/' + stSelectedId + '/logs').then(r => r.json())
       stLogBox().innerHTML = ''; stSignalLogCount = 0
-      for (const line of logs) appendSignalLog(line)
-      if (!logs.length) stLogBox().innerHTML = '<div class="log-empty">No activity yet — start the bot to see logs</div>'
+      for (const line of (Array.isArray(logs) ? logs : [])) appendSignalLog(line)
+      if (!stLogBox().children.length) stLogBox().innerHTML = '<div class="log-empty">No activity yet — start the bot to see logs</div>'
     } catch { /* ignore */ }
   }
 
@@ -1539,7 +1690,7 @@
     es.onmessage = (e) => {
       const line = JSON.parse(e.data)
       // Grid bot: reload on lifecycle events
-      if (line.botId !== '_server' && line.botId !== 'signal' && (
+      if (line.botId !== '_server' && !String(line.botId).startsWith('signal-') && (
           line.msg.includes('Bot live') || line.msg.includes('Bot HALTED') ||
           (line.msg.includes('Cancelled') && line.msg.includes('orders')))) {
         loadBots()

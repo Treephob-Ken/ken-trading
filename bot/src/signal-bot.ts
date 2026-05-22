@@ -1,19 +1,25 @@
-// Indicator-signal trading bot.
+// Indicator-signal trading bots.
 //
-// Unlike the grid bot, this engine evaluates a technical strategy on a
-// timeframe of candles and fires a market order whenever a fresh BUY/SELL
-// signal prints on a newly-closed bar. It runs entirely server-side so it
-// keeps trading with no browser open; the web UI is just a view/control
-// layer that reads state back from here.
+// Each SignalBot evaluates one technical strategy on one market and fires a
+// market order whenever a fresh BUY/SELL signal prints on a newly-closed bar.
+// Multiple bots run concurrently in the same process — each with its own
+// config, scoped logger, and persisted state file — mirroring the multi grid
+// bot setup. The web UI is a view/control layer; all state reads back here.
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createLogger, type Logger } from './logger.js'
+import { clearLogBuffer, createLogger, type Logger } from './logger.js'
 import { fetchKlines } from './strategy/market-data.js'
 import {
   STRATEGIES,
-  defaultParams,
   generateSignals,
   type Signal,
   type StrategyId,
@@ -21,9 +27,9 @@ import {
 import { executeMarketTrade } from './trade.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const STATE_PATH = join(__dirname, '..', 'signal-bot.json')
+const SIGNAL_DIR = join(__dirname, '..', 'signal-bots')
+const LEGACY_PATH = join(__dirname, '..', 'signal-bot.json')
 
-const BOT_ID = 'signal'
 const POLL_MS = 30_000
 const CANDLE_LIMIT = 400
 const VALID_TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d']
@@ -41,6 +47,8 @@ export interface SignalBotConfig {
 }
 
 export interface SignalBotStatus {
+  id: string
+  name: string
   running: boolean
   startedAt: number | null
   config: SignalBotConfig
@@ -52,16 +60,13 @@ export interface SignalBotStatus {
   tradesExecuted: number
 }
 
-const DEFAULT_CONFIG: SignalBotConfig = {
-  symbol: 'ETHUSDT',
-  timeframe: '1h',
-  strategyId: 'macd',
-  params: defaultParams('macd'),
-  asset: 'ETH',
-  size: 0.1,
-  slippagePct: 2,
-  cooldownSec: 60,
-  tradeSide: 'both',
+export interface SignalBotSummary {
+  id: string
+  name: string
+  running: boolean
+  strategyId: StrategyId
+  symbol: string
+  timeframe: string
 }
 
 // Validate a raw config object into a typed SignalBotConfig. Throws on bad
@@ -118,29 +123,18 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   return { symbol, timeframe, strategyId, params, asset, size, slippagePct, cooldownSec, tradeSide }
 }
 
-interface PersistedState {
+interface PersistedSignalBot {
+  id: string
+  name: string
   config: SignalBotConfig
   running: boolean
 }
 
-function readState(): PersistedState {
-  if (existsSync(STATE_PATH)) {
-    try {
-      const raw = JSON.parse(readFileSync(STATE_PATH, 'utf8'))
-      return {
-        config: parseSignalConfig(raw.config),
-        running: Boolean(raw.running),
-      }
-    } catch {
-      /* fall through to defaults */
-    }
-  }
-  return { config: { ...DEFAULT_CONFIG }, running: false }
-}
-
 class SignalBot {
+  readonly id: string
+  name: string
   private config: SignalBotConfig
-  private log: Logger = createLogger(BOT_ID)
+  private log: Logger
   private timer: NodeJS.Timeout | null = null
   private running = false
   private startedAt: number | null = null
@@ -152,26 +146,40 @@ class SignalBot {
   private lastTradeAt = 0
   private tradesExecuted = 0
   private evaluating = false
+  // True once the first poll has recorded the current bar — only bars that
+  // close after that are genuine signals we should act on.
+  private primed = false
 
-  constructor() {
-    const state = readState()
-    this.config = state.config
+  constructor(id: string, name: string, config: SignalBotConfig) {
+    this.id = id
+    this.name = name
+    this.config = config
+    this.log = createLogger('signal-' + id)
   }
 
   getConfig(): SignalBotConfig {
     return this.config
   }
 
-  // Replace the config. Only allowed while stopped — a running strategy
-  // shouldn't have the ground shift under it mid-evaluation.
-  setConfig(cfg: SignalBotConfig): void {
-    if (this.running) throw new Error('Stop the signal bot before changing its config')
-    this.config = cfg
-    this.persist()
+  isRunning(): boolean {
+    return this.running
+  }
+
+  summary(): SignalBotSummary {
+    return {
+      id: this.id,
+      name: this.name,
+      running: this.running,
+      strategyId: this.config.strategyId,
+      symbol: this.config.symbol,
+      timeframe: this.config.timeframe,
+    }
   }
 
   getStatus(): SignalBotStatus {
     return {
+      id: this.id,
+      name: this.name,
       running: this.running,
       startedAt: this.startedAt,
       config: this.config,
@@ -184,18 +192,30 @@ class SignalBot {
     }
   }
 
+  // Replace the config. Only allowed while stopped — a running strategy
+  // shouldn't have the ground shift under it mid-evaluation.
+  setConfig(cfg: SignalBotConfig): void {
+    if (this.running) throw new Error('Stop the bot before changing its config')
+    this.config = cfg
+    this.persist()
+  }
+
+  rename(name: string): void {
+    this.name = name.trim() || this.name
+    this.persist()
+  }
+
   start(): void {
     if (this.running) return
     this.running = true
     this.startedAt = Date.now()
     this.lastError = null
-    // Skip the very first closed bar so we don't fire on an old signal the
-    // moment the bot starts — only act on bars that close from now on.
+    // Skip the very first closed bar so we don't fire on an old signal.
     this.lastClosedBarTime = null
     this.primed = false
     this.persist()
     this.log.ok(
-      `Signal bot started — ${this.config.strategyId.toUpperCase()} on ` +
+      `Started — ${this.config.strategyId.toUpperCase()} on ` +
         `${this.config.symbol} ${this.config.timeframe}`,
     )
     void this.tick()
@@ -205,15 +225,11 @@ class SignalBot {
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
-    if (this.running) this.log.warn('Signal bot stopped')
+    if (this.running) this.log.warn('Stopped')
     this.running = false
     this.startedAt = null
     this.persist()
   }
-
-  // True once the first poll has recorded the current bar — subsequent new
-  // bars are genuine closes that happened while we were watching.
-  private primed = false
 
   private async tick(): Promise<void> {
     if (this.evaluating) return
@@ -290,23 +306,135 @@ class SignalBot {
     }
   }
 
-  private persist(): void {
-    const state: PersistedState = { config: this.config, running: this.running }
+  persist(): void {
+    const state: PersistedSignalBot = {
+      id: this.id,
+      name: this.name,
+      config: this.config,
+      running: this.running,
+    }
     try {
-      writeFileSync(STATE_PATH, JSON.stringify(state, null, 2))
+      ensureDir()
+      writeFileSync(join(SIGNAL_DIR, this.id + '.json'), JSON.stringify(state, null, 2))
     } catch (e) {
       this.log.err(`Could not persist signal-bot state: ${(e as Error).message}`)
     }
   }
 }
 
-export const signalBot = new SignalBot()
+// ─────────────────────────── Manager ───────────────────────────
 
-// Called on server boot — resumes the bot if it was running when the
-// process last exited, so a restart doesn't silently stop trading.
-export function maybeAutostartSignalBot(): void {
-  if (readState().running) {
-    createLogger(BOT_ID).info('Resuming signal bot from saved running state')
-    signalBot.start()
+const bots = new Map<string, SignalBot>()
+let loaded = false
+
+function ensureDir(): void {
+  if (!existsSync(SIGNAL_DIR)) mkdirSync(SIGNAL_DIR, { recursive: true })
+}
+
+function slugify(s: string): string {
+  return (
+    s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'bot'
+  )
+}
+
+function uniqueId(base: string): string {
+  let id = base
+  let n = 2
+  while (bots.has(id) || existsSync(join(SIGNAL_DIR, id + '.json'))) {
+    id = `${base}-${n}`
+    n++
+  }
+  return id
+}
+
+// Read every persisted bot into memory. Bots are loaded stopped; resuming
+// happens in maybeAutostartSignalBots so the running flag survives a restart.
+function loadAll(): void {
+  if (loaded) return
+  loaded = true
+  ensureDir()
+
+  // Migrate the legacy single-bot file into a per-bot file.
+  if (existsSync(LEGACY_PATH)) {
+    try {
+      const raw = JSON.parse(readFileSync(LEGACY_PATH, 'utf8'))
+      const cfg = parseSignalConfig(raw.config)
+      const id = uniqueId(slugify(`${cfg.strategyId}-${cfg.symbol}`))
+      const persisted: PersistedSignalBot = {
+        id,
+        name: `${cfg.strategyId.toUpperCase()} ${cfg.symbol}`,
+        config: cfg,
+        running: Boolean(raw.running),
+      }
+      writeFileSync(join(SIGNAL_DIR, id + '.json'), JSON.stringify(persisted, null, 2))
+      unlinkSync(LEGACY_PATH)
+    } catch {
+      /* ignore an unreadable legacy file */
+    }
+  }
+
+  for (const file of readdirSync(SIGNAL_DIR)) {
+    if (!file.endsWith('.json')) continue
+    try {
+      const raw = JSON.parse(readFileSync(join(SIGNAL_DIR, file), 'utf8')) as PersistedSignalBot
+      if (!raw.id || bots.has(raw.id)) continue
+      bots.set(raw.id, new SignalBot(raw.id, raw.name || raw.id, parseSignalConfig(raw.config)))
+    } catch {
+      /* skip a corrupt bot file */
+    }
+  }
+}
+
+export function listSignalBots(): SignalBotSummary[] {
+  loadAll()
+  return [...bots.values()].map((b) => b.summary())
+}
+
+export function getSignalBot(id: string): SignalBot {
+  loadAll()
+  const b = bots.get(id)
+  if (!b) throw new Error(`Signal bot not found: ${id}`)
+  return b
+}
+
+export function createSignalBot(name: string, config: SignalBotConfig): SignalBot {
+  loadAll()
+  const label = name.trim() || `${config.strategyId.toUpperCase()} ${config.symbol}`
+  const id = uniqueId(slugify(label))
+  const bot = new SignalBot(id, label, config)
+  bots.set(id, bot)
+  bot.persist()
+  return bot
+}
+
+export function deleteSignalBot(id: string): void {
+  const bot = getSignalBot(id)
+  bot.stop()
+  bots.delete(id)
+  clearLogBuffer('signal-' + id)
+  try {
+    unlinkSync(join(SIGNAL_DIR, id + '.json'))
+  } catch {
+    /* already gone */
+  }
+}
+
+// Called on server boot — resumes every bot that was running when the process
+// last exited, so a restart doesn't silently stop trading.
+export function maybeAutostartSignalBots(): void {
+  loadAll()
+  if (!existsSync(SIGNAL_DIR)) return
+  for (const file of readdirSync(SIGNAL_DIR)) {
+    if (!file.endsWith('.json')) continue
+    try {
+      const raw = JSON.parse(readFileSync(join(SIGNAL_DIR, file), 'utf8')) as PersistedSignalBot
+      const bot = bots.get(raw.id)
+      if (bot && raw.running && !bot.isRunning()) {
+        createLogger('signal-' + raw.id).info('Resuming from saved running state')
+        bot.start()
+      }
+    } catch {
+      /* ignore */
+    }
   }
 }

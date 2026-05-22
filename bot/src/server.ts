@@ -20,9 +20,12 @@ import {
   parseTradeRequest,
 } from './trade.js'
 import {
-  maybeAutostartSignalBot,
+  createSignalBot,
+  deleteSignalBot,
+  getSignalBot,
+  listSignalBots,
+  maybeAutostartSignalBots,
   parseSignalConfig,
-  signalBot,
 } from './signal-bot.js'
 import { STRATEGIES } from './strategy/strategies.js'
 
@@ -297,48 +300,87 @@ app.get('/api/assets', async (_req: Request, res: Response) => {
   }
 })
 
-app.get('/api/signal/status', (_req: Request, res: Response) => {
-  res.json(signalBot.getStatus())
+// List every signal bot (summary form).
+app.get('/api/signal/bots', (_req: Request, res: Response) => {
+  res.json(listSignalBots())
 })
 
-app.get('/api/signal/logs', (_req: Request, res: Response) => {
-  res.json(getLogBuffer('signal'))
-})
-
-// Save the signal bot config (only allowed while the bot is stopped).
-app.put('/api/signal/config', (req: Request, res: Response) => {
-  let cfg
+// Create a new signal bot. Body: { name?, config }.
+app.post('/api/signal/bots', (req: Request, res: Response) => {
   try {
-    cfg = parseSignalConfig(req.body)
+    const body = (req.body ?? {}) as { name?: string; config?: unknown }
+    const cfg = parseSignalConfig(body.config ?? req.body)
+    const bot = createSignalBot(typeof body.name === 'string' ? body.name : '', cfg)
+    log.ok(`Signal bot created: ${bot.id}`)
+    res.json(bot.getStatus())
   } catch (e) {
     res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+app.get('/api/signal/bots/:id', (req: Request, res: Response) => {
+  try {
+    res.json(getSignalBot(req.params.id).getStatus())
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
+  }
+})
+
+// Update a bot's name/config — config changes are only allowed while stopped.
+app.put('/api/signal/bots/:id', (req: Request, res: Response) => {
+  let bot
+  try {
+    bot = getSignalBot(req.params.id)
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
     return
   }
   try {
-    signalBot.setConfig(cfg)
-    log.ok(`Signal config saved: ${cfg.strategyId} on ${cfg.symbol} ${cfg.timeframe}`)
-    res.json(signalBot.getStatus())
+    const body = (req.body ?? {}) as { name?: string; config?: unknown }
+    if (typeof body.name === 'string') bot.rename(body.name)
+    bot.setConfig(parseSignalConfig(body.config ?? req.body))
+    res.json(bot.getStatus())
   } catch (e) {
     res.status(400).json({ error: (e as Error).message })
   }
 })
 
-app.post('/api/signal/start', (_req: Request, res: Response) => {
+app.delete('/api/signal/bots/:id', (req: Request, res: Response) => {
   try {
-    signalBot.start()
-    res.json(signalBot.getStatus())
+    deleteSignalBot(req.params.id)
+    log.ok(`Signal bot deleted: ${req.params.id}`)
+    res.json({ ok: true })
   } catch (e) {
-    res.status(500).json({ error: (e as Error).message })
+    res.status(404).json({ error: (e as Error).message })
   }
 })
 
-app.post('/api/signal/stop', (_req: Request, res: Response) => {
-  signalBot.stop()
-  res.json(signalBot.getStatus())
+app.post('/api/signal/bots/:id/start', (req: Request, res: Response) => {
+  try {
+    const bot = getSignalBot(req.params.id)
+    bot.start()
+    res.json(bot.getStatus())
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+app.post('/api/signal/bots/:id/stop', (req: Request, res: Response) => {
+  try {
+    const bot = getSignalBot(req.params.id)
+    bot.stop()
+    res.json(bot.getStatus())
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
+  }
+})
+
+app.get('/api/signal/bots/:id/logs', (req: Request, res: Response) => {
+  res.json(getLogBuffer('signal-' + req.params.id))
 })
 
 const PORT = 3001
 createServer(app).listen(PORT, () => {
   log.ok(`Bot dashboard -> http://localhost:${PORT}`)
-  maybeAutostartSignalBot()
+  maybeAutostartSignalBots()
 })

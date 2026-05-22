@@ -67,6 +67,8 @@ bot/.env.*
 bot/dist/
 bot/configs/
 bot/signal-bot.json
+bot/signal-bots/
+bot/trade-audit.log
 bot/grid.config.json
 
 # Editor / OS
