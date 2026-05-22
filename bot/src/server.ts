@@ -11,8 +11,15 @@ import {
   type GridConfig,
 } from './config.js'
 import { GridBot } from './grid-bot.js'
-import { createClients, getAssetMeta, roundPrice, roundSize } from './hyperliquid.js'
+import { createClients } from './hyperliquid.js'
 import { clearLogBuffer, createLogger, getLogBuffer, log, onLog } from './logger.js'
+import { executeMarketTrade, getAccountState, parseTradeRequest } from './trade.js'
+import {
+  maybeAutostartSignalBot,
+  parseSignalConfig,
+  signalBot,
+} from './signal-bot.js'
+import { STRATEGIES } from './strategy/strategies.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DASHBOARD_PATH = join(__dirname, '..', 'dashboard', 'index.html')
@@ -27,20 +34,27 @@ const bots = new Map<string, BotEntry>()
 
 const app = express()
 
-// Enable CORS for frontend web app communication
+// CORS — only reflect localhost origins. This endpoint can place real orders,
+// so a wildcard would let any website you visit trade your funds. Combined
+// with the JSON content-type requirement (which forces a preflight), this
+// keeps the API reachable only from the locally-served web app.
+const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  const origin = req.headers.origin
+  if (origin && LOCALHOST_ORIGIN.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   if (req.method === 'OPTIONS') {
-    res.sendStatus(200)
+    res.sendStatus(204)
     return
   }
   next()
 })
 
 app.use(express.json())
-
 
 const sseClients = new Set<Response>()
 onLog((line) => {
@@ -195,52 +209,85 @@ app.get('/api/logs/stream', (req: Request, res: Response) => {
 
 // ---------- Direct Trade Signal Execution ----------
 
-app.post('/api/trade', async (req: Request, res: Response) => {
+// Account snapshot — network, balance, and the open position for ?asset=.
+app.get('/api/account', async (req: Request, res: Response) => {
   try {
-    const { asset, side, size } = req.body
-    if (!asset || !side || !size) {
-      res.status(400).json({ error: 'asset, side, and size are required' })
-      return
-    }
-    const env = loadEnv()
-    const clients = createClients(env)
-    const meta = await getAssetMeta(clients.info, asset)
-    // For market-like execution, place limit order 5% past mid-price
-    const rawPx = side === 'buy' ? meta.midPx * 1.05 : meta.midPx * 0.95
-    const roundedPx = roundPrice(rawPx, meta)
-    const roundedSz = roundSize(size, meta)
-    
-    log.info(`API Trade: ${side.toUpperCase()} ${roundedSz} ${asset} (approx mid: ${meta.midPx})`)
-    
-    const orderRes = await clients.exchange.order({
-      orders: [
-        {
-          a: meta.index,
-          b: side === 'buy',
-          p: roundedPx,
-          s: roundedSz,
-          r: false,
-          t: { limit: { tif: 'Ioc' } }, // Immediate-or-Cancel
-        },
-      ],
-      grouping: 'na',
-    })
-    
-    const status = orderRes.response.data.statuses[0]
-    if (typeof status === 'object' && 'filled' in status) {
-      log.ok(`API Trade filled: ${status.filled.totalSz} @ ${status.filled.avgPx}`)
-      res.json({ ok: true, status, msg: `Filled ${status.filled.totalSz} @ ${status.filled.avgPx}` })
-    } else {
-      log.warn(`API Trade execution status: ${JSON.stringify(status)}`)
-      res.json({ ok: true, status, msg: JSON.stringify(status) })
-    }
+    const asset = typeof req.query.asset === 'string' ? req.query.asset : undefined
+    res.json(await getAccountState(asset))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Place a market-like (IOC) order. Validation failures return 400; exchange
+// or network failures return 500.
+app.post('/api/trade', async (req: Request, res: Response) => {
+  let parsed
+  try {
+    parsed = parseTradeRequest(req.body)
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+    return
+  }
+  try {
+    const result = await executeMarketTrade(parsed)
+    res.json({ ...result, msg: result.message })
   } catch (e) {
     log.err(`API Trade failed: ${(e as Error).message}`)
     res.status(500).json({ error: (e as Error).message })
   }
 })
 
+// ---------- Signal Trading Bot ----------
+
+// Strategy catalog — lets the web app render the strategy picker and its
+// parameter inputs without duplicating the strategy definitions.
+app.get('/api/strategies', (_req: Request, res: Response) => {
+  res.json(STRATEGIES)
+})
+
+app.get('/api/signal/status', (_req: Request, res: Response) => {
+  res.json(signalBot.getStatus())
+})
+
+app.get('/api/signal/logs', (_req: Request, res: Response) => {
+  res.json(getLogBuffer('signal'))
+})
+
+// Save the signal bot config (only allowed while the bot is stopped).
+app.put('/api/signal/config', (req: Request, res: Response) => {
+  let cfg
+  try {
+    cfg = parseSignalConfig(req.body)
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+    return
+  }
+  try {
+    signalBot.setConfig(cfg)
+    log.ok(`Signal config saved: ${cfg.strategyId} on ${cfg.symbol} ${cfg.timeframe}`)
+    res.json(signalBot.getStatus())
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+app.post('/api/signal/start', (_req: Request, res: Response) => {
+  try {
+    signalBot.start()
+    res.json(signalBot.getStatus())
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+app.post('/api/signal/stop', (_req: Request, res: Response) => {
+  signalBot.stop()
+  res.json(signalBot.getStatus())
+})
+
 const PORT = 3001
 createServer(app).listen(PORT, () => {
   log.ok(`Bot dashboard -> http://localhost:${PORT}`)
+  maybeAutostartSignalBot()
 })

@@ -120,6 +120,46 @@ Connecting React web app's live indicator signals (BUY/SELL) to the local tradin
 
 ---
 
+### Phase 5 — Signal Trader: autonomous indicator bot + dedicated page (current)
+
+Re-architected the Phase 4 live-trading feature. The strategy now runs **inside the
+bot** (autonomous, server-side) instead of in the browser, and it has its own page
+instead of being bolted onto the Backtester sidebar. The browser is now purely a
+view/control layer — closing and reopening the tab re-fetches all state from the bot.
+
+#### Bot (bot/) — the signal engine
+
+- **Strategy port (`bot/src/strategy/`)** — `indicators.ts` and `strategies.ts` ported
+  from the web app so the bot evaluates all 13 strategies identically to the backtester;
+  `market-data.ts` fetches Binance candles (REST).
+- **`bot/src/signal-bot.ts`** — the `SignalBot` engine. Every 30s it fetches candles,
+  evaluates the configured strategy on the **last closed bar**, and fires a market order
+  on a fresh BUY/SELL signal (respecting a cooldown and a buy/sell/both direction filter).
+  Config + running state persist to `signal-bot.json`; the bot **auto-resumes** if it was
+  running when the process last exited.
+- **`bot/src/trade.ts`** — hardened trade module: input validation, slippage cap
+  (IOC limit at most N% past mid, default 2%, max 10%), reused clients, `getAccountState`.
+- **API** — `GET /api/strategies` (strategy catalog), `GET /api/account` (network +
+  balance + position), and `/api/signal/{status,config,start,stop,logs}`.
+- **Security** — CORS tightened from wildcard `*` to localhost-only origins, so a public
+  website can never reach the trade API.
+
+#### Web app (src/)
+
+- **New "Signal Trader" page (`src/pages/SignalTraderPage.tsx`)** — the 3rd tab.
+  Configure symbol / timeframe / strategy + params / size / slippage / cooldown /
+  direction; Save, Start, Stop; live status (last signal, trades executed, errors);
+  account + position panel; manual one-click Buy/Sell; activity log. All state is read
+  back from the bot, so reopening the tab always shows the latest.
+- **`src/lib/env.ts`** — `IS_LOCAL` environment gate. On Vercel the page shows a
+  "local only" explanation (no bot trigger); on localhost it has full control.
+- **ChartPanel** — removed the non-working drawing tools; added a **Hide Buy/Sell**
+  marker toggle and a **Latest Price** jump button.
+- **Backtester sidebar** — fixed a scroll glitch (sticky sidebar now scrolls internally);
+  removed the old `LiveSignalController` and mock-signal simulator (superseded).
+
+---
+
 ## Current state
 
 | Area | Status |
@@ -129,7 +169,8 @@ Connecting React web app's live indicator signals (BUY/SELL) to the local tradin
 | GitHub | ✅ pushed to master & new branch `autotrade` created |
 | SL/TP on Hyperliquid | ✅ verified — correct trigger conditions confirmed in order history |
 | Multi-bot | ✅ working — manage via dashboard at `http://localhost:3001` |
-| Auto-Trading | ✅ verified — orders trigger on simulated BUY/SELL signals |
+| Signal Trader | ✅ verified — autonomous indicator bot, 3rd tab, localhost-gated |
+| Trade API security | ✅ CORS locked to localhost; input validated; slippage capped |
 
 ---
 
@@ -137,7 +178,8 @@ Connecting React web app's live indicator signals (BUY/SELL) to the local tradin
 
 - Grid lines not visible on bot dashboard chart (GridChart not re-rendering after config load)
 - No position sizing for "both" direction grids (current formula assumes long-only)
-- No auto-restart if bot crashes mid-session
-- Backtester drawing tools: trend line and Fibonacci not yet implemented
+- Grid bot has no auto-restart on crash (the Signal Trader does — resumes from saved state)
+- Signal Trader supports one bot at a time (grid bots support many)
+- Signal Trader polls candles every 30s rather than streaming on candle close
 - No webhook / alert when SL or TP triggers
 

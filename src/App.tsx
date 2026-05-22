@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { CandlestickChart, LayoutGrid, LineChart } from 'lucide-react'
+import { CandlestickChart, LayoutGrid, LineChart, Zap } from 'lucide-react'
 import { fetchSymbols, type SymbolInfo } from '@/lib/binance'
 import BacktesterPage from '@/pages/BacktesterPage'
 import GridPage from '@/pages/GridPage'
+import SignalTraderPage from '@/pages/SignalTraderPage'
 
 const FALLBACK_SYMBOLS: SymbolInfo[] = [
   { symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' },
@@ -12,11 +13,12 @@ const FALLBACK_SYMBOLS: SymbolInfo[] = [
   { symbol: 'XRPUSDT', base: 'XRP', quote: 'USDT' },
 ]
 
-type Page = 'backtest' | 'grid'
+type Page = 'backtest' | 'grid' | 'signal'
 
 const TABS: { id: Page; label: string; icon: typeof LineChart }[] = [
   { id: 'backtest', label: 'Strategy Backtester', icon: LineChart },
   { id: 'grid', label: 'Grid Optimizer', icon: LayoutGrid },
+  { id: 'signal', label: 'Signal Trader', icon: Zap },
 ]
 
 export default function App() {
@@ -101,7 +103,7 @@ export default function App() {
         </div>
       </header>
 
-      {page === 'backtest' ? (
+      {page === 'backtest' && (
         <BacktesterPage
           symbol={symbol}
           timeframe={timeframe}
@@ -109,7 +111,8 @@ export default function App() {
           onSymbol={setSymbol}
           onTimeframe={setTimeframe}
         />
-      ) : (
+      )}
+      {page === 'grid' && (
         <GridPage
           symbol={symbol}
           timeframe={timeframe}
@@ -118,6 +121,7 @@ export default function App() {
           onTimeframe={setTimeframe}
         />
       )}
+      {page === 'signal' && <SignalTraderPage />}
 
       <footer className="border-t border-border px-6 py-4 text-center text-[11px] text-dim">
         Backtests are simulations on historical data and do not predict future

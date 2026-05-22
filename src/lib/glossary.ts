@@ -236,5 +236,7 @@ export const GLOSSARY: Record<string, string> = {
   'Local Bot URL': 'The URL of your running local Express server. Default is http://localhost:3001.',
   'Hyperliquid Asset': 'The asset symbol as listed on Hyperliquid. Binance symbols (like ETHUSDT) are automatically mapped to Hyperliquid asset names (like ETH).',
   'Signal Size': 'The quantity of the asset (e.g. 0.1 ETH) to buy or sell per trade signal.',
+  'Max Slippage': 'How far past the mid-price the market order may fill, as a percent. The order is an IOC limit capped at this distance, so a thin order book can never fill you at an arbitrarily bad price.',
+  'Trade Cooldown': 'Minimum seconds between auto-trades. A new signal arriving inside this window is skipped, preventing rapid-fire orders when signals flip quickly.',
 }
 

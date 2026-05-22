@@ -123,8 +123,51 @@ Grid trading places a grid of buy and sell limit orders around the current price
 
 ---
 
+## ⚡ Step 7: Auto-Trading an Indicator (Signal Trader)
+
+Grid bots are for sideways markets. When the market is **trending**, you instead want to
+trade an indicator's BUY/SELL signals automatically. That is what the **Signal Trader**
+tab does — it runs one of the 13 backtester strategies live and sends a market order
+every time a fresh signal prints.
+
+> [!IMPORTANT]
+> The Signal Trader is **local-only**. It can only run when you open the app on your own
+> machine (`npm run dev`). On the public website (`garlic-trading.vercel.app`) the tab
+> shows an explanation instead — a public page must never be able to move real funds.
+
+### How it works
+The **strategy runs inside the bot**, not the browser. Once you press Start, the bot
+keeps trading on its own even if you close the tab or the browser. Reopening the Signal
+Trader tab simply re-fetches the latest state from the bot.
+
+### Step-by-Step
+1.  **Start the bot**: run `start_bot.bat` (or `cd bot && npm run serve`).
+2.  **Open the app locally** with `start_website.bat` and go to the **Signal Trader** tab.
+3.  **Configure the strategy**:
+    *   **Binance Symbol** + **Timeframe** — what market and candle size to evaluate.
+    *   **Strategy** + parameters — same 13 strategies as the backtester. Backtest first
+        on the Backtester tab to pick good settings.
+    *   **Hyperliquid Asset** — auto-filled from the symbol (e.g. `ETHUSDT` → `ETH`).
+    *   **Order Size** — how much to buy/sell per signal.
+    *   **Max Slippage %** — caps how far past mid-price a market order may fill (default 2%).
+    *   **Cooldown (s)** — minimum gap between auto-trades, so fast signal flips don't
+        rapid-fire orders.
+    *   **Trade Direction** — trade both signals, or only buys, or only sells.
+4.  **Save Configuration**, then press **Start**.
+5.  **Monitor**: the status panel shows the last signal, trades executed, and any errors;
+    the activity log streams what the bot is doing. You can also send a one-off **manual**
+    Buy/Sell at any time.
+6.  Press **Stop** to halt auto-trading.
+
+> [!TIP]
+> The bot acts only on **closed** candles and skips the very first one after starting,
+> so it never fires on a stale signal. Always test on **Testnet** first.
+
+---
+
 ## 💡 Quick Cheat Sheet for Success
 
 1.  **Regime Check first**: Don't run a grid bot in a trending market. Use the Markov Regime panel.
 2.  **Paper Trade first**: Always run new configurations on the **Hyperliquid Testnet** for at least 24 hours before moving to Mainnet.
 3.  **Watch the Liquidation Price**: If using leverage (e.g., > 3x), keep your Stop Loss well *above* the liquidation price. The dashboard safety panel will warn you if your Stop Loss is unreachable.
+4.  **Trending vs Sideways**: Use the **Signal Trader** (indicator auto-trading) for trends, the **Grid Optimizer** for ranges. Backtest the strategy before going live.

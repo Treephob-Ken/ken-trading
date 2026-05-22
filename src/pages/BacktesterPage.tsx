@@ -13,7 +13,6 @@ import WalkForwardPanel from '@/components/WalkForwardPanel'
 import MultiTFPanel from '@/components/MultiTFPanel'
 import CorrelationPanel from '@/components/CorrelationPanel'
 import Results from '@/components/Results'
-import LiveSignalController from '@/components/LiveSignalController'
 import { runEnsemble, type EnsembleConfig } from '@/lib/ensemble'
 import { analyzeRegime } from '@/lib/markov'
 import { walkForward } from '@/lib/walkforward'
@@ -299,27 +298,13 @@ export default function BacktesterPage({
     setParams(initialParams)
   }
 
-  // Extract latest completed signal for live trading integration
-  const { latestSignal, latestSignalTime } = useMemo(() => {
-    if (!output || !output.signals || output.signals.length === 0) {
-      return { latestSignal: null, latestSignalTime: null }
-    }
-    const signalIndex = output.signals.length - 1
-    const signal = output.signals[signalIndex]
-    const candle = candles[signalIndex]
-    return {
-      latestSignal: signal,
-      latestSignalTime: candle ? candle.time * 1000 : null,
-    }
-  }, [output, candles])
-
   const pairLabel = symbol.replace(/USDT$/, '/USDT')
   const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
   const dataCapped = candles.length >= MAX_BARS
 
   return (
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
-      <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:sticky lg:top-[97px] lg:w-[300px]">
+      <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:sticky lg:top-[97px] lg:max-h-[calc(100vh-113px)] lg:w-[300px] lg:overflow-y-auto lg:overflow-x-hidden lg:pr-1">
         <div className="card p-4">
           <Controls
             symbol={symbol}
@@ -357,12 +342,6 @@ export default function BacktesterPage({
             onReload={() => setReloadKey((k) => k + 1)}
           />
         </div>
-        <LiveSignalController
-          symbol={symbol}
-          latestSignal={latestSignal}
-          latestSignalTime={latestSignalTime}
-          isLiveRange={isLiveRange}
-        />
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-4">
