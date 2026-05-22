@@ -25,6 +25,7 @@ import {
   deleteSignalBot,
   getSignalBot,
   listSignalBots,
+  listSignalBotTrades,
   maybeAutostartSignalBots,
   parseSignalConfig,
 } from './signal-bot.js'
@@ -409,6 +410,14 @@ app.post('/api/signal/bots/:id/stop', (req: Request, res: Response) => {
 
 app.get('/api/signal/bots/:id/logs', (req: Request, res: Response) => {
   res.json(getLogBuffer('signal-' + req.params.id))
+})
+
+app.get('/api/signal/bots/:id/trades', (req: Request, res: Response) => {
+  try {
+    res.json(listSignalBotTrades(req.params.id))
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
+  }
 })
 
 const PORT = 3001

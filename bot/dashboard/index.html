@@ -606,6 +606,27 @@
               <option value="sell">Sell only (Short)</option>
             </select>
           </div>
+          <!-- MTF Filter -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text);padding-bottom:8px">
+              <input type="checkbox" id="st-mtf-enabled" onchange="toggleMTF();scheduleSave()" style="width:14px;height:14px;margin:0;accent-color:var(--accent)">
+              MTF Filter
+            </label>
+            <div class="field" style="margin-bottom:0">
+              <label>HTF Timeframe</label>
+              <select id="st-mtf-timeframe" disabled onchange="scheduleSave()">
+                <option value="15m">15m</option><option value="30m">30m</option>
+                <option value="1h" selected>1h</option><option value="2h">2h</option>
+                <option value="4h">4h</option><option value="6h">6h</option>
+                <option value="12h">12h</option><option value="1d">1d</option>
+              </select>
+            </div>
+          </div>
+          <!-- Daily Loss Limit -->
+          <div class="field" style="margin-bottom:0">
+            <label>Daily Loss Limit % <span style="font-weight:400;color:var(--dim)">(pause today if account drops this %)</span></label>
+            <input id="st-daily-loss" type="number" min="0.5" max="50" step="0.5" placeholder="off (no limit)" oninput="scheduleSave()" />
+          </div>
         </div>
       </div>
 
@@ -678,6 +699,41 @@
         <div class="stat">
           <div class="stat-label">Last Error</div>
           <div id="st-last-error" class="stat-value warn" style="font-size:11px;word-break:break-word;line-height:1.4">—</div>
+        </div>
+      </div>
+
+      <!-- Protection Status (MTF + Daily Loss) -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="st-protection-row">
+        <div class="stat">
+          <div class="stat-label">MTF Trend</div>
+          <div id="st-mtf-trend" class="stat-value" style="font-size:14px">—</div>
+          <div id="st-mtf-tf" class="stat-sub">disabled</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Daily P&amp;L</div>
+          <div id="st-daily-pnl" class="stat-value" style="font-size:14px">—</div>
+          <div id="st-daily-paused" class="stat-sub">disabled</div>
+        </div>
+      </div>
+
+      <!-- Trade Journal -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="panel-title" style="margin:0">Trade Journal</div>
+          <span id="st-journal-count" style="font-size:11px;color:var(--dim)"></span>
+        </div>
+        <div id="st-journal-empty" style="font-size:12px;color:var(--dim);text-align:center;padding:10px 0">No trades this session</div>
+        <div id="st-journal-table" style="display:none;overflow-x:auto">
+          <table style="width:100%;font-size:11px;border-collapse:collapse">
+            <thead><tr style="color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.05em">
+              <th style="text-align:left;padding:4px 6px">Time</th>
+              <th style="text-align:left;padding:4px 6px">Side</th>
+              <th style="text-align:right;padding:4px 6px">Size</th>
+              <th style="text-align:right;padding:4px 6px">Price</th>
+              <th style="text-align:right;padding:4px 6px">OK</th>
+            </tr></thead>
+            <tbody id="st-journal-body"></tbody>
+          </table>
         </div>
       </div>
 
@@ -1443,10 +1499,49 @@
   // Auto-save: any config change is persisted to the selected bot after a
   // short debounce — no separate Save button.
   function wireAutoSave() {
-    ['st-timeframe', 'st-investment', 'st-leverage', 'st-size', 'st-slippage', 'st-cooldown', 'st-direction', 'st-ensemble-threshold'].forEach((id) => {
+    ['st-timeframe', 'st-investment', 'st-leverage', 'st-size', 'st-slippage', 'st-cooldown',
+     'st-direction', 'st-ensemble-threshold', 'st-mtf-timeframe', 'st-daily-loss'].forEach((id) => {
       const el = $(id); if (el) el.addEventListener('change', scheduleSave)
     })
     $('st-params-grid').addEventListener('change', scheduleSave)
+  }
+
+  function toggleMTF() {
+    const en = $('st-mtf-enabled')?.checked
+    const tf = $('st-mtf-timeframe')
+    if (tf) tf.disabled = !en
+  }
+
+  async function refreshTradeJournal() {
+    if (!stSelectedId) return
+    try {
+      const trades = await fetch('/api/signal/bots/' + stSelectedId + '/trades').then(r => r.json())
+      const body = $('st-journal-body'), empty = $('st-journal-empty')
+      const table = $('st-journal-table'), count = $('st-journal-count')
+      if (!Array.isArray(trades) || trades.length === 0) {
+        if (empty) empty.style.display = 'block'
+        if (table) table.style.display = 'none'
+        if (count) count.textContent = ''
+        return
+      }
+      if (count) count.textContent = `(${trades.length})`
+      if (empty) empty.style.display = 'none'
+      if (table) table.style.display = 'block'
+      if (body) body.innerHTML = trades.slice().reverse().map(t => {
+        const d = new Date(t.time)
+        const ts = d.toLocaleDateString('en',{month:'2-digit',day:'2-digit'}) + ' ' +
+                   d.toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})
+        const sc = t.side === 'buy' ? '#22c55e' : '#ef4444'
+        const px = t.price ? Number(t.price).toPrecision(6) : '—'
+        return `<tr style="border-top:1px solid var(--border)">
+          <td style="padding:4px 6px;color:var(--dim);font-family:monospace;font-size:10px">${ts}</td>
+          <td style="padding:4px 6px;font-weight:700;color:${sc}">${t.side.toUpperCase()}</td>
+          <td style="padding:4px 6px;text-align:right;font-family:monospace">${Number(t.size).toPrecision(4)}</td>
+          <td style="padding:4px 6px;text-align:right;font-family:monospace">${px}</td>
+          <td style="padding:4px 6px;text-align:right;color:${t.filled ? 'var(--gain)' : 'var(--loss)'}">${t.filled ? '✓' : '✗'}</td>
+        </tr>`
+      }).join('')
+    } catch { /* ignore network errors */ }
   }
   function scheduleSave() {
     if (!stSelectedId || (stStatus && stStatus.running)) return
@@ -1639,6 +1734,13 @@
     $('st-slippage').value    = cfg.slippagePct ?? 2
     $('st-cooldown').value    = cfg.cooldownSec ?? 60
     $('st-direction').value   = cfg.tradeSide || 'both'
+    // MTF filter
+    const mtfEn = cfg.mtfEnabled || false
+    $('st-mtf-enabled').checked = mtfEn
+    const mtfTfEl = $('st-mtf-timeframe')
+    if (mtfTfEl) { mtfTfEl.value = cfg.mtfTimeframe || '1h'; mtfTfEl.disabled = !mtfEn }
+    // Daily loss limit
+    $('st-daily-loss').value = cfg.dailyLossLimitPct || ''
     stCurrentPrice = null
     updateSignalSizingPreview()
   }
@@ -1656,6 +1758,7 @@
       }
     } catch { /* ignore */ }
     refreshAccount()
+    refreshTradeJournal()
   }
 
   async function refreshAccount() {
@@ -1735,17 +1838,41 @@
     // Start/Stop buttons
     $('st-start-btn').disabled = s.running
     $('st-stop-btn').disabled  = !s.running
+    // MTF trend
+    const mtfEl = $('st-mtf-trend'), mtfTfEl = $('st-mtf-tf')
+    if (mtfEl) {
+      const trend = s.mtfTrend
+      if (trend) { mtfEl.textContent = trend === 'buy' ? '▲ LONG' : '▼ SHORT'; mtfEl.style.color = trend === 'buy' ? '#22c55e' : '#ef4444' }
+      else { mtfEl.textContent = '—'; mtfEl.style.color = '' }
+      if (mtfTfEl) mtfTfEl.textContent = s.config?.mtfEnabled ? `HTF: ${s.config.mtfTimeframe}` : 'disabled'
+    }
+    // Daily P&L
+    const dailyEl = $('st-daily-pnl'), dailyPausedEl = $('st-daily-paused')
+    if (dailyEl) {
+      const pnl = s.dailyPnlPct
+      if (pnl !== null && pnl !== undefined) {
+        dailyEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(1) + '%'
+        dailyEl.style.color = pnl >= 0 ? '#22c55e' : '#ef4444'
+        if (dailyPausedEl) { dailyPausedEl.textContent = s.dailyPaused ? '⚠ Paused today' : 'active'; dailyPausedEl.style.color = s.dailyPaused ? '#f59e0b' : '' }
+      } else {
+        dailyEl.textContent = '—'; dailyEl.style.color = ''
+        if (dailyPausedEl) { dailyPausedEl.textContent = s.config?.dailyLossLimitPct ? `limit: ${s.config.dailyLossLimitPct}%` : 'disabled'; dailyPausedEl.style.color = '' }
+      }
+    }
     // Lock the config form while running — settings only change when stopped.
     const lock = s.running
-    ;['st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown','st-direction'].forEach((id) => {
+    ;['st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown','st-direction','st-mtf-timeframe','st-daily-loss'].forEach((id) => {
       const el = $(id); if (el) el.disabled = lock
     })
+    ;['st-mtf-enabled'].forEach(id => { const el = $(id); if (el) el.disabled = lock })
     document.querySelectorAll('#st-params-grid input').forEach((el) => { el.disabled = lock })
     if (stStrategyCombo) stStrategyCombo.setEnabled(!lock)
     if (stCurrencyCombo) stCurrencyCombo.setEnabled(!lock)
     // Lock ensemble controls while running
     document.querySelectorAll('#st-ensemble-list input, #st-ensemble-threshold').forEach(el => { el.disabled = lock })
     ;['st-mode-single', 'st-mode-ensemble'].forEach(id => { const el = $(id); if (el) el.disabled = lock })
+    // MTF timeframe should stay locked when MTF is disabled too
+    if (!lock) toggleMTF()
     const hint = $('st-running-hint'); if (hint) hint.style.display = lock ? 'block' : 'none'
     // While running, show computed size in the preview box instead of the form estimate.
     const preview = $('st-sizing-preview')
@@ -1824,6 +1951,10 @@
       cooldownSec: parseInt($('st-cooldown').value) || 60,
       tradeSide:   $('st-direction').value,
       ...ensembleExtra,
+      ...($('st-mtf-enabled')?.checked && $('st-mtf-timeframe')?.value
+        ? { mtfEnabled: true, mtfTimeframe: $('st-mtf-timeframe').value } : {}),
+      ...(parseFloat($('st-daily-loss')?.value) > 0
+        ? { dailyLossLimitPct: parseFloat($('st-daily-loss').value) } : {}),
     }
   }
 

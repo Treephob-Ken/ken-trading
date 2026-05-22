@@ -25,7 +25,16 @@ import {
   type Signal,
   type StrategyId,
 } from './strategy/strategies.js'
-import { executeMarketTrade } from './trade.js'
+import { executeMarketTrade, getAccountState } from './trade.js'
+
+export interface TradeRecord {
+  time: number         // Unix ms
+  side: 'buy' | 'sell'
+  asset: string
+  size: number
+  price: number | null // avgPx if filled
+  filled: boolean
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SIGNAL_DIR = join(__dirname, '..', 'signal-bots')
@@ -54,6 +63,13 @@ export interface SignalBotConfig {
   ensembleMode?: boolean
   ensembleStrategyIds?: StrategyId[]
   ensembleThreshold?: number // defaults to majority (ceil(n/2))
+  // Multi-timeframe filter — before entering, check that the last signal on a
+  // higher timeframe agrees with the current signal. Skip the trade if it doesn't.
+  mtfEnabled?: boolean
+  mtfTimeframe?: string // e.g. '4h' when the bot runs on '15m'
+  // Daily loss circuit-breaker — pause new entries for the rest of the UTC day
+  // once the account drops more than this % below its value at UTC midnight.
+  dailyLossLimitPct?: number
 }
 
 export interface SignalBotStatus {
@@ -73,6 +89,11 @@ export interface SignalBotStatus {
   tradesExecuted: number
   // Ensemble mode: vote breakdown from the last evaluation (null in single mode).
   lastVotes: { buy: number; sell: number; abstain: number; threshold: number } | null
+  // MTF filter: last signal direction seen on the higher timeframe (null = not checked yet).
+  mtfTrend: Signal
+  // Daily loss circuit-breaker state (null when feature is off).
+  dailyPnlPct: number | null
+  dailyPaused: boolean
 }
 
 export interface SignalBotSummary {
@@ -168,10 +189,23 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
         : Math.ceil(ensembleStrategyIds.length / 2)
   }
 
+  // MTF filter
+  const mtfEnabled = b.mtfEnabled === true
+  const mtfTimeframeRaw = typeof b.mtfTimeframe === 'string' ? b.mtfTimeframe : ''
+  const mtfTimeframe =
+    mtfEnabled && VALID_TIMEFRAMES.includes(mtfTimeframeRaw) ? mtfTimeframeRaw : undefined
+
+  // Daily loss circuit-breaker
+  const dlRaw = typeof b.dailyLossLimitPct === 'string' ? Number(b.dailyLossLimitPct) : b.dailyLossLimitPct
+  const dailyLossLimitPct =
+    typeof dlRaw === 'number' && dlRaw > 0 && dlRaw <= 100 ? dlRaw : undefined
+
   return {
     symbol, timeframe, strategyId, params, asset,
     investment, leverage, size, slippagePct, cooldownSec, tradeSide,
     ...(ensembleMode ? { ensembleMode, ensembleStrategyIds, ensembleThreshold } : {}),
+    ...(mtfEnabled && mtfTimeframe ? { mtfEnabled, mtfTimeframe } : {}),
+    ...(dailyLossLimitPct !== undefined ? { dailyLossLimitPct } : {}),
   }
 }
 
@@ -203,6 +237,15 @@ class SignalBot {
   private computedSize: number | null = null
   // Ensemble mode: vote breakdown from the last evaluation.
   private lastVotes: SignalBotStatus['lastVotes'] = null
+  // MTF filter: last HTF signal direction observed.
+  private mtfTrend: Signal = null
+  // Daily loss circuit-breaker state.
+  private dailyDate = ''
+  private dailyStartEquity: number | null = null
+  private dailyPaused = false
+  private dailyPnlPct: number | null = null
+  // In-session trade journal (last 100 fills, reset on restart).
+  private trades: TradeRecord[] = []
   // True once the first poll has recorded the current bar — only bars that
   // close after that are genuine signals we should act on.
   private primed = false
@@ -250,7 +293,14 @@ class SignalBot {
       lastError: this.lastError,
       tradesExecuted: this.tradesExecuted,
       lastVotes: this.lastVotes,
+      mtfTrend: this.mtfTrend,
+      dailyPnlPct: this.dailyPnlPct,
+      dailyPaused: this.dailyPaused,
     }
+  }
+
+  getTrades(): TradeRecord[] {
+    return [...this.trades]
   }
 
   // Replace the config. Only allowed while stopped — a running strategy
@@ -275,6 +325,12 @@ class SignalBot {
     this.primed = false
     this.computedSize = null
     this.lastVotes = null
+    this.mtfTrend = null
+    this.dailyDate = ''
+    this.dailyStartEquity = null
+    this.dailyPaused = false
+    this.dailyPnlPct = null
+    this.trades = []
     this.persist()
     const cfg = this.config
     if (cfg.ensembleMode && cfg.ensembleStrategyIds?.length) {
@@ -374,6 +430,69 @@ class SignalBot {
 
       if (!sig) return
 
+      // ── MTF filter ─────────────────────────────────────────────────────────
+      // Check that the last signal on the higher timeframe agrees before entering.
+      if (cfg.mtfEnabled && cfg.mtfTimeframe) {
+        try {
+          const htfCandles = await fetchKlines(cfg.symbol, cfg.mtfTimeframe, CANDLE_LIMIT)
+          if (htfCandles.length >= 30) {
+            const htfSigs = generateSignals(cfg.strategyId, htfCandles, cfg.params)
+            let htfLast: Signal = null
+            for (let i = htfSigs.length - 2; i >= 0; i--) {
+              if (htfSigs[i] !== null) { htfLast = htfSigs[i]; break }
+            }
+            this.mtfTrend = htfLast
+            if (htfLast !== null && htfLast !== sig) {
+              this.log.info(
+                `MTF filter (${cfg.mtfTimeframe}): ${sig.toUpperCase()} blocked` +
+                  ` — HTF last signal: ${htfLast.toUpperCase()}`,
+              )
+              return
+            }
+          }
+        } catch (e) {
+          this.log.warn(`MTF filter error: ${(e as Error).message} — proceeding without filter`)
+        }
+      }
+
+      // ── Daily loss circuit-breaker ──────────────────────────────────────────
+      if (cfg.dailyLossLimitPct && cfg.dailyLossLimitPct > 0) {
+        const today = new Date().toISOString().slice(0, 10)
+        if (today !== this.dailyDate) {
+          // UTC day rolled over — snapshot fresh start equity.
+          this.dailyDate = today
+          this.dailyPaused = false
+          this.dailyPnlPct = null
+          try {
+            const acct = await getAccountState()
+            this.dailyStartEquity = acct.accountValue
+            this.log.info(`Daily reset: start equity $${this.dailyStartEquity.toFixed(2)}`)
+          } catch {
+            this.dailyStartEquity = null
+          }
+        }
+        if (this.dailyStartEquity !== null) {
+          try {
+            const acct = await getAccountState()
+            const lossPct = ((this.dailyStartEquity - acct.accountValue) / this.dailyStartEquity) * 100
+            this.dailyPnlPct = -lossPct // positive = profit, negative = loss
+            if (lossPct >= cfg.dailyLossLimitPct) {
+              if (!this.dailyPaused) {
+                this.dailyPaused = true
+                this.log.warn(
+                  `Daily loss limit hit: −${lossPct.toFixed(1)}%` +
+                    ` (limit: ${cfg.dailyLossLimitPct}%) — no new entries until tomorrow UTC`,
+                )
+              }
+              return
+            }
+            this.dailyPaused = false
+          } catch {
+            // Can't reach Hyperliquid for balance check — don't block trading.
+          }
+        }
+      }
+
       this.lastSignal = sig
       this.lastSignalAt = Date.now()
 
@@ -405,6 +524,16 @@ class SignalBot {
           maxSlippagePct: cfg.slippagePct,
         })
         if (result.filled) this.tradesExecuted++
+        // Append to in-session trade journal (capped at 100 entries).
+        this.trades.push({
+          time: Date.now(),
+          side: sig,
+          asset: cfg.asset,
+          size: result.filledSize,
+          price: result.avgPx,
+          filled: result.filled,
+        })
+        if (this.trades.length > 100) this.trades = this.trades.slice(-100)
         this.log.fill(result.message)
       } catch (e) {
         this.lastError = (e as Error).message
@@ -517,6 +646,10 @@ export function createSignalBot(name: string, config: SignalBotConfig): SignalBo
   bots.set(id, bot)
   bot.persist()
   return bot
+}
+
+export function listSignalBotTrades(id: string): TradeRecord[] {
+  return getSignalBot(id).getTrades()
 }
 
 export function deleteSignalBot(id: string): void {

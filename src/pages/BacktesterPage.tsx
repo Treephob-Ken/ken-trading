@@ -1,24 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, ChevronDown, ChevronUp } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import type { Candle, Direction, StrategyId, Trade } from '@/types'
 import { fetchKlines, MAX_BARS, subscribeKline, type SymbolInfo } from '@/lib/binance'
-import { defaultParams, generateSignals, strategyMeta, type StrategyOutput } from '@/lib/strategies'
+import { defaultParams, generateSignals, strategyMeta } from '@/lib/strategies'
 import { runBacktest } from '@/lib/backtest'
 import { fmtPrice } from '@/lib/format'
 import ChartPanel from '@/components/ChartPanel'
 import Controls from '@/components/Controls'
-import RegimePanel from '@/components/RegimePanel'
-import EnsemblePanel from '@/components/EnsemblePanel'
-import WalkForwardPanel from '@/components/WalkForwardPanel'
-import MultiTFPanel from '@/components/MultiTFPanel'
-import CorrelationPanel from '@/components/CorrelationPanel'
 import Results from '@/components/Results'
 import SummaryPanel from '@/components/SummaryPanel'
-import { runEnsemble, type EnsembleConfig } from '@/lib/ensemble'
 import { analyzeRegime } from '@/lib/markov'
-import { walkForward } from '@/lib/walkforward'
-import { getMultiTFConfluence, type MultiTFResult } from '@/lib/multiTF'
-import type { Signal } from '@/types'
 
 interface Props {
   symbol: string
@@ -39,49 +30,54 @@ export default function BacktesterPage({
 }: Props) {
   const [startDate, setStartDate] = useState(() => localStorage.getItem('bt_startDate') || '')
   const [endDate, setEndDate] = useState(() => localStorage.getItem('bt_endDate') || '')
-  const [strategyId, setStrategyId] = useState<StrategyId>(() => (localStorage.getItem('bt_strategyId') as StrategyId) || 'macd')
-  
+  const [strategyId, setStrategyId] = useState<StrategyId>(
+    () => (localStorage.getItem('bt_strategyId') as StrategyId) || 'macd',
+  )
+
   const [params, setParams] = useState<Record<string, number>>(() => {
     try {
       const activeId = localStorage.getItem('bt_strategyId') || 'macd'
       const saved = localStorage.getItem(`bt_params_${activeId}`)
       return saved ? JSON.parse(saved) : defaultParams(activeId as StrategyId)
     } catch {
-      const activeId = localStorage.getItem('bt_strategyId') || 'macd'
-      return defaultParams(activeId as StrategyId)
+      return defaultParams((localStorage.getItem('bt_strategyId') || 'macd') as StrategyId)
     }
   })
-  
-  const [direction, setDirection] = useState<Direction>(() => (localStorage.getItem('bt_direction') as Direction) || 'long')
-  const [initialCapital, setInitialCapital] = useState(() => +(localStorage.getItem('bt_initialCapital') || '10000'))
-  const [feePct, setFeePct] = useState(() => +(localStorage.getItem('bt_feePct') || '0.1'))
-  const [stopLossPct, setStopLossPct] = useState(() => +(localStorage.getItem('bt_stopLossPct') || '0'))
-  const [takeProfitPct, setTakeProfitPct] = useState(() => +(localStorage.getItem('bt_takeProfitPct') || '0'))
-  const [positionMode, setPositionMode] = useState<'fixed' | 'compounding' | 'volatility'>(() => (localStorage.getItem('bt_positionMode') as any) || 'fixed')
-  const [targetRiskPct, setTargetRiskPct] = useState(() => +(localStorage.getItem('bt_targetRiskPct') || '2'))
-  const [atrMultiplier, setAtrMultiplier] = useState(() => +(localStorage.getItem('bt_atrMultiplier') || '1.5'))
 
-  useEffect(() => {
-    localStorage.setItem('bt_startDate', startDate)
-  }, [startDate])
-  useEffect(() => {
-    localStorage.setItem('bt_endDate', endDate)
-  }, [endDate])
-  useEffect(() => {
-    localStorage.setItem('bt_strategyId', strategyId)
-  }, [strategyId])
+  const [direction, setDirection] = useState<Direction>(
+    () => (localStorage.getItem('bt_direction') as Direction) || 'long',
+  )
+  const [initialCapital, setInitialCapital] = useState(
+    () => +(localStorage.getItem('bt_initialCapital') || '10000'),
+  )
+  const [feePct, setFeePct] = useState(() => +(localStorage.getItem('bt_feePct') || '0.1'))
+  const [stopLossPct, setStopLossPct] = useState(
+    () => +(localStorage.getItem('bt_stopLossPct') || '0'),
+  )
+  const [takeProfitPct, setTakeProfitPct] = useState(
+    () => +(localStorage.getItem('bt_takeProfitPct') || '0'),
+  )
+  const [positionMode, setPositionMode] = useState<'fixed' | 'compounding' | 'volatility'>(
+    () => (localStorage.getItem('bt_positionMode') as 'fixed' | 'compounding' | 'volatility') || 'fixed',
+  )
+  const [targetRiskPct, setTargetRiskPct] = useState(
+    () => +(localStorage.getItem('bt_targetRiskPct') || '2'),
+  )
+  const [atrMultiplier, setAtrMultiplier] = useState(
+    () => +(localStorage.getItem('bt_atrMultiplier') || '1.5'),
+  )
+
+  useEffect(() => { localStorage.setItem('bt_startDate', startDate) }, [startDate])
+  useEffect(() => { localStorage.setItem('bt_endDate', endDate) }, [endDate])
+  useEffect(() => { localStorage.setItem('bt_strategyId', strategyId) }, [strategyId])
   useEffect(() => {
     localStorage.setItem(`bt_params_${strategyId}`, JSON.stringify(params))
   }, [params, strategyId])
-  useEffect(() => {
-    localStorage.setItem('bt_direction', direction)
-  }, [direction])
+  useEffect(() => { localStorage.setItem('bt_direction', direction) }, [direction])
   useEffect(() => {
     localStorage.setItem('bt_initialCapital', String(initialCapital))
   }, [initialCapital])
-  useEffect(() => {
-    localStorage.setItem('bt_feePct', String(feePct))
-  }, [feePct])
+  useEffect(() => { localStorage.setItem('bt_feePct', String(feePct)) }, [feePct])
   useEffect(() => {
     localStorage.setItem('bt_stopLossPct', String(stopLossPct))
   }, [stopLossPct])
@@ -98,21 +94,6 @@ export default function BacktesterPage({
     localStorage.setItem('bt_atrMultiplier', String(atrMultiplier))
   }, [atrMultiplier])
 
-  const [showAdvanced, setShowAdvanced] = useState(() => localStorage.getItem('bt_showAdvanced') === 'true')
-
-  // Ensemble states
-  const [ensembleActive, setEnsembleActive] = useState(false)
-  const [ensembleStrategies, setEnsembleStrategies] = useState<StrategyId[]>(['macd', 'ema', 'supertrend', 'rsi', 'bollinger'])
-  const [ensembleConfig, setEnsembleConfig] = useState<EnsembleConfig>({
-    mode: 'vote',
-    threshold: 3,
-    regimeWeights: true,
-  })
-
-  // Confluence states
-  const [confluence, setConfluence] = useState<MultiTFResult | null>(null)
-  const [confluenceLoading, setConfluenceLoading] = useState(false)
-
   const [candles, setCandles] = useState<Candle[]>([])
   const [liveCandle, setLiveCandle] = useState<Candle | null>(null)
   const [loading, setLoading] = useState(true)
@@ -124,30 +105,14 @@ export default function BacktesterPage({
 
   const isLiveRange = endDate === '' || endDate === todayIso()
 
-  // Reset selectedTrade when backtest parameters change
   useEffect(() => {
     setSelectedTrade(null)
   }, [
-    symbol,
-    timeframe,
-    startDate,
-    endDate,
-    strategyId,
-    params,
-    direction,
-    initialCapital,
-    feePct,
-    stopLossPct,
-    takeProfitPct,
-    positionMode,
-    targetRiskPct,
-    atrMultiplier,
-    ensembleActive,
-    ensembleStrategies,
-    ensembleConfig,
+    symbol, timeframe, startDate, endDate, strategyId, params, direction,
+    initialCapital, feePct, stopLossPct, takeProfitPct, positionMode,
+    targetRiskPct, atrMultiplier,
   ])
 
-  // Load candles whenever the market, timeframe or date range changes.
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -167,12 +132,9 @@ export default function BacktesterPage({
         setCandles([])
         setLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [symbol, timeframe, startDate, endDate, reloadKey])
 
-  // Live price stream — only for ranges that include the present.
   useEffect(() => {
     if (!isLiveRange) {
       setConnected(false)
@@ -201,53 +163,17 @@ export default function BacktesterPage({
     return unsubscribe
   }, [symbol, timeframe, isLiveRange])
 
-  // Fetch higher TF confluence
-  useEffect(() => {
-    if (candles.length < 30) {
-      setConfluence(null)
-      return
-    }
-    setConfluenceLoading(true)
-    getMultiTFConfluence(symbol, timeframe, candles)
-      .then((res) => {
-        setConfluence(res)
-        setConfluenceLoading(false)
-      })
-      .catch(() => {
-        setConfluence(null)
-        setConfluenceLoading(false)
-      })
-  }, [symbol, timeframe, candles.length])
-
-  // Compute regime analysis once for sharing
   const regime = useMemo(() => {
     if (candles.length < 30) return null
     return analyzeRegime(candles)
   }, [candles])
 
-  // Run the backtest whenever inputs change (instant, client-side).
   const { output, result } = useMemo(() => {
     if (candles.length < 35) return { output: null, result: null }
-    
-    let out: StrategyOutput
-    let signals: Signal[]
-    
-    if (ensembleActive) {
-      const ensembleRes = runEnsemble(candles, ensembleStrategies, ensembleConfig, regime)
-      signals = ensembleRes.signals
-      
-      // For the chart, show overlays from the currently selected strategy,
-      // but override the signals with ensemble signals.
-      const baseOut = generateSignals(strategyId, candles, params)
-      out = { ...baseOut, signals }
-    } else {
-      out = generateSignals(strategyId, candles, params)
-      signals = out.signals
-    }
-    
+    const out = generateSignals(strategyId, candles, params)
     const res = runBacktest(
       candles,
-      signals,
+      out.signals,
       initialCapital,
       feePct / 100,
       direction,
@@ -259,37 +185,9 @@ export default function BacktesterPage({
     )
     return { output: out, result: res }
   }, [
-    candles,
-    strategyId,
-    params,
-    initialCapital,
-    feePct,
-    direction,
-    stopLossPct,
-    takeProfitPct,
-    positionMode,
-    targetRiskPct,
-    atrMultiplier,
-    ensembleActive,
-    ensembleStrategies,
-    ensembleConfig,
-    regime,
+    candles, strategyId, params, initialCapital, feePct, direction,
+    stopLossPct, takeProfitPct, positionMode, targetRiskPct, atrMultiplier,
   ])
-
-  // Run walk-forward validation when parameters or strategy change
-  const walkForwardResult = useMemo(() => {
-    if (candles.length < 50 || ensembleActive) return null
-    return walkForward(
-      candles,
-      strategyId,
-      params,
-      5,
-      initialCapital,
-      feePct / 100,
-      direction,
-      positionMode,
-    )
-  }, [candles, strategyId, params, initialCapital, feePct, direction, positionMode, ensembleActive])
 
   const handleStrategy = (id: StrategyId) => {
     setStrategyId(id)
@@ -331,9 +229,7 @@ export default function BacktesterPage({
             onStartDate={setStartDate}
             onEndDate={setEndDate}
             onStrategy={handleStrategy}
-            onParam={(key, value) =>
-              setParams((prev) => ({ ...prev, [key]: value }))
-            }
+            onParam={(key, value) => setParams((prev) => ({ ...prev, [key]: value }))}
             onDirection={setDirection}
             onCapital={setInitialCapital}
             onFee={setFeePct}
@@ -375,16 +271,15 @@ export default function BacktesterPage({
 
           {dataCapped && (
             <div className="mb-3 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-[11px] text-warn">
-              Loaded the maximum {MAX_BARS.toLocaleString()} bars for this range.
-              Earlier history was truncated — pick a coarser timeframe or a shorter date range to see the full window.
+              Loaded the maximum {MAX_BARS.toLocaleString()} bars for this range. Earlier history
+              was truncated — pick a coarser timeframe or a shorter date range to see the full
+              window.
             </div>
           )}
 
           {error ? (
             <div className="flex h-[480px] flex-col items-center justify-center gap-2 text-center">
-              <p className="text-sm font-medium text-loss">
-                Could not load market data
-              </p>
+              <p className="text-sm font-medium text-loss">Could not load market data</p>
               <p className="max-w-sm text-xs text-dim">{error}</p>
             </div>
           ) : loading && candles.length === 0 ? (
@@ -427,68 +322,6 @@ export default function BacktesterPage({
               Not enough candles in this range to run a backtest.
             </div>
           )
-        )}
-
-        {/* ── Advanced analysis tools (collapsed by default) ─────────────── */}
-        {candles.length >= 30 && (
-          <div className="card overflow-hidden">
-            <button
-              onClick={() => {
-                const next = !showAdvanced
-                setShowAdvanced(next)
-                localStorage.setItem('bt_showAdvanced', String(next))
-              }}
-              className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-text hover:bg-panel-2 transition-colors font-display"
-            >
-              <span>Advanced Analysis Tools</span>
-              <span className="flex items-center gap-1.5 text-xs text-dim font-sans font-normal">
-                {showAdvanced ? 'Hide' : 'Show'}
-                {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              </span>
-            </button>
-
-            {showAdvanced && (
-              <div className="flex flex-col gap-4 border-t border-border p-4">
-                <MultiTFPanel
-                  confluence={confluence}
-                  loading={confluenceLoading}
-                  currentTF={timeframe}
-                />
-                <RegimePanel
-                  candles={candles}
-                  currentStrategy={strategyId}
-                  onApplyStrategy={handleStrategy}
-                />
-                <EnsemblePanel
-                  candles={candles}
-                  regime={regime}
-                  activeStrategyId={strategyId}
-                  ensembleActive={ensembleActive}
-                  onToggleEnsemble={setEnsembleActive}
-                  onApplyEnsembleConfig={(ids, config) => {
-                    setEnsembleStrategies(ids)
-                    setEnsembleConfig(config)
-                  }}
-                />
-                <CorrelationPanel
-                  candles={candles}
-                  currentStrategyId={strategyId}
-                  initialCapital={initialCapital}
-                  feePct={feePct}
-                  direction={direction}
-                  positionMode={positionMode}
-                  targetRiskPct={targetRiskPct}
-                  atrMultiplier={atrMultiplier}
-                  onApplyStrategy={handleStrategy}
-                  ensembleActive={ensembleActive}
-                  ensembleStrategies={ensembleStrategies}
-                />
-                {result && !ensembleActive && (
-                  <WalkForwardPanel result={walkForwardResult} loading={loading} />
-                )}
-              </div>
-            )}
-          </div>
         )}
       </section>
     </main>
