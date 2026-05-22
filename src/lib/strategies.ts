@@ -672,29 +672,22 @@ export function generateSignals(
       const slowEma = ema(closes, params.slow)
       const maFilter = ema(closes, params.maLen)
       const sr = stochRsi(closes, params.rsiLen, params.stochLen, 3, 3)
+      // Signals match the Pine Script arrows exactly: fire only at the EMA crossover bar.
+      // The StochRSI and MA filter are visual confirmation (background on TradingView),
+      // shown here in the sub-pane — not part of the entry condition.
       return {
         signals: buildSignals(
           n,
-          (i) =>
-            fastEma[i] > slowEma[i] &&
-            crossUp(sr.k, sr.d, i) &&
-            sr.k[i] < 50 &&
-            sr.d[i] < 50 &&
-            closes[i] > maFilter[i],
-          (i) =>
-            fastEma[i] < slowEma[i] &&
-            crossDown(sr.k, sr.d, i) &&
-            sr.k[i] > 50 &&
-            sr.d[i] > 50 &&
-            closes[i] < maFilter[i],
+          (i) => crossUp(fastEma, slowEma, i),
+          (i) => crossDown(fastEma, slowEma, i),
         ),
         mainLines: [
           { id: 'txoFast', color: '#3b9eff', data: toLine(times, fastEma) },
           { id: 'txoSlow', color: '#ff9f43', data: toLine(times, slowEma) },
-          { id: 'txoMA', color: 'rgba(167,139,250,0.6)', data: toLine(times, maFilter) },
+          { id: 'txoMA', color: 'rgba(167,139,250,0.5)', data: toLine(times, maFilter) },
         ],
         subPane: {
-          title: 'StochRSI',
+          title: 'StochRSI (confirmation)',
           lines: [
             { id: 'txoK', color: '#3b9eff', data: toLine(times, sr.k) },
             { id: 'txoD', color: '#ff9f43', data: toLine(times, sr.d) },

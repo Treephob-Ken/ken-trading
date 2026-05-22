@@ -369,22 +369,13 @@ export function generateSignals(
     case 'traderxo': {
       const fastEma = ema(closes, params.fast)
       const slowEma = ema(closes, params.slow)
-      const maFilter = ema(closes, params.maLen)
-      const sr = stochRsi(closes, params.rsiLen, params.stochLen, 3, 3)
+      // Signal fires at the EMA crossover bar, matching the Pine Script arrows.
+      // maLen/rsiLen/stochLen params are available as visual overlays on the web app
+      // but not used as entry conditions (they are background-only on TradingView).
       return buildSignals(
         n,
-        (i) =>
-          fastEma[i] > slowEma[i] &&
-          crossUp(sr.k, sr.d, i) &&
-          sr.k[i] < 50 &&
-          sr.d[i] < 50 &&
-          closes[i] > maFilter[i],
-        (i) =>
-          fastEma[i] < slowEma[i] &&
-          crossDown(sr.k, sr.d, i) &&
-          sr.k[i] > 50 &&
-          sr.d[i] > 50 &&
-          closes[i] < maFilter[i],
+        (i) => crossUp(fastEma, slowEma, i),
+        (i) => crossDown(fastEma, slowEma, i),
       )
     }
   }
