@@ -1553,7 +1553,10 @@
   // ════════════════════════════════════════════════════════
   let activeCandles = [], candlestickSeries = null, gridChart = null
   let signalChart = null, signalCandleSeries = null
-  let _gridPriceLines = []
+  let _gridPriceLines = [], _signalTrades = []
+
+  // Minutes per timeframe — used to calculate how many bars to fetch
+  const _TF_MINS = { '1m':1,'3m':3,'5m':5,'15m':15,'30m':30,'1h':60,'2h':120,'4h':240,'6h':360,'12h':720,'1d':1440 }
 
   function buildLines(lower, upper, count, mode) {
     const lines = []
@@ -1573,24 +1576,45 @@
     _gridPriceLines = []
     for (const { price } of (lines || [])) {
       const below = currentPrice != null && price <= currentPrice
+      // Solid bright colors — blue below current price, purple above
       _gridPriceLines.push(candlestickSeries.createPriceLine({
         price, lineWidth: 1, axisLabelVisible: false,
         lineStyle: LightweightCharts.LineStyle.Dashed,
-        color: below ? 'rgba(59,130,246,0.45)' : 'rgba(124,58,237,0.45)',
+        color: below ? '#3b82f6' : '#a78bfa',
       }))
     }
     if (slPrice) _gridPriceLines.push(candlestickSeries.createPriceLine({
-      price: slPrice, color: 'rgba(239,68,68,0.75)', lineWidth: 1,
+      price: slPrice, color: '#ef4444', lineWidth: 2,
       lineStyle: LightweightCharts.LineStyle.Solid, axisLabelVisible: true, title: 'SL',
     }))
     if (tpPrice) _gridPriceLines.push(candlestickSeries.createPriceLine({
-      price: tpPrice, color: 'rgba(34,197,94,0.75)', lineWidth: 1,
+      price: tpPrice, color: '#22c55e', lineWidth: 2,
       lineStyle: LightweightCharts.LineStyle.Solid, axisLabelVisible: true, title: 'TP',
     }))
   }
 
+  // Push buy/sell arrow markers onto the signal chart.
+  // Trades must be sorted by time; called after setData and on each poll tick.
+  function _setSignalMarkers(trades) {
+    if (!signalCandleSeries || typeof LightweightCharts === 'undefined') return
+    const markers = (trades || [])
+      .filter(t => t.time && t.price != null && t.filled)
+      .map(t => ({
+        // t.time is Unix ms (Date.now() at fill time)
+        time: Math.floor(t.time / 1000),
+        position: t.side === 'buy' ? 'belowBar' : 'aboveBar',
+        color: t.side === 'buy' ? '#22c55e' : '#ef4444',
+        shape: t.side === 'buy' ? 'arrowUp' : 'arrowDown',
+        text: t.side === 'buy'
+          ? `B ${t.price != null ? Number(t.price).toFixed(2) : ''}`
+          : `S ${t.price != null ? Number(t.price).toFixed(2) : ''}`,
+      }))
+      .sort((a, b) => a.time - b.time)
+    try { signalCandleSeries.setMarkers(markers) } catch(e) { console.warn('setMarkers', e) }
+  }
+
   async function _fetchCandles(symbol, interval, limit) {
-    const url = `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+    const url = `https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`
     const r = await fetch(url)
     if (!r.ok) throw new Error(`Binance ${r.status}`)
     return (await r.json()).map(k => ({ time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4] }))
@@ -1598,9 +1622,9 @@
 
   function _makeLWChart(el) {
     return LightweightCharts.createChart(el, {
-      width: el.clientWidth || 600, height: el.clientHeight || 400,
+      width: el.clientWidth || 700, height: el.clientHeight || 450,
       layout: { background: { color: 'transparent' }, textColor: '#a0a0c0' },
-      grid: { vertLines: { color: '#252538' }, horzLines: { color: '#252538' } },
+      grid: { vertLines: { color: '#1e1e30' }, horzLines: { color: '#1e1e30' } },
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
       timeScale: { borderColor: '#252538', timeVisible: true, secondsVisible: false },
       rightPriceScale: { borderColor: '#252538' },
@@ -1611,7 +1635,7 @@
     const el = $('grid-chart-el'); if (!el || !cfg || typeof LightweightCharts === 'undefined') return
     if (gridChart) { try { gridChart.remove() } catch {} gridChart = null }
     candlestickSeries = null; activeCandles = []; _gridPriceLines = []
-    const sym = (cfg.asset || 'ETH') + 'USDT'
+    const sym = ((cfg.asset || 'ETH').toUpperCase()) + 'USDT'
     const info = $('grid-chart-info'); if (info) info.textContent = `${sym} · 1h · loading…`
     try {
       const candles = await _fetchCandles(sym, '1h', 300)
@@ -1623,12 +1647,16 @@
         wickUpColor: '#22c55e', wickDownColor: '#ef4444',
       })
       candlestickSeries.setData(candles)
-      if (cfg.lower && cfg.upper && cfg.gridCount) {
+      // Draw grid lines — use explicit > 0 check (cfg.lower can be a small positive number)
+      if (cfg.lower > 0 && cfg.upper > 0 && cfg.gridCount > 0) {
         const cp = candles.length ? candles[candles.length - 1].close : (cfg.lower + cfg.upper) / 2
-        updateGridLines(buildLines(cfg.lower, cfg.upper, cfg.gridCount, cfg.mode || 'arithmetic'), cp, cfg.stopLossPrice, cfg.takeProfitPrice)
+        updateGridLines(
+          buildLines(+cfg.lower, +cfg.upper, +cfg.gridCount, cfg.mode || 'arithmetic'),
+          cp, cfg.stopLossPrice, cfg.takeProfitPrice
+        )
       }
       gridChart.timeScale().fitContent()
-      if (info) info.textContent = `${sym} · 1h · ${candles.length} bars`
+      if (info) info.textContent = `${sym} · 1h · ${candles.length} bars · ${cfg.gridCount || 0} grid lines`
       new ResizeObserver(() => {
         if (gridChart && el.clientWidth > 0 && el.clientHeight > 0)
           gridChart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
@@ -1640,11 +1668,18 @@
     const el = $('signal-chart-el'); if (!el || !cfg || typeof LightweightCharts === 'undefined') return
     if (signalChart) { try { signalChart.remove() } catch {} signalChart = null }
     signalCandleSeries = null
-    const sym = (cfg.asset || (cfg.symbol || '').replace(/USDT$/, '') || 'ETH') + 'USDT'
+    _signalTrades = Array.isArray(trades) ? trades : []
+    const sym = ((cfg.asset || (cfg.symbol || '').replace(/USDT$/, '') || 'ETH').toUpperCase()) + 'USDT'
     const tf = cfg.timeframe || '1h'
     const info = $('signal-chart-info'); if (info) info.textContent = `${sym} · ${tf} · loading…`
+    // Fetch enough bars to cover all filled trades (short TFs = fewer hours per bar)
+    const mins = _TF_MINS[tf] || 60
+    const filledTrades = _signalTrades.filter(t => t.filled && t.time)
+    const oldestMs = filledTrades.length ? Math.min(...filledTrades.map(t => t.time)) : Date.now()
+    const barsNeeded = Math.ceil((Date.now() - oldestMs) / (mins * 60000)) + 30
+    const limit = Math.min(Math.max(barsNeeded, 300), 1000)
     try {
-      const candles = await _fetchCandles(sym, tf, 300)
+      const candles = await _fetchCandles(sym, tf, limit)
       signalChart = _makeLWChart(el)
       signalCandleSeries = signalChart.addCandlestickSeries({
         upColor: '#22c55e', downColor: '#ef4444',
@@ -1652,21 +1687,10 @@
         wickUpColor: '#22c55e', wickDownColor: '#ef4444',
       })
       signalCandleSeries.setData(candles)
-      if (Array.isArray(trades) && trades.length) {
-        const markers = trades
-          .filter(t => t.time && t.price && t.filled)
-          .map(t => ({
-            time: Math.floor(new Date(t.time).getTime() / 1000),
-            position: t.side === 'buy' ? 'belowBar' : 'aboveBar',
-            color: t.side === 'buy' ? '#22c55e' : '#ef4444',
-            shape: t.side === 'buy' ? 'arrowUp' : 'arrowDown',
-            text: t.side === 'buy' ? 'B' : 'S',
-          }))
-          .sort((a, b) => a.time - b.time)
-        if (markers.length) signalCandleSeries.setMarkers(markers)
-      }
+      _setSignalMarkers(_signalTrades)
       signalChart.timeScale().fitContent()
-      if (info) info.textContent = `${sym} · ${tf} · ${candles.length} bars`
+      const tradeCount = _signalTrades.filter(t => t.filled).length
+      if (info) info.textContent = `${sym} · ${tf} · ${candles.length} bars` + (tradeCount ? ` · ${tradeCount} trades` : '')
       new ResizeObserver(() => {
         if (signalChart && el.clientWidth > 0 && el.clientHeight > 0)
           signalChart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
@@ -2166,6 +2190,9 @@
         const px = t.price ? Number(t.price).toPrecision(6) : '—'
         return `<tr><td style="color:var(--text-dim)">${ts}</td><td style="font-weight:700;color:${sc}">${t.side.toUpperCase()}</td><td style="text-align:right">${Number(t.size).toPrecision(4)}</td><td style="text-align:right">${px}</td><td style="text-align:right;color:${t.filled ? 'var(--gain-light)' : 'var(--loss-light)'}">${t.filled ? '✓' : '✗'}</td></tr>`
       }).join('')
+      // Keep signal chart markers in sync on every poll tick
+      _signalTrades = Array.isArray(trades) ? trades : []
+      _setSignalMarkers(_signalTrades)
     } catch {}
   }
 
