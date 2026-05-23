@@ -1599,32 +1599,52 @@
     }))
   }
 
-  // Push buy/sell arrow markers + optional wave markers onto the signal chart.
-  // Trades must be sorted by time; called after setData and on each poll tick.
-  // waveMarkers = [{time (Unix s), label, position}] — from Elliott wave output.
+  // Push markers onto the signal chart. Three tiers:
+  //  1. Actual bot fills  — bright green/red arrows, price shown (from trade records)
+  //  2. Strategy signals  — blue/purple arrows, just B/S text (from waveMarkers with _isSignal)
+  //  3. Elliott wave dots — small purple circles with ①②③ labels (from waveMarkers without _isSignal)
   function _setSignalMarkers(trades, waveMarkers) {
     if (!signalCandleSeries || typeof LightweightCharts === 'undefined') return
-    const tradeMarkers = (trades || [])
+
+    // Tier 1 — actual filled bot orders
+    const fillMarkers = (trades || [])
       .filter(t => t.time && t.price != null && t.filled)
       .map(t => ({
-        // t.time is Unix ms (Date.now() at fill time)
-        time: Math.floor(t.time / 1000),
+        time: Math.floor(t.time / 1000),  // t.time is Unix ms
         position: t.side === 'buy' ? 'belowBar' : 'aboveBar',
         color: t.side === 'buy' ? '#22c55e' : '#ef4444',
         shape: t.side === 'buy' ? 'arrowUp' : 'arrowDown',
         text: t.side === 'buy'
-          ? `B ${t.price != null ? Number(t.price).toFixed(2) : ''}`
-          : `S ${t.price != null ? Number(t.price).toFixed(2) : ''}`,
+          ? `B ${Number(t.price).toFixed(2)}`
+          : `S ${Number(t.price).toFixed(2)}`,
+        size: 1.5,
       }))
-    const wMarkers = (waveMarkers || []).map(w => ({
-      time: w.time,  // already Unix seconds from server
-      position: w.position || 'aboveBar',
-      color: '#a78bfa',
-      shape: 'circle',
-      text: w.label || '',
-      size: 0.5,
-    }))
-    const all = [...tradeMarkers, ...wMarkers].sort((a, b) => a.time - b.time)
+
+    // Tiers 2 & 3 — extra markers from waveMarkers array
+    const extraMarkers = (waveMarkers || []).map(w => {
+      if (w._isSignal) {
+        // Tier 2 — historical strategy signal (blue buy / purple sell)
+        return {
+          time: w.time,
+          position: w._side === 'buy' ? 'belowBar' : 'aboveBar',
+          color: w._side === 'buy' ? '#3b82f6' : '#a78bfa',
+          shape: w._side === 'buy' ? 'arrowUp' : 'arrowDown',
+          text: w.label || (w._side === 'buy' ? 'B' : 'S'),
+          size: 1,
+        }
+      }
+      // Tier 3 — Elliott wave circle
+      return {
+        time: w.time,
+        position: w.position || 'aboveBar',
+        color: '#a78bfa',
+        shape: 'circle',
+        text: w.label || '',
+        size: 0.5,
+      }
+    })
+
+    const all = [...fillMarkers, ...extraMarkers].sort((a, b) => a.time - b.time)
     try { signalCandleSeries.setMarkers(all) } catch(e) { console.warn('setMarkers', e) }
   }
 
@@ -1712,6 +1732,23 @@
             mainLines = cd.mainLines || []
             subPane = cd.subPane || null
             waveMarkers = cd.waveMarkers || []
+            // Strategy signal markers from the server (where buy/sell signals fired historically)
+            if (Array.isArray(cd.signalMarkers)) {
+              // Merge with actual bot fills: fills take priority (bright), signals are dimmer
+              const fillTimes = new Set(_signalTrades.filter(t => t.filled).map(t => Math.floor(t.time / 1000)))
+              const stratSignals = cd.signalMarkers.filter(m => !fillTimes.has(m.time))
+              // Store as extra wave-style markers — rendered below in _setSignalMarkers
+              waveMarkers = [
+                ...waveMarkers,
+                ...stratSignals.map(m => ({
+                  time: m.time,
+                  label: m.side === 'buy' ? 'B' : 'S',
+                  position: m.side === 'buy' ? 'belowBar' : 'aboveBar',
+                  _isSignal: true,
+                  _side: m.side,
+                }))
+              ]
+            }
           }
         } catch(e) { console.warn('chart-data fetch failed, falling back to Binance', e) }
       }

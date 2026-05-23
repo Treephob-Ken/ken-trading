@@ -32,7 +32,7 @@ import {
   maybeAutostartSignalBots,
   parseSignalConfig,
 } from './signal-bot.js'
-import { generateChartData, STRATEGIES } from './strategy/strategies.js'
+import { generateChartData, generateSignals, STRATEGIES } from './strategy/strategies.js'
 import { fetchKlines } from './strategy/market-data.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -488,10 +488,23 @@ app.get('/api/signal/bots/:id/chart-data', async (req: Request, res: Response) =
     const candles = await fetchKlines(sym, tf, limit)
     const chartData = stratId ? generateChartData(stratId, candles, params) : { mainLines: [] }
 
+    // Strategy signal markers — show where buy/sell signals fired on the historical bars,
+    // mirroring the backtester view. Skip the last (still-forming) candle.
+    const signalMarkers: Array<{ time: number; side: 'buy' | 'sell' }> = []
+    if (stratId) {
+      const signals = generateSignals(stratId, candles, params)
+      for (let i = 0; i < candles.length - 1; i++) {
+        if (signals[i] === 'buy' || signals[i] === 'sell') {
+          signalMarkers.push({ time: candles[i].time, side: signals[i] as 'buy' | 'sell' })
+        }
+      }
+    }
+
     res.json({
       candles: candles.map((c) => ({
         time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
       })),
+      signalMarkers,
       ...chartData,
     })
   } catch (e) {
