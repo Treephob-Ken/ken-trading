@@ -1337,6 +1337,11 @@
         </div>
       </div>
       <div id="signal-chart-el" class="chart-el"></div>
+      <!-- Sub-pane (RSI, MACD, Stochastic, etc.) — shown only when strategy has one -->
+      <div id="signal-subpane-wrap" style="display:none;flex-shrink:0;height:130px;border-top:1px solid var(--border)">
+        <div id="signal-subpane-title" style="padding:4px 10px;font-size:10px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;letter-spacing:.04em;background:var(--bg-card)"></div>
+        <div id="signal-subpane-el" style="height:108px;width:100%"></div>
+      </div>
     </div>
 
     <!-- Hidden placeholders — keep IDs in DOM for JS compatibility -->
@@ -1552,7 +1557,8 @@
   //  updateSizingPreview() and pollGridStats() already in JS.
   // ════════════════════════════════════════════════════════
   let activeCandles = [], candlestickSeries = null, gridChart = null
-  let signalChart = null, signalCandleSeries = null
+  let signalChart = null, signalCandleSeries = null, signalSubChart = null
+  let _signalOverlays = []  // line series added to signal main chart (indicators)
   let _gridPriceLines = [], _signalTrades = []
 
   // Minutes per timeframe — used to calculate how many bars to fetch
@@ -1593,11 +1599,12 @@
     }))
   }
 
-  // Push buy/sell arrow markers onto the signal chart.
+  // Push buy/sell arrow markers + optional wave markers onto the signal chart.
   // Trades must be sorted by time; called after setData and on each poll tick.
-  function _setSignalMarkers(trades) {
+  // waveMarkers = [{time (Unix s), label, position}] — from Elliott wave output.
+  function _setSignalMarkers(trades, waveMarkers) {
     if (!signalCandleSeries || typeof LightweightCharts === 'undefined') return
-    const markers = (trades || [])
+    const tradeMarkers = (trades || [])
       .filter(t => t.time && t.price != null && t.filled)
       .map(t => ({
         // t.time is Unix ms (Date.now() at fill time)
@@ -1609,8 +1616,16 @@
           ? `B ${t.price != null ? Number(t.price).toFixed(2) : ''}`
           : `S ${t.price != null ? Number(t.price).toFixed(2) : ''}`,
       }))
-      .sort((a, b) => a.time - b.time)
-    try { signalCandleSeries.setMarkers(markers) } catch(e) { console.warn('setMarkers', e) }
+    const wMarkers = (waveMarkers || []).map(w => ({
+      time: w.time,  // already Unix seconds from server
+      position: w.position || 'aboveBar',
+      color: '#a78bfa',
+      shape: 'circle',
+      text: w.label || '',
+      size: 0.5,
+    }))
+    const all = [...tradeMarkers, ...wMarkers].sort((a, b) => a.time - b.time)
+    try { signalCandleSeries.setMarkers(all) } catch(e) { console.warn('setMarkers', e) }
   }
 
   async function _fetchCandles(symbol, interval, limit) {
@@ -1664,22 +1679,46 @@
     } catch(e) { if (info) info.textContent = 'Chart unavailable'; console.warn('initGridChart', e) }
   }
 
-  async function initSignalChart(cfg, trades) {
-    const el = $('signal-chart-el'); if (!el || !cfg || typeof LightweightCharts === 'undefined') return
+  async function initSignalChart(cfg, trades, botId) {
+    const el = $('signal-chart-el')
+    if (!el || !cfg || typeof LightweightCharts === 'undefined') return
+
+    // Tear down existing charts and overlay series
     if (signalChart) { try { signalChart.remove() } catch {} signalChart = null }
-    signalCandleSeries = null
+    if (signalSubChart) { try { signalSubChart.remove() } catch {} signalSubChart = null }
+    signalCandleSeries = null; _signalOverlays = []
     _signalTrades = Array.isArray(trades) ? trades : []
+
     const sym = ((cfg.asset || (cfg.symbol || '').replace(/USDT$/, '') || 'ETH').toUpperCase()) + 'USDT'
-    const tf = cfg.timeframe || '1h'
-    const info = $('signal-chart-info'); if (info) info.textContent = `${sym} · ${tf} · loading…`
-    // Fetch enough bars to cover all filled trades (short TFs = fewer hours per bar)
+    const tf  = cfg.timeframe || '1h'
+    const info = $('signal-chart-info')
+    if (info) info.textContent = `${sym} · ${tf} · loading…`
+
+    // Calculate bar limit to cover all filled trades
     const mins = _TF_MINS[tf] || 60
     const filledTrades = _signalTrades.filter(t => t.filled && t.time)
     const oldestMs = filledTrades.length ? Math.min(...filledTrades.map(t => t.time)) : Date.now()
     const barsNeeded = Math.ceil((Date.now() - oldestMs) / (mins * 60000)) + 30
     const limit = Math.min(Math.max(barsNeeded, 300), 1000)
+
     try {
-      const candles = await _fetchCandles(sym, tf, limit)
+      // Fetch candles + indicator overlay data from server (server computes indicators)
+      let candles, mainLines = [], subPane = null, waveMarkers = []
+      if (botId) {
+        try {
+          const cd = await fetch(`/api/signal/bots/${botId}/chart-data?limit=${limit}`).then(r => r.json())
+          if (cd && Array.isArray(cd.candles) && cd.candles.length > 0) {
+            candles = cd.candles
+            mainLines = cd.mainLines || []
+            subPane = cd.subPane || null
+            waveMarkers = cd.waveMarkers || []
+          }
+        } catch(e) { console.warn('chart-data fetch failed, falling back to Binance', e) }
+      }
+      // Fallback: fetch candles directly from Binance if server call failed
+      if (!candles) candles = await _fetchCandles(sym, tf, limit)
+
+      // Build main candlestick chart
       signalChart = _makeLWChart(el)
       signalCandleSeries = signalChart.addCandlestickSeries({
         upColor: '#22c55e', downColor: '#ef4444',
@@ -1687,14 +1726,77 @@
         wickUpColor: '#22c55e', wickDownColor: '#ef4444',
       })
       signalCandleSeries.setData(candles)
-      _setSignalMarkers(_signalTrades)
+
+      // Render indicator overlay lines on the main pane
+      for (const ln of mainLines) {
+        const s = signalChart.addLineSeries({
+          color: ln.color, lineWidth: 2,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        })
+        s.setData(ln.data)
+        _signalOverlays.push(s)
+      }
+
+      // Wave markers (Elliott) — add as price line circles via markers array
+      _setSignalMarkers(_signalTrades, waveMarkers)
+
       signalChart.timeScale().fitContent()
+
       const tradeCount = _signalTrades.filter(t => t.filled).length
-      if (info) info.textContent = `${sym} · ${tf} · ${candles.length} bars` + (tradeCount ? ` · ${tradeCount} trades` : '')
+      const overlayLabel = mainLines.length ? ` · ${mainLines.map(l => l.id).join(',')}` : ''
+      if (info) info.textContent = `${sym} · ${tf} · ${candles.length} bars` +
+        (tradeCount ? ` · ${tradeCount} trades` : '') + overlayLabel
+
       new ResizeObserver(() => {
         if (signalChart && el.clientWidth > 0 && el.clientHeight > 0)
           signalChart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
       }).observe(el)
+
+      // Sub-pane chart (RSI, MACD, Stoch, etc.)
+      const spWrap = $('signal-subpane-wrap')
+      const spEl   = $('signal-subpane-el')
+      const spTitle = $('signal-subpane-title')
+      if (subPane && spEl && spWrap) {
+        spWrap.style.display = 'block'
+        if (spTitle) spTitle.textContent = subPane.title || ''
+        signalSubChart = LightweightCharts.createChart(spEl, {
+          width: spEl.clientWidth || 700, height: spEl.clientHeight || 108,
+          layout: { background: { color: 'transparent' }, textColor: '#a0a0c0' },
+          grid: { vertLines: { color: '#1e1e30' }, horzLines: { color: '#1e1e30' } },
+          crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+          timeScale: { borderColor: '#252538', timeVisible: true, secondsVisible: false },
+          rightPriceScale: { borderColor: '#252538' },
+          handleScroll: false, handleScale: false,
+        })
+        // Sync sub-pane time scale with main chart
+        signalChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+          if (range && signalSubChart) signalSubChart.timeScale().setVisibleLogicalRange(range)
+        })
+        for (const ln of subPane.lines) {
+          const s = signalSubChart.addLineSeries({
+            color: ln.color, lineWidth: 2,
+            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          })
+          s.setData(ln.data)
+          // Draw reference levels (e.g. RSI 30/70) as dashed price lines
+          if (subPane.refLines && ln === subPane.lines[0]) {
+            for (const level of subPane.refLines) {
+              s.createPriceLine({
+                price: level, color: '#5b6478', lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                axisLabelVisible: true, title: '',
+              })
+            }
+          }
+        }
+        signalSubChart.timeScale().fitContent()
+        new ResizeObserver(() => {
+          if (signalSubChart && spEl.clientWidth > 0 && spEl.clientHeight > 0)
+            signalSubChart.applyOptions({ width: spEl.clientWidth, height: spEl.clientHeight })
+        }).observe(spEl)
+      } else if (spWrap) {
+        spWrap.style.display = 'none'
+      }
     } catch(e) { if (info) info.textContent = 'Chart unavailable'; console.warn('initSignalChart', e) }
   }
 
@@ -2302,7 +2404,7 @@
       renderSignalBanner(status); renderSignalStats(status)
       // init chart with trade markers (fire-and-forget, errors caught inside)
       const _trades = await fetch('/api/signal/bots/' + id + '/trades').then(r => r.json()).catch(() => [])
-      setTimeout(() => initSignalChart(status.config, Array.isArray(_trades) ? _trades : []), 0)
+      setTimeout(() => initSignalChart(status.config, Array.isArray(_trades) ? _trades : [], id), 0)
       await loadSignalLogs(); refreshAccount()
     } catch (e) { showToast(e.message, true) }
   }

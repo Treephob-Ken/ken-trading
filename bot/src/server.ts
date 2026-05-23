@@ -32,7 +32,8 @@ import {
   maybeAutostartSignalBots,
   parseSignalConfig,
 } from './signal-bot.js'
-import { STRATEGIES } from './strategy/strategies.js'
+import { generateChartData, STRATEGIES } from './strategy/strategies.js'
+import { fetchKlines } from './strategy/market-data.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DASHBOARD_PATH = join(__dirname, '..', 'dashboard', 'index.html')
@@ -463,6 +464,38 @@ app.get('/api/signal/bots/:id/trades', (req: Request, res: Response) => {
     res.json(listSignalBotTrades(req.params.id))
   } catch (e) {
     res.status(404).json({ error: (e as Error).message })
+  }
+})
+
+// Returns candles + indicator overlay data for the signal chart.
+// The server fetches candles server-side so it can compute indicators once;
+// the dashboard renders whatever mainLines / subPane it receives.
+app.get('/api/signal/bots/:id/chart-data', async (req: Request, res: Response) => {
+  try {
+    const bot = getSignalBot(req.params.id)
+    const status = bot.getStatus()
+    const cfg = status.config as {
+      asset?: string; symbol?: string; timeframe?: string
+      strategy?: string; params?: Record<string, number>
+    }
+    const asset = (cfg.asset || (cfg.symbol ?? '').replace(/USDT$/i, '') || 'ETH').toUpperCase()
+    const sym = asset + 'USDT'
+    const tf = cfg.timeframe || '1h'
+    const stratId = cfg.strategy as Parameters<typeof generateChartData>[0] | undefined
+    const params = (cfg.params ?? {}) as Record<string, number>
+    const limit = Math.min(Number(req.query.limit) || 500, 1000)
+
+    const candles = await fetchKlines(sym, tf, limit)
+    const chartData = stratId ? generateChartData(stratId, candles, params) : { mainLines: [] }
+
+    res.json({
+      candles: candles.map((c) => ({
+        time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+      })),
+      ...chartData,
+    })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
   }
 })
 

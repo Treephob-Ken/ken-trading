@@ -380,3 +380,213 @@ export function generateSignals(
     }
   }
 }
+
+// ── Chart overlay data ──────────────────────────────────────────────────────
+// Returns indicator series (mainLines, subPane) for a strategy so the dashboard
+// can render overlays on the LW Charts candlestick chart. No signal logic here —
+// signal computation stays in generateSignals.
+
+export interface SeriesLine {
+  id: string
+  color: string
+  data: Array<{ time: number; value: number }>
+}
+
+export interface ChartDataOutput {
+  mainLines: SeriesLine[]
+  subPane?: {
+    title: string
+    lines: SeriesLine[]
+    refLines?: number[]
+  }
+  waveMarkers?: Array<{ time: number; label: string; position: 'aboveBar' | 'belowBar' }>
+  priceLines?: Array<{ price: number; color: string; label: string }>
+}
+
+function toLine(
+  times: number[],
+  values: number[],
+): Array<{ time: number; value: number }> {
+  return times
+    .map((t, i) => ({ time: t, value: values[i] }))
+    .filter((p) => isFinite(p.value))
+}
+
+export function generateChartData(
+  id: StrategyId,
+  candles: Candle[],
+  params: Record<string, number>,
+): ChartDataOutput {
+  const closes = candles.map((c) => c.close)
+  const highs = candles.map((c) => c.high)
+  const lows = candles.map((c) => c.low)
+  const times = candles.map((c) => c.time)
+
+  switch (id) {
+    case 'macd': {
+      const m = macd(closes, params.fast, params.slow, params.signal)
+      return {
+        mainLines: [],
+        subPane: {
+          title: 'MACD',
+          lines: [
+            { id: 'macd',   color: '#3b9eff', data: toLine(times, m.macd) },
+            { id: 'signal', color: '#ff9f43', data: toLine(times, m.signal) },
+          ],
+        },
+      }
+    }
+    case 'ema': {
+      const fast = ema(closes, params.fast)
+      const slow = ema(closes, params.slow)
+      return {
+        mainLines: [
+          { id: 'emaFast', color: '#3b9eff', data: toLine(times, fast) },
+          { id: 'emaSlow', color: '#ff9f43', data: toLine(times, slow) },
+        ],
+      }
+    }
+    case 'sma': {
+      const fast = sma(closes, params.fast)
+      const slow = sma(closes, params.slow)
+      return {
+        mainLines: [
+          { id: 'smaFast', color: '#3b9eff', data: toLine(times, fast) },
+          { id: 'smaSlow', color: '#ff9f43', data: toLine(times, slow) },
+        ],
+      }
+    }
+    case 'supertrend': {
+      const st = supertrend(highs, lows, closes, params.period, params.mult)
+      return {
+        mainLines: [
+          { id: 'supertrend', color: '#a78bfa', data: toLine(times, st.line) },
+        ],
+      }
+    }
+    case 'psar': {
+      const sar = psar(highs, lows, params.step, params.max)
+      return {
+        mainLines: [{ id: 'psar', color: '#a78bfa', data: toLine(times, sar) }],
+      }
+    }
+    case 'donchian': {
+      const d = donchian(highs, lows, params.period)
+      return {
+        mainLines: [
+          { id: 'dcUpper', color: 'rgba(237,75,75,0.7)',   data: toLine(times, d.upper) },
+          { id: 'dcLower', color: 'rgba(29,191,115,0.7)',  data: toLine(times, d.lower) },
+        ],
+      }
+    }
+    case 'rsi': {
+      const r = rsi(closes, params.period)
+      return {
+        mainLines: [],
+        subPane: {
+          title: 'RSI',
+          lines: [{ id: 'rsi', color: '#c084fc', data: toLine(times, r) }],
+          refLines: [params.oversold ?? 30, params.overbought ?? 70],
+        },
+      }
+    }
+    case 'stochastic': {
+      const s = stochastic(highs, lows, closes, params.kPeriod, params.kSmooth, params.dPeriod)
+      return {
+        mainLines: [],
+        subPane: {
+          title: 'Stochastic',
+          lines: [
+            { id: 'k', color: '#3b9eff', data: toLine(times, s.k) },
+            { id: 'd', color: '#ff9f43', data: toLine(times, s.d) },
+          ],
+          refLines: [20, 80],
+        },
+      }
+    }
+    case 'stochrsi': {
+      const s = stochRsi(closes, params.rsiPeriod, params.stochPeriod, params.kSmooth, params.dSmooth)
+      return {
+        mainLines: [],
+        subPane: {
+          title: 'Stoch RSI',
+          lines: [
+            { id: 'k', color: '#3b9eff', data: toLine(times, s.k) },
+            { id: 'd', color: '#ff9f43', data: toLine(times, s.d) },
+          ],
+          refLines: [20, 80],
+        },
+      }
+    }
+    case 'cci': {
+      const c = cci(highs, lows, closes, params.period)
+      return {
+        mainLines: [],
+        subPane: {
+          title: 'CCI',
+          lines: [{ id: 'cci', color: '#c084fc', data: toLine(times, c) }],
+          refLines: [-100, 0, 100],
+        },
+      }
+    }
+    case 'williamsr': {
+      const w = williamsR(highs, lows, closes, params.period)
+      return {
+        mainLines: [],
+        subPane: {
+          title: 'Williams %R',
+          lines: [{ id: 'wr', color: '#c084fc', data: toLine(times, w) }],
+          refLines: [-80, -20],
+        },
+      }
+    }
+    case 'bollinger': {
+      const b = bollinger(closes, params.period, params.mult)
+      return {
+        mainLines: [
+          { id: 'bbUpper', color: 'rgba(237,75,75,0.7)',  data: toLine(times, b.upper) },
+          { id: 'bbMid',   color: 'rgba(150,150,150,0.6)', data: toLine(times, b.mid) },
+          { id: 'bbLower', color: 'rgba(29,191,115,0.7)', data: toLine(times, b.lower) },
+        ],
+      }
+    }
+    case 'elliott': {
+      const pivots = ewZigZag(candles, params.zigzag ?? 3)
+      const zigzagData = pivots.map((p) => ({
+        time: candles[p.idx].time,
+        value: p.kind === 'high' ? candles[p.idx].high : candles[p.idx].low,
+      }))
+      const waveLabels = ['①', '②', '③', '④', '⑤']
+      const waveMarkers = pivots.slice(0, 5).map((p, i) => ({
+        time: candles[p.idx].time,
+        label: waveLabels[i] ?? `${i + 1}`,
+        position: (p.kind === 'high' ? 'aboveBar' : 'belowBar') as 'aboveBar' | 'belowBar',
+      }))
+      return {
+        mainLines: [{ id: 'zigzag', color: 'rgba(167,139,250,0.8)', data: zigzagData }],
+        waveMarkers,
+      }
+    }
+    case 'traderxo': {
+      const fastEma = ema(closes, params.fast)
+      const slowEma = ema(closes, params.slow)
+      const maFilter = ema(closes, params.maLen)
+      const sr = stochRsi(closes, params.rsiLen, params.stochLen, 3, 3)
+      return {
+        mainLines: [
+          { id: 'txoFast', color: '#3b9eff', data: toLine(times, fastEma) },
+          { id: 'txoSlow', color: '#ff9f43', data: toLine(times, slowEma) },
+          { id: 'txoMA',   color: 'rgba(167,139,250,0.5)', data: toLine(times, maFilter) },
+        ],
+        subPane: {
+          title: 'StochRSI',
+          lines: [
+            { id: 'txoK', color: '#3b9eff', data: toLine(times, sr.k) },
+            { id: 'txoD', color: '#ff9f43', data: toLine(times, sr.d) },
+          ],
+          refLines: [20, 50, 80],
+        },
+      }
+    }
+  }
+}
