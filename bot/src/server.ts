@@ -476,12 +476,12 @@ app.get('/api/signal/bots/:id/chart-data', async (req: Request, res: Response) =
     const status = bot.getStatus()
     const cfg = status.config as {
       asset?: string; symbol?: string; timeframe?: string
-      strategy?: string; params?: Record<string, number>
+      strategyId?: string; params?: Record<string, number>
     }
     const asset = (cfg.asset || (cfg.symbol ?? '').replace(/USDT$/i, '') || 'ETH').toUpperCase()
     const sym = asset + 'USDT'
     const tf = cfg.timeframe || '1h'
-    const stratId = cfg.strategy as Parameters<typeof generateChartData>[0] | undefined
+    const stratId = cfg.strategyId as Parameters<typeof generateChartData>[0] | undefined
     const params = (cfg.params ?? {}) as Record<string, number>
     const limit = Math.min(Number(req.query.limit) || 500, 1000)
 
