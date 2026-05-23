@@ -18,6 +18,7 @@ import {
   closePosition,
   executeMarketTrade,
   getAccountState,
+  getAssetInfo,
   listAssets,
   parseTradeRequest,
   placeOrder,
@@ -363,6 +364,18 @@ app.get('/api/assets', async (_req: Request, res: Response) => {
     res.json(await listAssets())
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Asset price + size constraints — used by the manual trade panel so the
+// dashboard can show min order size and convert USDC → asset units.
+app.get('/api/asset-info', async (req: Request, res: Response) => {
+  const asset = typeof req.query.asset === 'string' ? req.query.asset.trim().toUpperCase() : ''
+  if (!asset) { res.status(400).json({ error: 'asset query param required' }); return }
+  try {
+    res.json(await getAssetInfo(asset))
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
   }
 })
 

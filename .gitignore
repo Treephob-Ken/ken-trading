@@ -83,4 +83,7 @@ Thumbs.db
 # Misc skill files
 ui-ux-pro-max-skill/
 
+# graphify skill output
+graphify-out/
+
 .vercel

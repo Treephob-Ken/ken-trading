@@ -319,6 +319,18 @@ export async function placeOrder(params: {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Price + size constraints for a single asset. Used by the manual trade panel
+// so the dashboard can show the minimum order and convert USDC → asset units.
+export async function getAssetInfo(asset: string): Promise<{
+  asset: string; midPx: number; markPx: number
+  szDecimals: number; minSz: number; minNotional: number
+}> {
+  const { info } = clients()
+  const meta = await getAssetMeta(info, asset.trim().toUpperCase())
+  const minSz = Math.pow(10, -meta.szDecimals)
+  return { asset: meta.name, midPx: meta.midPx, markPx: meta.markPx, szDecimals: meta.szDecimals, minSz, minNotional: minSz * meta.midPx }
+}
+
 // The Hyperliquid perp universe — asset names available to trade. The web UI
 // uses this to populate its currency picker so a user can't type an asset that
 // Hyperliquid doesn't list.
@@ -331,19 +343,22 @@ export async function listAssets(): Promise<string[]> {
     .sort()
 }
 
+export interface PositionInfo {
+  asset: string
+  size: number
+  side: 'long' | 'short'
+  entryPx: number | null
+  unrealizedPnl: number
+}
+
 export interface AccountState {
   network: 'testnet' | 'mainnet'
   user: string
   accountValue: number
   withdrawable: number
   currentPrice: number | null  // mid price for the queried asset; null when no asset supplied
-  position: {
-    asset: string
-    size: number
-    side: 'long' | 'short'
-    entryPx: number | null
-    unrealizedPnl: number
-  } | null
+  position: PositionInfo | null          // single asset position (when ?asset= is supplied)
+  allPositions: PositionInfo[]           // all open positions across every asset
 }
 
 // Snapshot of the agent account: network, balance, and the open position for
@@ -375,6 +390,20 @@ export async function getAccountState(asset?: string): Promise<AccountState> {
     }
   }
 
+  // Build the full list of open positions from all asset positions
+  const allPositions: PositionInfo[] = state.assetPositions
+    .filter((ap) => Number(ap.position.szi) !== 0)
+    .map((ap) => {
+      const szi = Number(ap.position.szi)
+      return {
+        asset: ap.position.coin,
+        size: Math.abs(szi),
+        side: szi > 0 ? 'long' : 'short',
+        entryPx: ap.position.entryPx ? Number(ap.position.entryPx) : null,
+        unrealizedPnl: Number(ap.position.unrealizedPnl),
+      }
+    })
+
   return {
     network: c.isTestnet ? 'testnet' : 'mainnet',
     user: c.user,
@@ -382,6 +411,7 @@ export async function getAccountState(asset?: string): Promise<AccountState> {
     withdrawable: Number(state.withdrawable),
     currentPrice,
     position,
+    allPositions,
   }
 }
 

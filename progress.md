@@ -284,3 +284,219 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 - No webhook / alert when SL or TP triggers
 - Signal Trader budget mode freezes size at start; no periodic recalculation as price drifts
 
+---
+
+### 2026-05-23 — Repo cleanup + CLAUDE.md overhaul
+
+**What changed:**
+- Deleted 4 redundant trading-guide markdown files (`trading_guide.md`, `trading_guide_simple.md`, `trading_instructions.md`, `TRADING_GUIDE_EASY.md`) — all superseded by `HOW_TO_TRADE.md`.
+- Added `graphify-out/` to `.gitignore` (generated skill output, already untracked).
+- Rewrote `CLAUDE.md` to cover all additions since Phase 3: signal-bot subsystem, HTTP server API table, trade.ts / limits.ts, Cloudflare Tunnel setup (`bot.garlic-trading.net`), new web-app lib modules (markov, ensemble, walkforward, multiTF, gridBotAuto, env, format, types.ts), and the `progress.md` logging convention.
+- `src/pages/SignalTraderPage.tsx` exists but is intentionally not wired to `App.tsx` (removed from Vercel in Phase 7 because Vercel can't reach the local bot). Left in repo — `trigger-bot` branch suggests it may be restored.
+
+**Gotchas:**
+- `HOW_TO_TRADE.md` is now the single user-facing guide — do not create additional trading guide files.
+- Log every change here in `progress.md`; CLAUDE.md is for architecture, not changelog.
+- **CLAUDE.md corrected**: `npm start` runs `index.ts` (legacy standalone single-bot, no dashboard). The server is `npm run serve` → `server.ts`. `start_bot.bat` correctly uses `npm run serve`. Do NOT confuse the two entry points.
+
+
+---
+
+### 2026-05-23 — Dashboard redesign + bug fixes (UI/UX Pro Max)
+
+**What changed (bot/dashboard/index.html):**
+- **Removed Grid Chart entirely** — user request; `fetchCandles`, `initChart`, `destroyChart`, `buildLines`, `updateGridLines` all deleted, along with the chart HTML card and `.chart-card`/`.chart-header`/`.chart-meta` CSS.
+- **Fixed corrupted `.log-empty` CSS** — a misplaced comment had broken the `padding:` rule and embedded a broken `ensemble-list` block inside it. Fixed to `padding: var(--s5); text-align: center;`.
+- **Fixed duplicate `.ensemble-list` block** — the corrupted block was removed; the clean block at line ~500 remains.
+- **Fixed duplicate `.ensemble-row:hover`** — appeared twice in the real ensemble-list block; removed duplicate.
+- **Added `.jump-btn` CSS** — the "↓ Latest" button was referenced in HTML for both Grid and Signal log boxes but had no CSS, making it invisible. Now has position:absolute, brand color, slide-in transition.
+- **Removed `lightweight-charts` script tag** — no longer needed after chart removal.
+- **Replaced emoji icons with SVGs** — ⚡ header icon, 🤖 empty state, 🗑 delete buttons all now use inline SVG per UI/UX Pro Max rule (no emoji as structural icons).
+- **Added Trade Log tab** — third tab with a global SSE log viewer (`/api/logs/stream`). Includes per-bot filter buttons (auto-generated as new bot IDs appear), level filters (All/Fills/Issues/Info), clear, and jump-to-bottom.
+- **Stat card accent borders** — colored left-border accents (gain=green, loss=red, warn=amber, neutral=brand) to distinguish card meaning at a glance.
+- **Tabular nums** — `font-variant-numeric: tabular-nums` on `.stat` and `.stat-value` for stable number columns.
+- **Stats grid gap** — increased from `var(--s2)` to `var(--s3)` for better breathing room.
+- **Branding** — header title updated to "Garlic Trading" with sub "Hyperliquid · Local Dashboard".
+- **Binance API** — changed `api.binance.com` (geo-blocked) → `data-api.binance.vision` in ST price ticker fetch (remaining after chart removal).
+
+**Installed UI/UX Pro Max skill** — cloned `github.com/nextlevelbuilder/ui-ux-pro-max-skill` into `~/.claude/skills/` (7 sub-skills: banner-design, brand, design, design-system, slides, ui-styling, ui-ux-pro-max). Repo removed after install.
+
+**Gotchas:**
+- The emoji-inside-CSS corruption came from a previous editor that injected a comment block mid-rule. Check for this pattern if other styles behave unexpectedly.
+- `jump-btn` must be inside a `position:relative` container (`.log-wrap` already sets this).
+- Trade Log tab routes logs through the existing `connectSSE()` call; no new SSE connection opened.
+
+---
+
+### 2026-05-23 — Manual Trade page + Trade Log portfolio overview
+
+**Config pane fix**: The first `field-row` in Grid Bot config had inline `grid-template-columns:1fr` overriding the default `1fr 1fr`, making "Display Name" and "Asset" stack vertically. Changed to `grid-template-columns:2fr 1fr` so they're side-by-side (Name wider, Asset narrower).
+
+**New Manual Trade tab (4th tab `page-trade`):**
+- Full 2-column layout: left = Account overview + Open Position + Recent Fills; right = sticky Place Order panel
+- Account card shows equity, withdrawable, margin used (computed as accountValue − withdrawable)
+- Open Position card shows big unrealized P&L number, side/asset/size/entry grid, close-slippage input, "Close Position" button (calls `POST /api/close { asset, slippagePct }`)
+- Place Order panel: asset input (Binance price auto-fetches via `data-api.binance.vision`), size, slippage, 25%/50%/75%/Max quick-size buttons (sized against withdrawable/price), order preview, Buy/Sell buttons, status line
+- Recent Fills table built from session fills (client-side list)
+- `initTradePage()` called by `switchTab('trade')`; polls account every 5 s while on tab
+- Manual Trade card removed from Signal Trader sidebar; `stManualTrade()` replaced by `trManualTrade()`; stale `st-manual-panel` show/hide calls cleaned up
+
+**Trade Log portfolio overview (top of `page-log`):**
+- 3-column strip: Account (equity + withdrawable), Open Position (badge/asset/size/entry/UPnL), Quick Close (asset input + slippage + Close button)
+- Position panel auto-fills asset from live position; "Quick Close" posts to `POST /api/close`
+- `refreshLogAccount()` runs on tab switch + every 5 s while on log tab
+
+**Gotchas:**
+- `/api/close` body: `{ asset: string, slippagePct?: number }`. Returns `{ filled, message }` on no-position case.
+- `trQuickSize()` reads withdrawable from the display text, so it requires the account to load first.
+- The Trade page price fetch runs Binance, not Hyperliquid — there's no `/api/price` endpoint. A 400ms debounce prevents flooding on fast typing.
+
+---
+
+### 2026-05-23 — Manual Trade page data-loading fixes
+
+**Root cause:** Bot server was never restarted after last session's code changes, so the new `/api/asset-info` endpoint didn't exist in the running process. Also several bugs in the dashboard JS.
+
+**Bugs fixed (`bot/dashboard/index.html`):**
+
+1. **`trAssetsLoaded = true` before `try` block** — If `/api/assets` failed on first visit (server cold/down), the flag was set before confirming success, so assets would never retry. Moved inside `try`, after `assets.length` is confirmed.
+
+2. **Price never auto-refreshes** — Once an asset was selected, `trAssetChanged()` fetched the price once and never updated it. Added `trPriceTimer` (module-level interval var) that polls `/api/asset-info` every 5 s while an asset is selected. Cleared via `destroyTradeTimers()` (which already cleared `trAccountTimer`).
+
+3. **Silent price failures** — When `/api/asset-info` returned an error or non-JSON (e.g. server not restarted), the catch silently set price to `—` with no user feedback. Replaced with `fetchAssetPrice()` helper that:
+   - Shows "Server error — restart bot" (red) when response isn't parseable JSON
+   - Shows "Not found" (amber) when the asset doesn't exist on Hyperliquid
+   - Shows "No connection" (red) on network failure
+   - Parses text first (not `.json()` directly) to safely handle HTML 404 responses
+
+4. **`slippagePct` → `maxSlippagePct` field mismatch** — All 4 manual trade API calls (`/api/order` once, `/api/close` three times) were sending `slippagePct` but the server reads `maxSlippagePct`. Orders worked but always used the default 2% slippage, ignoring the UI input. Fixed in all 4 places. (Signal bot config still uses `slippagePct` — that's a different JSON field, correct as-is.)
+
+**TypeScript build:** Passes clean (`npm run build` — no errors in `trade.ts` or `server.ts`).
+
+**Action required:** Restart the bot server (`cd bot && npm run serve`) to activate the `/api/asset-info` endpoint.
+
+**Gotchas:**
+- `fetchAssetPrice()` reads `.text()` first then `JSON.parse()` to distinguish HTML-404 from JSON-404. Using `.json()` directly would throw on HTML responses (like Express's default 404 page before the route was registered), masking the real error.
+- The price timer (`trPriceTimer`) must be cleared in `trAssetChanged()` at the top before starting a new one, otherwise selecting a second asset creates a second parallel timer for the old asset.
+
+---
+
+### Sidebar Redesign — 2026-05-23
+
+#### Web app (garlic-trading.vercel.app)
+**What changed:**
+- Replaced the top header (brand + tab nav) with a left icon nav rail (`src/components/Sidebar.tsx`)
+- Layout changed from `flex-col` to `h-screen flex overflow-hidden` in `App.tsx`
+- Signal Trader page (`SignalTraderPage.tsx`) wired into `App.tsx` as a third nav item (Radio icon)
+- Sticky aside top values updated: `top-[97px]` → `top-5`, `top-[52px]` → `top-5` (old values assumed header height, now irrelevant)
+- Retained the 3px brand accent stripe at top of the content area
+
+**Design:**
+- 60px icon rail: CandlestickChart brand logo, 3 nav buttons (LineChart / LayoutGrid / Radio), hover tooltip labels
+- Active state: `bg-brand/15 text-brand` + left accent bar
+- Tooltip: absolute-positioned floating label slides in to the right on hover
+
+#### Bot dashboard (garlic-trading.net)
+**What changed:**
+- Removed tab nav from `<header>` (slimmed to brand + connection status only)
+- Added `<div class="app-main">` wrapper around icon rail + pages
+- Added 60px `<nav class="icon-rail">` with SVG icons for Grid Bots / Signal Trader / Trade & Log
+- `switchTab()` updated to also toggle `.active` on `.rail-btn` elements
+- Running-dot pulse propagates to `rail-dot-grid` and `rail-dot-signal` (small indicator dots on the rail buttons)
+
+**Gotchas:**
+- The `tab-btn-*` elements still exist in the DOM (hidden by the header being slimmed) so existing `has-running` toggle code still works without breakage
+- Rail tooltip arrows use `::before`/`::after` pseudo-elements — these need `position:relative` on `.rail-btn` (already set)
+- Sticky positioning on page controls still works because the scroll container is the page's `.pane-right` / BacktesterPage's overflow-y-auto parent, not the viewport
+
+---
+
+### 2026-05-23 — Theme alignment + BentoGrid stat cards + GlowCard effect (bot dashboard)
+
+**What changed (`bot/dashboard/index.html`):**
+
+**Theme alignment:**
+- `--bg` changed `#080810` → `#000000` (pure black to match Vercel web app)
+- `--bg-raised` `#0c0c18` → `#060609`, `--surface` `#111122` → `#0a0a0f`, `--surface-2` `#181830` → `#101017`, `--surface-3` `#1e1e38` → `#16161f`
+- Body background updated: removed heavy single-color purple radial; replaced with subtle `radial-gradient` corner accents (purple tl, blue tr) + a fine `40px×40px` grid of 1.2%-opacity lines — identical pattern to the Vercel web app's Tailwind `bg-grid` style
+
+**GlowCard cursor-following spotlight:**
+- `:root` gains `--gx`, `--gy`, `--gxp` custom properties updated on `pointermove`
+- `.card` gets a `background-image: radial-gradient(300px at --gx --gy ...)` fill spotlight (`!important` to beat the existing background shorthand)
+- `.card::before` / `.card::after` use a CSS mask trick (`mask-clip: padding-box, border-box; mask-composite: intersect`) to light up only the 1px border ring — no fill leaks inside the card
+- `.stat` was intentionally kept separate from glow pseudo-elements to avoid `::before`/`::after` conflicts with bento-stat's dot-grid overlay
+
+**Glow hue: blue → purple blend:**
+- Changed hue formula from `calc(263 + xp*60)` (purple→pink) to `calc(213 + xp*50)` (blue→purple): cursor left = 213° (blue, matching Vercel's brand-blue), cursor right = 263° (violet, matching the bot's brand-purple)
+- Removed `.stat` from glow rules entirely (`.card` only), which also removes pseudo-element conflicts
+
+**BentoGrid stat tiles:**
+- New `.bento-stat` class: `bg-raised` background, `border`, `r-md` rounded, flex-col layout, dot-grid `::before` overlay that fades in on hover, `position: relative; overflow: hidden` for the overlay clipping
+- Accent variants: `.bento-stat.gain-accent / .loss-accent / .warn-accent / .neutral-accent` — same left-border treatment as old `.stat`
+- Grid utilities: `.bento-grid .bento-grid-4 .bento-grid-3 .bento-grid-2`
+- Inner classes `stat-label`, `stat-value`, `stat-sub` unchanged — JS color updates (`$('s-realized').className = 'stat-value gain'`) still work
+
+**shadcn-style card composables:**
+- Added `.card-header`, `.card-header-row`, `.card-heading`, `.card-desc`, `.card-content`, `.card-footer` CSS — replaces the `.card { padding } + .card-title { margin-bottom }` pattern with explicit header/content sections
+
+**HTML updated:**
+- Grid Bot Live Stats: `card-title` → `card-header`; `.stats-grid-4` of `.stat` → `.bento-grid.bento-grid-4` of `.bento-stat`
+- Grid Bot Safety: same pattern, `.stats-grid-3` → `.bento-grid.bento-grid-3`
+- Signal Trader Live Stats: same pattern, `.stats-grid-4` → `.bento-grid.bento-grid-4`
+- Signal Trader Protection Status: same pattern, `.stats-grid-2` → `.bento-grid.bento-grid-2`
+- Signal Trader Account: same pattern, `.stats-grid-3` → `.bento-grid.bento-grid-3`
+- Trade & Log Account: same pattern, `.stats-grid-3` → `.bento-grid.bento-grid-3`
+- All inner IDs preserved (no JS changes needed)
+
+**Web app new files:**
+- `src/lib/utils.ts` — `cn()` class merger utility
+- `src/components/ui/card.tsx` — shadcn-style Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter
+- `src/components/ui/bento-grid.tsx` — BentoGrid + BentoCell components with dot-grid overlay, gradient border shine, icon/status/tags/CTA
+
+**Gotchas:**
+- `.card` glow uses `!important` on `background-image` to beat the `background: var(--surface-2)` shorthand which sets `background-image: none`
+- `background-attachment: fixed` makes the gradient viewport-relative — cursor position in `px` maps directly to the correct spot on every card simultaneously
+- `mask-composite: intersect` treats areas outside a layer's clip as opaque=1, so `padding-box` (layer 1 transparent interior) × `border-box` (layer 2 full area) = border strip only visible
+- Remove `.stat::before/::after` from glow: the `.bento-stat::before` dot-grid overlay uses `::before` for its own purpose — having glow pseudo-elements on `.stat` too would conflict if both classes were ever on the same element
+
+---
+
+### 2026-05-23 — Bot dashboard pane redesign + price charts (Stage 1+2)
+
+**Motivation:** User requested: fewer cards on right panes, logs only on Trade Log page, chart on Grid Bot page like Vercel web app, chart + signals on Signal Trader page.
+
+**What changed (`bot/dashboard/index.html`):**
+
+**CSS additions:**
+- `.chart-card { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }` — makes the chart card fill remaining height in the pane
+- `.chart-el { flex: 1; min-height: 0; width: 100%; }` — the div LW Charts renders into; fills card
+- Added `<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js">` in `<head>` — pinned to v4.2.0 (v5 removed `addCandlestickSeries` and `setMarkers`)
+
+**Grid Bot right pane (done in previous session):**
+- Replaced: 8-tile Live Stats card + 3-tile Safety card + Log panel
+- With: single combined compact card (4-tile row: Price/Realized/Total/State + 3-tile row: SL/TP/Liq) + chart card
+- `pane-right` got `overflow:hidden` so chart fills remaining flex space
+- Removed IDs kept alive in hidden `display:none` div: `safety-warning`, `s-floating`, `s-position`, `s-orders`, `s-fills`, `s-fees`, `s-size`, `s-budget`, `log-count`, `log-box`, `jump-btn`
+
+**Signal Trader right pane:**
+- Replaced: Banner + Live Stats (4 tiles) + Protection Status (2 tiles) + Account (3 tiles + position card) + Trade Journal + Activity Log
+- With: Banner (unchanged) + compact stats card (3+3 tiles: LastSignal/Trades/LastEval + MTFTrend/DailyPnL/LastError) + chart card
+- `pane-right` got `overflow:hidden`
+- Removed IDs kept alive in hidden div: `st-log-box`, `st-jump-btn`, `st-log-context`, `st-journal-body/empty/table/count`, `st-balance`, `st-withdrawable`, `st-position-none/card`, `st-pos-badge/asset/size/entry/upnl`, `st-started-at`, `st-network-badge`
+
+**Chart JavaScript (Stage 2):**
+- `activeCandles`, `candlestickSeries`, `gridChart` — grid chart state (names match existing `pollGridStats`/`updateSizingPreview` references)
+- `signalChart`, `signalCandleSeries` — signal chart state
+- `_gridPriceLines[]` — tracks price line handles for remove-before-redraw pattern
+- `buildLines(lower, upper, count, mode)` — generates `{price}[]` for arithmetic/geometric grids; called by `updateSizingPreview()` and `clearGridStats()` already in JS
+- `updateGridLines(lines, currentPrice, slPrice, tpPrice)` — removes old price lines, re-draws all: grid lines in blue (below price) / purple (above), SL in red, TP in green
+- `_fetchCandles(symbol, interval, limit)` — Binance `data-api.binance.vision` REST, returns `{time,open,high,low,close}[]`
+- `_makeLWChart(el)` — creates LW chart with dark theme (transparent bg, `#252538` grid/border, `#a0a0c0` text)
+- `initGridChart(cfg)` — fetches 300×1h bars for `cfg.asset`, draws candles + grid lines + SL/TP, fits content, attaches ResizeObserver; hooked into `selectBot(id)` via `setTimeout(() => initGridChart(cfgRes), 0)` (defer 1 tick so layout paints first)
+- `initSignalChart(cfg, trades)` — fetches 300 bars at `cfg.timeframe`, draws candles + buy/sell arrow markers from filled trades, fits content; hooked into `selectSignalBot(id)` (fetches trades from `/api/signal/bots/:id/trades` inline before defer)
+
+**Gotchas:**
+- LW Charts v5 breaks `addCandlestickSeries()` and `series.setMarkers()` — pinned to v4.2.0 on CDN
+- `setTimeout(() => ..., 0)` defers chart init by one event loop tick so `el.clientWidth/clientHeight` are non-zero after the flex layout paints
+- `candlestickSeries` variable name matches what `updateSizingPreview()` and `pollGridStats()` already check (`if (candlestickSeries && ...)`) — must stay as-is
+- Signal activity log and trade journal still appended to hidden DOM elements (no errors, just invisible) — logs are fully visible on Trade Log page via SSE stream

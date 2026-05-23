@@ -194,7 +194,7 @@ export default function GridPage({
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
 
       {/* ── Sidebar ── */}
-      <aside className="card relative z-[35] h-fit w-full shrink-0 p-4 lg:sticky lg:top-[52px] lg:w-[300px]">
+      <aside className="card relative z-[35] h-fit w-full shrink-0 p-4 lg:sticky lg:top-5 lg:w-[300px]">
         {/* Mode toggle */}
         <div className="mb-4">
           <p className="label mb-2">Grid Mode</p>
