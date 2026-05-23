@@ -1,4 +1,4 @@
-import { loadEnv } from './config.js'
+import { loadEnv, type EnvConfig } from './config.js'
 import {
   createClients,
   getAssetMeta,
@@ -14,14 +14,37 @@ import {
   recordTrade,
 } from './limits.js'
 
-// Clients are expensive to build (wallet + transports) and hold a WS
-// connection, so we create them once and reuse across requests.
-let shared: HLClients | null = null
+// ─── Client management ────────────────────────────────────────────────────────
 
-function clients(): HLClients {
-  if (!shared) shared = createClients(loadEnv())
-  return shared
+// Single-tenant: one singleton built from process.env on first use.
+let singletonClients: HLClients | null = null
+
+// Multi-tenant: one entry per user, keyed by HL user address.
+// The key is the user address (public) so two sessions with the same wallet share a client.
+const userClientCache = new Map<string, HLClients>()
+
+// Return the right HLClients: per-user when creds are provided, otherwise the
+// module-level singleton (single-tenant mode). Both paths are lazy-initialized.
+export function getClients(creds?: EnvConfig | null): HLClients {
+  if (creds) {
+    const key = creds.user
+    let c = userClientCache.get(key)
+    if (!c) {
+      c = createClients(creds)
+      userClientCache.set(key, c)
+    }
+    return c
+  }
+  if (!singletonClients) singletonClients = createClients(loadEnv())
+  return singletonClients
 }
+
+// Evict a user's cached client — call when their credentials are updated.
+export function evictClientCache(hlUser: string): void {
+  userClientCache.delete(hlUser)
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 const DEFAULT_SLIPPAGE_PCT = 2
 const MAX_SLIPPAGE_PCT = 10
@@ -75,16 +98,19 @@ export function parseTradeRequest(body: unknown): TradeRequest {
     slip = Math.min(s, MAX_SLIPPAGE_PCT)
   }
 
-  const cleanAsset = asset.trim().toUpperCase()
+  const cleanAsset = (asset as string).trim().toUpperCase()
   assertAssetAllowed(cleanAsset)
-  return { asset: cleanAsset, side, size: sizeNum, maxSlippagePct: slip }
+  return { asset: cleanAsset, side: side as 'buy' | 'sell', size: sizeNum as number, maxSlippagePct: slip }
 }
 
 // Place an aggressively-priced IOC limit order so it behaves like a market
 // order. The limit is capped at `maxSlippagePct` past mid so a thin or stale
 // book can never fill us at an arbitrarily bad price.
-export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult> {
-  const { info, exchange } = clients()
+export async function executeMarketTrade(
+  req: TradeRequest,
+  creds?: EnvConfig | null,
+): Promise<TradeResult> {
+  const { info, exchange } = getClients(creds)
   const meta = await getAssetMeta(info, req.asset)
   const slip = (req.maxSlippagePct ?? DEFAULT_SLIPPAGE_PCT) / 100
 
@@ -97,7 +123,6 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
     )
   }
 
-  // Hard safety caps — enforced server-side regardless of the caller.
   const notionalUsd = Number(sizeStr) * meta.midPx
   assertNotionalAllowed(notionalUsd)
   assertRateLimit()
@@ -153,7 +178,6 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
     }
   }
 
-  // IOC with no fill — book was empty or too far from our capped limit.
   const desc = typeof status === 'string' ? status : JSON.stringify(status)
   log.warn(`Trade not filled (${desc})`)
   recordTrade({
@@ -179,8 +203,8 @@ export async function executeMarketTrade(req: TradeRequest): Promise<TradeResult
 
 export interface PlaceOrderResult {
   ok: boolean
-  filled: boolean    // market/IOC fill happened
-  resting: boolean   // GTC limit placed and waiting
+  filled: boolean
+  resting: boolean
   orderId: number | null
   asset: string
   side: 'buy' | 'sell'
@@ -195,26 +219,27 @@ export interface PlaceOrderResult {
 }
 
 // Place a market (IOC) or limit (GTC) order with optional TP/SL stops.
-// TP/SL stops are placed immediately after a market fill using the same
-// tpsl pattern as the grid bot: `isMarket:true` trigger orders, reduce-only.
-export async function placeOrder(params: {
-  asset: string
-  side: 'buy' | 'sell'
-  size: number
-  orderType: 'market' | 'limit'
-  limitPrice?: number
-  reduceOnly?: boolean
-  tpPrice?: number
-  slPrice?: number
-  tpPct?: number   // % above fill (buy) / below fill (sell) — takes precedence over tpPrice
-  slPct?: number   // % below fill (buy) / above fill (sell) — takes precedence over slPrice
-  maxSlippagePct?: number
-}): Promise<PlaceOrderResult> {
+export async function placeOrder(
+  params: {
+    asset: string
+    side: 'buy' | 'sell'
+    size: number
+    orderType: 'market' | 'limit'
+    limitPrice?: number
+    reduceOnly?: boolean
+    tpPrice?: number
+    slPrice?: number
+    tpPct?: number
+    slPct?: number
+    maxSlippagePct?: number
+  },
+  creds?: EnvConfig | null,
+): Promise<PlaceOrderResult> {
   const {
     asset, side, size, orderType, limitPrice,
     reduceOnly = false, tpPrice, slPrice, tpPct, slPct, maxSlippagePct,
   } = params
-  const { info, exchange } = clients()
+  const { info, exchange } = getClients(creds)
   const meta = await getAssetMeta(info, asset)
 
   assertAssetAllowed(asset)
@@ -272,10 +297,6 @@ export async function placeOrder(params: {
     result = { ...base, ok: true, filled: false, resting: false, orderId: null, filledSize: 0, avgPx: null, tpPlaced: false, slPlaced: false, message: `Not filled: ${desc}` }
   }
 
-  // Chain TP/SL bracket stops after a market fill. Prices can be absolute
-  // (tpPrice/slPrice) or a % offset from the actual fill price (tpPct/slPct).
-  // Percentage form takes precedence. Both orders are reduce-only triggers;
-  // limitMul ensures the IOC limit crosses the book when the trigger fires.
   if (result.filled && result.filledSize > 0) {
     const avgPx = result.avgPx ?? meta.midPx
     const effectiveTp = tpPct
@@ -319,23 +340,21 @@ export async function placeOrder(params: {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Price + size constraints for a single asset. Used by the manual trade panel
-// so the dashboard can show the minimum order and convert USDC → asset units.
-export async function getAssetInfo(asset: string): Promise<{
+export async function getAssetInfo(
+  asset: string,
+  creds?: EnvConfig | null,
+): Promise<{
   asset: string; midPx: number; markPx: number
   szDecimals: number; minSz: number; minNotional: number
 }> {
-  const { info } = clients()
+  const { info } = getClients(creds)
   const meta = await getAssetMeta(info, asset.trim().toUpperCase())
   const minSz = Math.pow(10, -meta.szDecimals)
   return { asset: meta.name, midPx: meta.midPx, markPx: meta.markPx, szDecimals: meta.szDecimals, minSz, minNotional: minSz * meta.midPx }
 }
 
-// The Hyperliquid perp universe — asset names available to trade. The web UI
-// uses this to populate its currency picker so a user can't type an asset that
-// Hyperliquid doesn't list.
-export async function listAssets(): Promise<string[]> {
-  const { info } = clients()
+export async function listAssets(creds?: EnvConfig | null): Promise<string[]> {
+  const { info } = getClients(creds)
   const [meta] = await info.metaAndAssetCtxs()
   return meta.universe
     .filter((u) => !u.isDelisted)
@@ -356,15 +375,16 @@ export interface AccountState {
   user: string
   accountValue: number
   withdrawable: number
-  currentPrice: number | null  // mid price for the queried asset; null when no asset supplied
-  position: PositionInfo | null          // single asset position (when ?asset= is supplied)
-  allPositions: PositionInfo[]           // all open positions across every asset
+  currentPrice: number | null
+  position: PositionInfo | null
+  allPositions: PositionInfo[]
 }
 
-// Snapshot of the agent account: network, balance, and the open position for
-// `asset` (if any). Used by the web app to show what's live before trading.
-export async function getAccountState(asset?: string): Promise<AccountState> {
-  const c = clients()
+export async function getAccountState(
+  asset?: string,
+  creds?: EnvConfig | null,
+): Promise<AccountState> {
+  const c = getClients(creds)
   const state = await c.info.clearinghouseState({ user: c.user })
 
   let currentPrice: number | null = null
@@ -374,7 +394,7 @@ export async function getAccountState(asset?: string): Promise<AccountState> {
     try {
       const priceMeta = await getAssetMeta(c.info, want)
       currentPrice = priceMeta.midPx
-    } catch { /* skip if asset not found on Hyperliquid */ }
+    } catch { /* skip if asset not found */ }
     const ap = state.assetPositions.find((p) => p.position.coin === want)
     if (ap) {
       const szi = Number(ap.position.szi)
@@ -390,7 +410,6 @@ export async function getAccountState(asset?: string): Promise<AccountState> {
     }
   }
 
-  // Build the full list of open positions from all asset positions
   const allPositions: PositionInfo[] = state.assetPositions
     .filter((ap) => Number(ap.position.szi) !== 0)
     .map((ap) => {
@@ -415,11 +434,11 @@ export async function getAccountState(asset?: string): Promise<AccountState> {
   }
 }
 
-// Cancel all open orders for a specific asset — called before placing a new
-// signal trade so stale TP/SL bracket orders from the previous position are
-// cleared first. Returns the number of orders cancelled.
-export async function cancelAssetOrders(asset: string): Promise<number> {
-  const { info, exchange, user } = clients()
+export async function cancelAssetOrders(
+  asset: string,
+  creds?: EnvConfig | null,
+): Promise<number> {
+  const { info, exchange, user } = getClients(creds)
   const meta = await getAssetMeta(info, asset)
   const open = await info.openOrders({ user })
   const mine = (open as Array<{ coin: string; oid: number }>).filter((o) => o.coin === asset)
@@ -429,16 +448,15 @@ export async function cancelAssetOrders(asset: string): Promise<number> {
   return mine.length
 }
 
-// Close the current open position for `asset` with a reduce-only market order.
-// Returns null when there is no open position to close.
 export async function closePosition(
   asset: string,
   maxSlippagePct?: number,
+  creds?: EnvConfig | null,
 ): Promise<PlaceOrderResult | null> {
-  const state = await getAccountState(asset)
+  const state = await getAccountState(asset, creds)
   if (!state.position) return null
   const { side, size } = state.position
   const closeSide: 'buy' | 'sell' = side === 'long' ? 'sell' : 'buy'
   log.info(`Closing ${side} ${size} ${asset} with reduce-only ${closeSide}`)
-  return placeOrder({ asset, side: closeSide, size, orderType: 'market', reduceOnly: true, maxSlippagePct })
+  return placeOrder({ asset, side: closeSide, size, orderType: 'market', reduceOnly: true, maxSlippagePct }, creds)
 }

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two independent apps share this repo:
 
-- **Web app** (root `src/`, `index.html`, `vite.config.ts`) — React + Vite + Tailwind + Lightweight Charts. Deployed to Vercel as `garlic-trading.vercel.app`. Two routed pages: a client-side strategy backtester and a grid optimizer. A third page (`src/pages/SignalTraderPage.tsx`) exists but is **not yet wired into `App.tsx`** — it's a React UI that talks to the bot's REST API.
+- **Web app** (root `src/`, `index.html`, `vite.config.ts`) — React + Vite + Tailwind + Lightweight Charts. Deployed to Vercel as `garlic-trading.vercel.app`. Three pages in a left icon-rail nav: Strategy Backtester, Grid Optimizer, and Signal Trader (`src/pages/SignalTraderPage.tsx`). Signal Trader is wired in `App.tsx` but is only functional when a bot URL is reachable — on Vercel with no bot it shows a connection-error state.
 - **Bot** (`bot/`) — Node + TypeScript live trading bot for Hyperliquid (testnet + mainnet). Runs two bot types: a grid bot (`grid-bot.ts`) and one or more signal bots (`signal-bot.ts`). Both are managed through an Express HTTP server (`server.ts`) on port 3001 that also serves the native-HTML dashboard at `bot/dashboard/index.html`.
 
 The web app's optimizer produces a grid spec (range, count, mode, spacing) that you can paste into `bot/grid.config.json` to run live.
@@ -37,8 +37,8 @@ npm run build             # tsc --noEmit (type-check only, no JS emitted)
 The bot server runs locally but is exposed to the internet (and to the hosted web app at `garlic-trading.vercel.app`) via a **Cloudflare Tunnel** at `https://bot.garlic-trading.net`. To start the bot remotely accessible:
 
 ```bash
-# In one terminal — start the bot server
-cd bot && npm start
+# In one terminal — start the bot server (use serve, not start)
+cd bot && npm run serve
 
 # In another terminal — start (or keep running) the tunnel
 cloudflared tunnel run <tunnel-name>
@@ -47,10 +47,14 @@ cloudflared tunnel run <tunnel-name>
 The tunnel forwards HTTPS at `bot.garlic-trading.net` → `http://localhost:3001`. Add `bot.garlic-trading.net` to `ALLOWED_ORIGINS` in `bot/.env` so the CORS policy allows the hosted dashboard. For extra security, put Cloudflare Access in front of the tunnel — then leave `BOT_API_TOKEN` unset and let Access handle authentication. Without Access, set `BOT_API_TOKEN` and enter it in the Signal Trader UI's "API Token" field.
 
 The bot reads `bot/.env` for keys and settings:
-- `HL_AGENT_PRIVATE_KEY`, `HL_USER_ADDRESS`, `HL_NETWORK` — required (see `bot/README.md`)
+- `HL_AGENT_PRIVATE_KEY`, `HL_USER_ADDRESS`, `HL_NETWORK` — required in single-tenant mode (see `bot/README.md`)
 - `ALLOWED_ORIGINS` — comma-separated origins the CORS policy allows beyond localhost
-- `BOT_API_TOKEN` — if set, every `/api/*` request must carry `Authorization: Bearer <token>`
+- `BOT_API_TOKEN` — if set, every `/api/*` request must carry `Authorization: Bearer <token>` (single-tenant only; ignored when `MULTI_USER=true`)
 - `MAX_TRADE_NOTIONAL_USD`, `ALLOWED_ASSETS`, `MAX_TRADES_PER_HOUR` — server-side safety caps (see `limits.ts`)
+- `MULTI_USER=true` — opt-in multi-user mode; adds login, per-user HL creds, data isolation (see Phase B below)
+- `OWNER_EMAIL` — if set, the first user who registers with this email gets admin privileges
+- `KEY_ENCRYPTION_SECRET` — 64 hex chars (32 bytes); used to AES-256-GCM encrypt each user's HL agent key at rest. **Unrecoverable if lost.**
+- `JWT_SECRET` — 32+ char random string; signs JWT session tokens (7-day expiry)
 
 ## Web app architecture
 
@@ -106,7 +110,8 @@ Multiple `SignalBot` instances run concurrently. Each polls Binance every 30 s, 
 - **Daily loss circuit-breaker** — snapshots equity at UTC midnight; pauses new entries for the rest of the day once the drawdown exceeds `dailyLossLimitPct`.
 - **Budget mode** — when `investment + leverage` are set instead of `size`, computes `size = (investment × leverage) / currentPrice` once per session at startup.
 - **Bracket orders** — after each fill, places TP and SL stop-limit orders from the actual fill price. Stale bracket orders from the previous trade are cancelled before the next entry.
-- **Persistence** — each bot's config and `running` state is written to `bot/signal-bots/<id>.json`. On server restart, `maybeAutostartSignalBots()` resumes every bot that was running when the process exited.
+- **Persistence** — in single-tenant mode, state files live in `bot/signal-bots/<id>.json`. In multi-user mode, per-user state lives in `bot/data/<userId>/signal-bots/<id>.json`. On server restart, `maybeAutostartSignalBots()` resumes every bot that was running when the process exited.
+- **Multi-user** — `SignalBot` accepts `userId` and `creds` (decrypted `EnvConfig`). All `placeOrder`/`getAccountState` calls pass the user's creds; bot IDs are UUIDs to prevent cross-user registry collisions.
 
 ### HTTP server (`server.ts`)
 
@@ -114,6 +119,14 @@ Express server on port 3001. Serves the native-HTML dashboard at `GET /`. API su
 
 | Route | Purpose |
 |---|---|
+| `POST /auth/register` | Create account (multi-user mode only) |
+| `POST /auth/login` | Sign in, get JWT |
+| `GET /auth/me` | Returns 404 (single-tenant), 401 (not logged in), or current user |
+| `GET /settings/credentials` | Read user's saved HL address + network |
+| `PUT /settings/credentials` | Save/update HL agent key + address (multi-user only) |
+| `GET /admin/users` | List all users (admin only) |
+| `DELETE /admin/users/:id` | Remove user (admin only) |
+| `POST /admin/users/:id/kill-bots` | Stop all bots for a user (admin only) |
 | `GET /api/bots` | List grid bots |
 | `POST/PUT/DELETE /api/bots/:id` | CRUD grid bot configs |
 | `POST /api/bots/:id/start\|stop` | Lifecycle |
@@ -128,7 +141,7 @@ Express server on port 3001. Serves the native-HTML dashboard at `GET /`. API su
 | `POST /api/close` | Cancel TP/SL stops then close position |
 | `GET /api/logs/stream` | SSE stream of all bot log lines |
 
-CORS: only localhost by default. For remote access, set `ALLOWED_ORIGINS`. With `BOT_API_TOKEN` set, requests must carry `Authorization: Bearer <token>` (SSE stream accepts `?token=` query param instead).
+CORS: only localhost by default. For remote access, set `ALLOWED_ORIGINS`. In single-tenant mode, `BOT_API_TOKEN` gates all `/api/*` requests (`Authorization: Bearer <token>`; SSE accepts `?token=` query param). In multi-user mode, JWT from `requireAuth` middleware is used instead.
 
 ### `trade.ts` and `limits.ts`
 
@@ -151,6 +164,23 @@ Hyperliquid perps cap prices at 5 significant figures AND `(6 - szDecimals)` dec
 ### Security model
 
 Bot signs with an **API agent wallet** — a separate key generated in Hyperliquid UI. Agent can place/cancel orders but cannot withdraw. Never use a real funded wallet's key.
+
+### Phase B — Multi-user mode (`MULTI_USER=true`)
+
+Opt-in feature. When absent (default), the server behaves exactly as before (single-tenant).
+
+**New files:**
+- `bot/src/users.ts` — SQLite DB at `bot/data/users.db`. Schema: `id, email, password_hash, is_admin, created_at, hl_key_enc, hl_user, hl_network`. Functions: `createUser`, `findUserByEmail`, `findUserById`, `verifyPassword`, `listUsers`, `deleteUser`, `userCount`, `saveHLCredentials`, `loadUserCreds`. Encryption helpers: `encryptSecret` / `decryptSecret` (AES-256-GCM).
+- `bot/src/auth.ts` — `MULTI_USER` flag, `JwtPayload` interface, `signToken`, `verifyToken`, `requireAuth`, `requireAdmin` middleware (both are no-ops when `!MULTI_USER`). Augments `Express.Request` with `req.user?: JwtPayload`.
+- `bot/src/migrate.ts` — `runMigrationIfNeeded(ownerId)` copies `bot/configs/*.json` and `bot/signal-bots/*.json` to `bot/data/<ownerId>/`. Idempotent (marker file `bot/data/.migrated`).
+
+**Key behaviour:**
+- First registered user always gets admin. `OWNER_EMAIL` also grants admin to any user with that email.
+- Migration runs inside `/auth/register` when `isFirstUser && isAdmin` (not at boot, because the DB is empty at first run).
+- `PUT /settings/credentials` saves the encrypted key and immediately calls `bot.updateCreds(newCreds)` on every running signal bot for that user.
+- `saveHLCredentials(userId, agentKey, hlUser, network)` — if `agentKey` is blank, only `hl_user` and `hl_network` are updated; existing encrypted key is preserved.
+- Per-user data directories: `bot/data/<userId>/configs/` and `bot/data/<userId>/signal-bots/`.
+- Audit log per user: `bot/data/<userId>/trade-audit.log` (wired in `limits.ts`; note callers in `trade.ts` don't yet pass `userId` so entries currently go to the global log).
 
 ## Conventions
 

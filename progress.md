@@ -263,15 +263,16 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 | Area | Status |
 |---|---|
 | Web app (Vercel) | ✅ deployed — garlic-trading.vercel.app |
-| Bot (local) | ✅ running — `cd bot && npm start` |
-| GitHub | ✅ pushed to master & new branch `trigger-bot` created |
+| Bot (local) | ✅ running — `cd bot && npm run serve` |
+| GitHub | ✅ pushed to master & working on branch `trigger-bot` |
 | SL/TP on Hyperliquid | ✅ verified — correct trigger conditions confirmed in order history |
 | Multi-bot (grid) | ✅ working — manage via dashboard at `http://localhost:3001` |
 | Signal Trader | ✅ multi-bot + budget sizing — budget × leverage → size computed at live price on start |
-| Trade page | ➖ removed — manual IOC trade restored as simple Buy/Sell in Signal Trader sidebar |
-| Trade API security | ✅ verified — CORS locked; API token gate; server safety caps; audit log |
+| Trade page | ✅ Manual Trade tab in dashboard (4th tab) with Account/Position/Order/Fills |
+| Trade API security | ✅ CORS locked; API token gate; server safety caps; audit log |
 | Remote access | ✅ live — Cloudflare Tunnel + Access at `bot.garlic-trading.net` (running from local PC) |
-| 24/7 VPS hosting | ⏳ next — deploy to Hetzner (see `futureplan.md` / `bot/DEPLOY_VPS.md`) |
+| Multi-user (Phase B) | ✅ built — enable with `MULTI_USER=true` in `bot/.env`; see `bot/.env.example` |
+| 24/7 VPS hosting | ⏳ pending — still on local PC; deploy to Hetzner when ready (see `futureplan.md` / `bot/DEPLOY_VPS.md`) |
 
 ---
 
@@ -500,3 +501,61 @@ Connecting and securing the local bot for 24/7 VPS hosting and remote control fr
 - `setTimeout(() => ..., 0)` defers chart init by one event loop tick so `el.clientWidth/clientHeight` are non-zero after the flex layout paints
 - `candlestickSeries` variable name matches what `updateSizingPreview()` and `pollGridStats()` already check (`if (candlestickSeries && ...)`) — must stay as-is
 - Signal activity log and trade journal still appended to hidden DOM elements (no errors, just invisible) — logs are fully visible on Trade Log page via SSE stream
+
+---
+
+## 2026-05-24 — Phase B: Multi-user support
+
+### What was built
+Full multi-user authentication and data isolation layer. Opt-in via `MULTI_USER=true` in `bot/.env`; single-tenant mode is completely unchanged when the flag is absent.
+
+### Files added
+- **`bot/src/users.ts`** — SQLite user DB (`bot/data/users.db`), bcrypt password hashing, AES-256-GCM encryption for HL agent private keys.
+- **`bot/src/auth.ts`** — JWT sign/verify (7-day expiry), `requireAuth` + `requireAdmin` Express middleware (both no-ops in single-tenant mode).
+- **`bot/src/migrate.ts`** — One-time migration: copies existing `bot/configs/` + `bot/signal-bots/` into `bot/data/<ownerId>/` on first multi-user boot.
+
+### Files changed
+- **`bot/src/trade.ts`** — Replaced singleton `HLClients` with per-user cache (`Map<string, HLClients>`). All exported functions accept optional `creds?: EnvConfig | null`; omitting falls back to env singleton.
+- **`bot/src/config.ts`** — Added `configsDirForUser(userId?)`. All CRUD functions accept optional `userId`.
+- **`bot/src/signal-bot.ts`** — `SignalBot` gains `userId` + `creds`. Data in `bot/data/<userId>/signal-bots/`. Multi-user bot IDs are UUIDs to prevent cross-user registry collisions.
+- **`bot/src/limits.ts`** — `recordTrade(entry, userId?)` writes to per-user audit log.
+- **`bot/src/server.ts`** — `/auth/register|login|me`, `requireAuth` on all `/api/*`, `/settings/credentials`, `/admin/users*`, per-user grid bot manager.
+- **`bot/dashboard/index.html`** — Login overlay, HL credentials modal, header user chip, mode detection via `GET /auth/me`.
+- **`bot/.env.example`** — Added `MULTI_USER`, `OWNER_EMAIL`, `KEY_ENCRYPTION_SECRET`, `JWT_SECRET`.
+
+### Key design decisions
+- **Feature flag** `MULTI_USER=true` — absent = full backward compat.
+- **Admin bootstrap** — first registered user always gets admin; `OWNER_EMAIL` also grants admin.
+- **Data migration** — idempotent (marker file `bot/data/.migrated`); existing bots claimed by first admin.
+- **`KEY_ENCRYPTION_SECRET` is unrecoverable** — losing it bricks all stored HL keys. Must be backed up separately.
+
+### Gotchas
+- Signal bot IDs are UUIDs in multi-user mode to ensure cross-user uniqueness in the shared registry map.
+- `GET /api/logs/stream` SSE can't use fetch headers — reads `?token=` query param in both modes.
+- `UserRow` must be exported from `users.ts` for `server.ts` to access `row.is_admin` from `verifyPassword()`.
+
+### Known gap
+- **Per-user audit log not fully wired**: `limits.ts:recordTrade(entry, userId?)` writes to `bot/data/<userId>/trade-audit.log` when `userId` is provided, but `trade.ts` doesn't thread the user ID through to that call. All audit entries still land in the global `bot/trade-audit.log` for now.
+
+---
+
+## 2026-05-24 — Phase B blockers fixed
+
+Four issues identified in advisor review and fixed:
+
+**Fix 1 — Migration not triggered on first registration** (`bot/src/server.ts`)
+- `runMigrationIfNeeded(user.id)` and `maybeAutostartSignalBots(...)` were only called at
+  boot `if (owner)` — but in a fresh multi-user deploy the DB is empty at boot, so owner is
+  undefined. Fixed: both calls now run inside `/auth/register` when `isFirstUser && isAdmin`.
+
+**Fix 2 — Running signal bots kept stale creds after key update** (`bot/src/server.ts`)
+- `PUT /settings/credentials` evicted the client cache but didn't notify running `SignalBot`
+  instances, which kept their old `EnvConfig`. Fixed: after `saveHLCredentials`, we load fresh
+  creds and call `bot.updateCreds(newCreds)` on every signal bot for that user.
+
+**Fix 3 — Empty agentKey rejected by saveHLCredentials** (`bot/src/users.ts`)
+- The dashboard credentials modal says "leave blank to keep current key" but the backend
+  threw `'agentKey must be a 0x-prefixed…'` on an empty string. Fixed: if `agentKey === ''`,
+  only `hl_user` and `hl_network` are updated; the existing `hl_key_enc` is preserved.
+
+**Fix 4 — TypeScript build** — all 3 changes pass `npm run build` clean.

@@ -6,13 +6,24 @@
 // has bounded damage. They are independent of the per-request slippage cap in
 // trade.ts.
 
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { log } from './logger.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const AUDIT_PATH = join(__dirname, '..', 'trade-audit.log')
+// Single-tenant: one global audit log in bot/.
+// Multi-tenant: per-user log in data/<userId>/trade-audit.log (set by recordTrade caller).
+const AUDIT_PATH_LEGACY = join(__dirname, '..', 'trade-audit.log')
+const DATA_DIR = join(__dirname, '..', 'data')
+
+function auditPathForUser(userId?: string): string {
+  if (!userId) return AUDIT_PATH_LEGACY
+  const dir = join(DATA_DIR, userId)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return join(dir, 'trade-audit.log')
+}
+
 
 // Largest notional (size × price, in USD) a single order may carry. 0 / unset
 // means no cap.
@@ -71,13 +82,14 @@ export interface AuditEntry {
   notionalUsd: number
 }
 
-// Append one line of NDJSON to trade-audit.log and count it toward the rolling
+// Append one line of NDJSON to the audit log and count it toward the rolling
 // rate-limit window. Called once per executed order, fill or no fill.
-export function recordTrade(entry: AuditEntry): void {
+// userId is optional — in single-tenant mode it is omitted and the global log is used.
+export function recordTrade(entry: AuditEntry, userId?: string): void {
   recentTrades.push(Date.now())
   const line = JSON.stringify({ ts: new Date().toISOString(), ...entry })
   try {
-    appendFileSync(AUDIT_PATH, line + '\n')
+    appendFileSync(auditPathForUser(userId), line + '\n')
   } catch (e) {
     log.err(`Could not write trade audit log: ${(e as Error).message}`)
   }

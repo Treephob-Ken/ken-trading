@@ -5,6 +5,10 @@
 // Multiple bots run concurrently in the same process — each with its own
 // config, scoped logger, and persisted state file — mirroring the multi grid
 // bot setup. The web UI is a view/control layer; all state reads back here.
+//
+// Multi-user mode: each bot belongs to a userId. Data is stored under
+// data/<userId>/signal-bots/. All manager functions accept an optional userId;
+// when omitted, the legacy single-tenant paths are used.
 
 import {
   existsSync,
@@ -14,6 +18,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { clearLogBuffer, createLogger, type Logger } from './logger.js'
@@ -26,6 +31,8 @@ import {
   type StrategyId,
 } from './strategy/strategies.js'
 import { cancelAssetOrders, getAccountState, placeOrder } from './trade.js'
+import { MULTI_USER } from './auth.js'
+import type { EnvConfig } from './config.js'
 
 export interface TradeRecord {
   time: number         // Unix ms
@@ -37,12 +44,20 @@ export interface TradeRecord {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const SIGNAL_DIR = join(__dirname, '..', 'signal-bots')
+// Single-tenant (legacy) paths
+const SIGNAL_DIR_LEGACY = join(__dirname, '..', 'signal-bots')
 const LEGACY_PATH = join(__dirname, '..', 'signal-bot.json')
+// Multi-tenant base
+const DATA_DIR = join(__dirname, '..', 'data')
 
 const POLL_MS = 30_000
 const CANDLE_LIMIT = 400
 const VALID_TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d']
+
+function signalDirForUser(userId?: string): string {
+  if (userId) return join(DATA_DIR, userId, 'signal-bots')
+  return SIGNAL_DIR_LEGACY
+}
 
 export interface SignalBotConfig {
   symbol: string // Binance symbol, e.g. ETHUSDT
@@ -58,15 +73,14 @@ export interface SignalBotConfig {
   slippagePct: number
   cooldownSec: number
   tradeSide: 'both' | 'buy' | 'sell'
-  tpPct?: number   // take-profit as % from fill price (e.g. 3 = +3%); bracket order placed after fill
-  slPct?: number   // stop-loss as % from fill price (e.g. 2 = −2%); bracket order placed after fill
+  tpPct?: number   // take-profit as % from fill price; bracket order placed after fill
+  slPct?: number   // stop-loss as % from fill price; bracket order placed after fill
   // Ensemble mode — run multiple strategies and only trade when ≥ ensembleThreshold agree.
-  // When false/absent, strategyId + params drive the single-strategy path.
   ensembleMode?: boolean
   ensembleStrategyIds?: StrategyId[]
   ensembleThreshold?: number // defaults to majority (ceil(n/2))
   // Multi-timeframe filter — before entering, check that the last signal on a
-  // higher timeframe agrees with the current signal. Skip the trade if it doesn't.
+  // higher timeframe agrees with the current signal.
   mtfEnabled?: boolean
   mtfTimeframe?: string // e.g. '4h' when the bot runs on '15m'
   // Daily loss circuit-breaker — pause new entries for the rest of the UTC day
@@ -80,8 +94,6 @@ export interface SignalBotStatus {
   running: boolean
   startedAt: number | null
   config: SignalBotConfig
-  // Effective size actually used for trades. Equals config.size in manual mode;
-  // in budget mode it is computed from (investment × leverage) / price on first tick.
   computedSize: number | null
   lastSignal: Signal
   lastSignalAt: number | null
@@ -89,11 +101,8 @@ export interface SignalBotStatus {
   lastEvaluatedAt: number | null
   lastError: string | null
   tradesExecuted: number
-  // Ensemble mode: vote breakdown from the last evaluation (null in single mode).
   lastVotes: { buy: number; sell: number; abstain: number; threshold: number } | null
-  // MTF filter: last signal direction seen on the higher timeframe (null = not checked yet).
   mtfTrend: Signal
-  // Daily loss circuit-breaker state (null when feature is off).
   dailyPnlPct: number | null
   dailyPaused: boolean
 }
@@ -129,7 +138,6 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const meta = STRATEGIES.find((s) => s.id === strategyId)
   if (!meta) throw new Error(`Unknown strategyId: ${String(b.strategyId)}`)
 
-  // Keep only known params for the strategy, fall back to defaults.
   const rawParams = (typeof b.params === 'object' && b.params) || {}
   const params: Record<string, number> = {}
   for (const def of meta.params) {
@@ -142,7 +150,6 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ? b.asset.trim().toUpperCase()
     : symbol.replace(/USDT$/, '')
 
-  // Budget mode — investment + leverage derive size at runtime from live price.
   const invRaw = typeof b.investment === 'string' ? Number(b.investment) : b.investment
   const investment =
     typeof invRaw === 'number' && Number.isFinite(invRaw) && invRaw > 0 ? invRaw : undefined
@@ -153,7 +160,6 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
 
   const sizeRaw = typeof b.size === 'string' ? Number(b.size) : b.size
   const sizeOk = typeof sizeRaw === 'number' && Number.isFinite(sizeRaw) && sizeRaw > 0
-  // size = 0 is the sentinel for "budget mode — compute at runtime".
   const size = sizeOk ? sizeRaw : 0
 
   if (!investment && !sizeOk) {
@@ -162,18 +168,15 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
 
   const slipRaw = typeof b.slippagePct === 'string' ? Number(b.slippagePct) : b.slippagePct
   const slippagePct = typeof slipRaw === 'number' && Number.isFinite(slipRaw) && slipRaw > 0
-    ? slipRaw
-    : 2
+    ? slipRaw : 2
 
   const cdRaw = typeof b.cooldownSec === 'string' ? Number(b.cooldownSec) : b.cooldownSec
   const cooldownSec = typeof cdRaw === 'number' && Number.isFinite(cdRaw) && cdRaw >= 0
-    ? cdRaw
-    : 60
+    ? cdRaw : 60
 
   const tradeSide =
     b.tradeSide === 'buy' || b.tradeSide === 'sell' ? b.tradeSide : 'both'
 
-  // Ensemble mode
   const ensembleMode = b.ensembleMode === true
   let ensembleStrategyIds: StrategyId[] | undefined
   let ensembleThreshold: number | undefined
@@ -191,18 +194,15 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
         : Math.ceil(ensembleStrategyIds.length / 2)
   }
 
-  // MTF filter
   const mtfEnabled = b.mtfEnabled === true
   const mtfTimeframeRaw = typeof b.mtfTimeframe === 'string' ? b.mtfTimeframe : ''
   const mtfTimeframe =
     mtfEnabled && VALID_TIMEFRAMES.includes(mtfTimeframeRaw) ? mtfTimeframeRaw : undefined
 
-  // Daily loss circuit-breaker
   const dlRaw = typeof b.dailyLossLimitPct === 'string' ? Number(b.dailyLossLimitPct) : b.dailyLossLimitPct
   const dailyLossLimitPct =
     typeof dlRaw === 'number' && dlRaw > 0 && dlRaw <= 100 ? dlRaw : undefined
 
-  // TP / SL as % from fill price
   const tpRaw = typeof b.tpPct === 'string' ? Number(b.tpPct) : b.tpPct
   const tpPct = typeof tpRaw === 'number' && tpRaw > 0 ? tpRaw : undefined
   const slRaw = typeof b.slPct === 'string' ? Number(b.slPct) : b.slPct
@@ -228,8 +228,11 @@ interface PersistedSignalBot {
 
 class SignalBot {
   readonly id: string
+  readonly userId: string | undefined
   name: string
   private config: SignalBotConfig
+  // In multi-user mode: the user's decrypted HL credentials. Null = single-tenant.
+  private creds: EnvConfig | null
   private log: Logger
   private timer: NodeJS.Timeout | null = null
   private running = false
@@ -242,28 +245,30 @@ class SignalBot {
   private lastTradeAt = 0
   private tradesExecuted = 0
   private evaluating = false
-  // In budget mode (investment + leverage set), the effective trade size is
-  // computed from (investment × leverage) / currentPrice on the first tick.
   private computedSize: number | null = null
-  // Ensemble mode: vote breakdown from the last evaluation.
   private lastVotes: SignalBotStatus['lastVotes'] = null
-  // MTF filter: last HTF signal direction observed.
   private mtfTrend: Signal = null
-  // Daily loss circuit-breaker state.
   private dailyDate = ''
   private dailyStartEquity: number | null = null
   private dailyPaused = false
   private dailyPnlPct: number | null = null
-  // In-session trade journal (last 100 fills, reset on restart).
   private trades: TradeRecord[] = []
   // True once the first poll has recorded the current bar — only bars that
   // close after that are genuine signals we should act on.
   private primed = false
 
-  constructor(id: string, name: string, config: SignalBotConfig) {
+  constructor(
+    id: string,
+    name: string,
+    config: SignalBotConfig,
+    userId?: string,
+    creds: EnvConfig | null = null,
+  ) {
     this.id = id
+    this.userId = userId
     this.name = name
     this.config = config
+    this.creds = creds
     this.log = createLogger('signal-' + id)
   }
 
@@ -313,8 +318,6 @@ class SignalBot {
     return [...this.trades]
   }
 
-  // Replace the config. Only allowed while stopped — a running strategy
-  // shouldn't have the ground shift under it mid-evaluation.
   setConfig(cfg: SignalBotConfig): void {
     if (this.running) throw new Error('Stop the bot before changing its config')
     this.config = cfg
@@ -324,6 +327,11 @@ class SignalBot {
   rename(name: string): void {
     this.name = name.trim() || this.name
     this.persist()
+  }
+
+  // Update the user's HL credentials (called when they save new keys).
+  updateCreds(creds: EnvConfig | null): void {
+    this.creds = creds
   }
 
   start(): void {
@@ -383,8 +391,7 @@ class SignalBot {
       }
 
       // Budget mode: derive order size from investment × leverage / current price.
-      // Computed once per session (resets on restart) so price drift doesn't
-      // silently change position size mid-run.
+      // Computed once per session so price drift doesn't silently change position size.
       if (this.computedSize === null && cfg.investment && cfg.leverage) {
         const livePrice = candles[candles.length - 1].close
         this.computedSize = (cfg.investment * cfg.leverage) / livePrice
@@ -441,7 +448,6 @@ class SignalBot {
       if (!sig) return
 
       // ── MTF filter ─────────────────────────────────────────────────────────
-      // Check that the last signal on the higher timeframe agrees before entering.
       if (cfg.mtfEnabled && cfg.mtfTimeframe) {
         try {
           const htfCandles = await fetchKlines(cfg.symbol, cfg.mtfTimeframe, CANDLE_LIMIT)
@@ -469,12 +475,11 @@ class SignalBot {
       if (cfg.dailyLossLimitPct && cfg.dailyLossLimitPct > 0) {
         const today = new Date().toISOString().slice(0, 10)
         if (today !== this.dailyDate) {
-          // UTC day rolled over — snapshot fresh start equity.
           this.dailyDate = today
           this.dailyPaused = false
           this.dailyPnlPct = null
           try {
-            const acct = await getAccountState()
+            const acct = await getAccountState(undefined, this.creds)
             this.dailyStartEquity = acct.accountValue
             this.log.info(`Daily reset: start equity $${this.dailyStartEquity.toFixed(2)}`)
           } catch {
@@ -483,9 +488,9 @@ class SignalBot {
         }
         if (this.dailyStartEquity !== null) {
           try {
-            const acct = await getAccountState()
+            const acct = await getAccountState(undefined, this.creds)
             const lossPct = ((this.dailyStartEquity - acct.accountValue) / this.dailyStartEquity) * 100
-            this.dailyPnlPct = -lossPct // positive = profit, negative = loss
+            this.dailyPnlPct = -lossPct
             if (lossPct >= cfg.dailyLossLimitPct) {
               if (!this.dailyPaused) {
                 this.dailyPaused = true
@@ -529,7 +534,7 @@ class SignalBot {
       try {
         // Cancel stale TP/SL bracket orders from the previous trade so they
         // don't double-close the position when the new signal fires.
-        const cancelled = await cancelAssetOrders(cfg.asset)
+        const cancelled = await cancelAssetOrders(cfg.asset, this.creds)
         if (cancelled > 0) this.log.info(`Cleared ${cancelled} stale order(s) for ${cfg.asset}`)
 
         const result = await placeOrder({
@@ -540,12 +545,11 @@ class SignalBot {
           maxSlippagePct: cfg.slippagePct,
           tpPct: cfg.tpPct,
           slPct: cfg.slPct,
-        })
+        }, this.creds)
         if (result.filled) this.tradesExecuted++
         if (result.filled && (result.tpPlaced || result.slPlaced)) {
           this.log.info(`Bracket orders: ${result.tpPlaced ? 'TP✓' : 'TP✗'} ${result.slPlaced ? 'SL✓' : 'SL✗'}`)
         }
-        // Append to in-session trade journal (capped at 100 entries).
         this.trades.push({
           time: Date.now(),
           side: sig,
@@ -576,8 +580,9 @@ class SignalBot {
       running: this.running,
     }
     try {
-      ensureDir()
-      writeFileSync(join(SIGNAL_DIR, this.id + '.json'), JSON.stringify(state, null, 2))
+      const dir = signalDirForUser(this.userId)
+      ensureBotDir(dir)
+      writeFileSync(join(dir, this.id + '.json'), JSON.stringify(state, null, 2))
     } catch (e) {
       this.log.err(`Could not persist signal-bot state: ${(e as Error).message}`)
     }
@@ -586,11 +591,21 @@ class SignalBot {
 
 // ─────────────────────────── Manager ───────────────────────────
 
+// Registry of all loaded bots. Key format: "<userId>:<botId>" in multi-user
+// mode; ":<botId>" in single-tenant mode. UUID bot IDs ensure no collisions
+// across users when MULTI_USER is true.
 const bots = new Map<string, SignalBot>()
-let loaded = false
+// Track which userId's bots have been loaded from disk.
+const loadedForUser = new Set<string>()
 
-function ensureDir(): void {
-  if (!existsSync(SIGNAL_DIR)) mkdirSync(SIGNAL_DIR, { recursive: true })
+const SINGLE_TENANT_KEY = ''
+
+function registryKey(userId: string | undefined, botId: string): string {
+  return `${userId ?? SINGLE_TENANT_KEY}:${botId}`
+}
+
+function ensureBotDir(dir: string): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 
 function slugify(s: string): string {
@@ -599,102 +614,126 @@ function slugify(s: string): string {
   )
 }
 
-function uniqueId(base: string): string {
+function uniqueId(base: string, userId: string | undefined): string {
+  const dir = signalDirForUser(userId)
   let id = base
   let n = 2
-  while (bots.has(id) || existsSync(join(SIGNAL_DIR, id + '.json'))) {
+  while (
+    bots.has(registryKey(userId, id)) ||
+    existsSync(join(dir, id + '.json'))
+  ) {
     id = `${base}-${n}`
     n++
   }
   return id
 }
 
-// Read every persisted bot into memory. Bots are loaded stopped; resuming
-// happens in maybeAutostartSignalBots so the running flag survives a restart.
-function loadAll(): void {
-  if (loaded) return
-  loaded = true
-  ensureDir()
+// Load bots from disk for a specific userId (or single-tenant if undefined).
+// Idempotent — only runs once per userId.
+function loadBotsForUser(userId: string | undefined, credsProvider?: () => EnvConfig | null): void {
+  const key = userId ?? SINGLE_TENANT_KEY
+  if (loadedForUser.has(key)) return
+  loadedForUser.add(key)
 
-  // Migrate the legacy single-bot file into a per-bot file.
-  if (existsSync(LEGACY_PATH)) {
+  const dir = signalDirForUser(userId)
+  ensureBotDir(dir)
+
+  // Single-tenant: migrate the legacy single-bot JSON file if present.
+  if (!userId && existsSync(LEGACY_PATH)) {
     try {
       const raw = JSON.parse(readFileSync(LEGACY_PATH, 'utf8'))
       const cfg = parseSignalConfig(raw.config)
-      const id = uniqueId(slugify(`${cfg.strategyId}-${cfg.symbol}`))
+      const id = uniqueId(slugify(`${cfg.strategyId}-${cfg.symbol}`), undefined)
       const persisted: PersistedSignalBot = {
         id,
         name: `${cfg.strategyId.toUpperCase()} ${cfg.symbol}`,
         config: cfg,
         running: Boolean(raw.running),
       }
-      writeFileSync(join(SIGNAL_DIR, id + '.json'), JSON.stringify(persisted, null, 2))
+      writeFileSync(join(dir, id + '.json'), JSON.stringify(persisted, null, 2))
       unlinkSync(LEGACY_PATH)
     } catch {
       /* ignore an unreadable legacy file */
     }
   }
 
-  for (const file of readdirSync(SIGNAL_DIR)) {
+  for (const file of readdirSync(dir)) {
     if (!file.endsWith('.json')) continue
     try {
-      const raw = JSON.parse(readFileSync(join(SIGNAL_DIR, file), 'utf8')) as PersistedSignalBot
-      if (!raw.id || bots.has(raw.id)) continue
-      bots.set(raw.id, new SignalBot(raw.id, raw.name || raw.id, parseSignalConfig(raw.config)))
+      const raw = JSON.parse(readFileSync(join(dir, file), 'utf8')) as PersistedSignalBot
+      if (!raw.id) continue
+      const rk = registryKey(userId, raw.id)
+      if (bots.has(rk)) continue
+      const creds = credsProvider ? credsProvider() : null
+      bots.set(rk, new SignalBot(raw.id, raw.name || raw.id, parseSignalConfig(raw.config), userId, creds))
     } catch {
       /* skip a corrupt bot file */
     }
   }
 }
 
-export function listSignalBots(): SignalBotSummary[] {
-  loadAll()
-  return [...bots.values()].map((b) => b.summary())
+export function listSignalBots(userId?: string): SignalBotSummary[] {
+  loadBotsForUser(userId)
+  const prefix = `${userId ?? SINGLE_TENANT_KEY}:`
+  return [...bots.entries()]
+    .filter(([k]) => k.startsWith(prefix))
+    .map(([, b]) => b.summary())
 }
 
-export function getSignalBot(id: string): SignalBot {
-  loadAll()
-  const b = bots.get(id)
+export function getSignalBot(id: string, userId?: string): SignalBot {
+  loadBotsForUser(userId)
+  const b = bots.get(registryKey(userId, id))
   if (!b) throw new Error(`Signal bot not found: ${id}`)
   return b
 }
 
-export function createSignalBot(name: string, config: SignalBotConfig): SignalBot {
-  loadAll()
+export function createSignalBot(
+  name: string,
+  config: SignalBotConfig,
+  userId?: string,
+  creds: EnvConfig | null = null,
+): SignalBot {
+  loadBotsForUser(userId)
   const label = name.trim() || `${config.strategyId.toUpperCase()} ${config.symbol}`
-  const id = uniqueId(slugify(label))
-  const bot = new SignalBot(id, label, config)
-  bots.set(id, bot)
+  // In multi-user mode, use UUID to guarantee cross-user uniqueness.
+  const id = MULTI_USER && userId ? randomUUID() : uniqueId(slugify(label), userId)
+  const bot = new SignalBot(id, label, config, userId, creds)
+  bots.set(registryKey(userId, id), bot)
   bot.persist()
   return bot
 }
 
-export function listSignalBotTrades(id: string): TradeRecord[] {
-  return getSignalBot(id).getTrades()
+export function listSignalBotTrades(id: string, userId?: string): TradeRecord[] {
+  return getSignalBot(id, userId).getTrades()
 }
 
-export function deleteSignalBot(id: string): void {
-  const bot = getSignalBot(id)
+export function deleteSignalBot(id: string, userId?: string): void {
+  const bot = getSignalBot(id, userId)
   bot.stop()
-  bots.delete(id)
+  bots.delete(registryKey(userId, id))
   clearLogBuffer('signal-' + id)
   try {
-    unlinkSync(join(SIGNAL_DIR, id + '.json'))
+    unlinkSync(join(signalDirForUser(userId), id + '.json'))
   } catch {
     /* already gone */
   }
 }
 
 // Called on server boot — resumes every bot that was running when the process
-// last exited, so a restart doesn't silently stop trading.
-export function maybeAutostartSignalBots(): void {
-  loadAll()
-  if (!existsSync(SIGNAL_DIR)) return
-  for (const file of readdirSync(SIGNAL_DIR)) {
+// last exited. In multi-user mode, pass a credsProvider so each bot gets its
+// owner's decrypted keys.
+export function maybeAutostartSignalBots(
+  userId?: string,
+  credsProvider?: () => EnvConfig | null,
+): void {
+  loadBotsForUser(userId, credsProvider)
+  const dir = signalDirForUser(userId)
+  if (!existsSync(dir)) return
+  for (const file of readdirSync(dir)) {
     if (!file.endsWith('.json')) continue
     try {
-      const raw = JSON.parse(readFileSync(join(SIGNAL_DIR, file), 'utf8')) as PersistedSignalBot
-      const bot = bots.get(raw.id)
+      const raw = JSON.parse(readFileSync(join(dir, file), 'utf8')) as PersistedSignalBot
+      const bot = bots.get(registryKey(userId, raw.id))
       if (bot && raw.running && !bot.isRunning()) {
         createLogger('signal-' + raw.id).info('Resuming from saved running state')
         bot.start()

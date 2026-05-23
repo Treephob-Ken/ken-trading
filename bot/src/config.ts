@@ -11,8 +11,21 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const CONFIGS_DIR = join(__dirname, '..', 'configs')
+
+// Single-tenant (legacy) paths — used when MULTI_USER is not set.
+const CONFIGS_DIR_LEGACY = join(__dirname, '..', 'configs')
 const LEGACY_PATH = join(__dirname, '..', 'grid.config.json')
+
+// Multi-tenant: configs live under data/<userId>/configs/
+const DATA_DIR = join(__dirname, '..', 'data')
+
+export function configsDirForUser(userId?: string): string {
+  if (userId) return join(DATA_DIR, userId, 'configs')
+  return CONFIGS_DIR_LEGACY
+}
+
+// Keep the old name as a convenience so call sites that don't yet pass userId still compile.
+const CONFIGS_DIR = CONFIGS_DIR_LEGACY
 
 export type GridMode = 'arithmetic' | 'geometric'
 
@@ -71,8 +84,13 @@ export function loadEnv(): EnvConfig {
   }
 }
 
-function ensureConfigsDir(): void {
-  if (!existsSync(CONFIGS_DIR)) mkdirSync(CONFIGS_DIR, { recursive: true })
+function ensureDir(dir: string): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+}
+
+// Keep the old zero-arg call working (single-tenant).
+function ensureConfigsDir(dir: string = CONFIGS_DIR): void {
+  ensureDir(dir)
 }
 
 // One-time migration: if a legacy grid.config.json sits in bot/ but
@@ -100,55 +118,60 @@ function slugify(s: string): string {
     .slice(0, 40) || 'bot'
 }
 
-function configPath(id: string): string {
-  return join(CONFIGS_DIR, `${id}.json`)
+function configPath(id: string, dir: string = CONFIGS_DIR): string {
+  return join(dir, `${id}.json`)
 }
 
-export function listConfigs(): GridConfig[] {
-  migrateLegacyConfig()
-  if (!existsSync(CONFIGS_DIR)) return []
-  return readdirSync(CONFIGS_DIR)
+// userId is optional — omit for single-tenant, pass for multi-tenant.
+export function listConfigs(userId?: string): GridConfig[] {
+  const dir = configsDirForUser(userId)
+  if (!userId) migrateLegacyConfig() // only run legacy migration in single-tenant mode
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
     .filter((f) => f.endsWith('.json'))
     .map((f) => {
-      const cfg = JSON.parse(readFileSync(join(CONFIGS_DIR, f), 'utf8')) as GridConfig
+      const cfg = JSON.parse(readFileSync(join(dir, f), 'utf8')) as GridConfig
       cfg.id = cfg.id ?? f.replace(/\.json$/, '')
       return cfg
     })
     .sort((a, b) => (a.id ?? '').localeCompare(b.id ?? ''))
 }
 
-export function loadConfig(id: string): GridConfig {
-  const cfg = JSON.parse(readFileSync(configPath(id), 'utf8')) as GridConfig
+export function loadConfig(id: string, userId?: string): GridConfig {
+  const dir = configsDirForUser(userId)
+  const cfg = JSON.parse(readFileSync(configPath(id, dir), 'utf8')) as GridConfig
   cfg.id = id
   validateConfig(cfg)
   return cfg
 }
 
-export function saveConfig(cfg: GridConfig, existingId?: string): GridConfig {
+export function saveConfig(cfg: GridConfig, existingId?: string, userId?: string): GridConfig {
   validateConfig(cfg)
-  ensureConfigsDir()
+  const dir = configsDirForUser(userId)
+  ensureConfigsDir(dir)
   // If renamed/created, generate a unique id from name or asset
   if (!cfg.id) cfg.id = slugify(cfg.name || cfg.asset)
   // Avoid collision with another bot
   if (!existingId || existingId !== cfg.id) {
     let candidate = cfg.id
     let i = 2
-    while (existsSync(configPath(candidate))) {
+    while (existsSync(configPath(candidate, dir))) {
       candidate = `${cfg.id}-${i++}`
     }
     cfg.id = candidate
   }
   if (!cfg.name) cfg.name = `${cfg.asset} grid`
-  writeFileSync(configPath(cfg.id), JSON.stringify(cfg, null, 2))
+  writeFileSync(configPath(cfg.id, dir), JSON.stringify(cfg, null, 2))
   // If id changed, drop the old file
-  if (existingId && existingId !== cfg.id && existsSync(configPath(existingId))) {
-    unlinkSync(configPath(existingId))
+  if (existingId && existingId !== cfg.id && existsSync(configPath(existingId, dir))) {
+    unlinkSync(configPath(existingId, dir))
   }
   return cfg
 }
 
-export function deleteConfig(id: string): void {
-  const p = configPath(id)
+export function deleteConfig(id: string, userId?: string): void {
+  const dir = configsDirForUser(userId)
+  const p = configPath(id, dir)
   if (existsSync(p)) unlinkSync(p)
 }
 

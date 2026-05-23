@@ -17,6 +17,31 @@ The tunnel currently runs from the local PC — it only works while the PC is aw
 
 ---
 
+## ✅ Phase B — Multi-user support (one server, many traders)
+
+**Built 2026-05-24.** Opt-in via `MULTI_USER=true` in `bot/.env`; single-tenant mode
+is completely unchanged when the flag is absent.
+
+What was implemented:
+- **User accounts + login** — `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
+  with bcrypt (12 rounds) + JWT (7-day expiry, `JWT_SECRET`).
+- **Per-user HL credentials** — each user enters their agent key + wallet address via the
+  dashboard Credentials modal; key encrypted at rest with AES-256-GCM (`KEY_ENCRYPTION_SECRET`).
+- **Data isolation** — bot configs, signal-bot state files, and trade audit logs stored in
+  `bot/data/<userId>/` directories; API routes reject cross-user access.
+- **Bot runner isolation** — grid/signal bots keyed by `"<userId>:<botId>"` in the manager
+  maps; each bot's `placeOrder`/`getAccountState` calls use the owner's decrypted creds.
+- **Admin panel** — `GET /admin/users`, `DELETE /admin/users/:id`, `POST /admin/users/:id/kill-bots`.
+- **Data migration** — on first admin registration, existing `bot/configs/` and
+  `bot/signal-bots/` are copied into the owner's data directory (idempotent).
+- **Dashboard auth flow** — login/register overlay, mode detection via `GET /auth/me`,
+  HL credentials modal, header user-chip with logout.
+
+Known gap: per-user audit log path is wired in `limits.ts` but callers in `trade.ts` don't
+yet pass `userId`, so all audit entries still go to the global `bot/trade-audit.log`.
+
+---
+
 ## ▶ Phase A — Deploy on a 24/7 server
 
 Move the bot off the local PC onto an always-on VPS so it trades around the clock.
@@ -101,17 +126,11 @@ dashboard. To let multiple people use it with their own accounts and private dat
   `PUT /settings/credentials`
 - Middleware: `requireAuth(req, res, next)` on all `/api/*` routes
 
-### What stays the same
-- The bot logic (`signal-bot.ts`, `grid-bot.ts`, `trade.ts`) — no changes needed
-- Cloudflare Tunnel + the `bot.garlic-trading.net` domain
-- The Vercel web app (garlic-trading.vercel.app) — read-only backtester, no user data
-
 ---
 
 ## Later ideas
 
 - Streaming candle-close evaluation instead of 30s polling for the signal bots
 - Webhook / Telegram alert when a Grid SL or TP triggers
-- Position sizing for "both"-direction grids (current formula assumes long-only)
 - Mobile-friendly dashboard layout
 - Performance dashboard: per-user cumulative P&L chart over time

@@ -851,10 +851,103 @@
     .chart-card { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
     .chart-el   { flex: 1; min-height: 0; width: 100%; }
 
+    /* ══════════════════════════════════════════════════════
+       LOGIN OVERLAY (multi-user mode)
+    ══════════════════════════════════════════════════════ */
+    #login-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,.92);
+      backdrop-filter: blur(18px);
+      display: flex; align-items: center; justify-content: center;
+    }
+    #login-overlay.hidden { display: none; }
+    .login-box {
+      width: 360px; padding: 36px 32px;
+      background: var(--surface); border: 1px solid var(--border-med);
+      border-radius: var(--r-xl); box-shadow: 0 24px 64px rgba(0,0,0,.7);
+    }
+    .login-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+    .login-logo-icon { width: 32px; height: 32px; border-radius: 9px; background: var(--brand); display: flex; align-items: center; justify-content: center; }
+    .login-title { font-size: 17px; font-weight: 700; }
+    .login-sub   { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .login-tabs  { display: flex; gap: 4px; margin-bottom: 20px; }
+    .login-tab   { flex: 1; padding: 6px; border: none; border-radius: 7px; background: transparent; color: var(--text-sub); cursor: pointer; font-family: inherit; font-size: 12px; transition: background .14s, color .14s; }
+    .login-tab.active { background: var(--brand-bg); color: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand-border); }
+    .login-field { margin-bottom: 14px; }
+    .login-field label { display: block; font-size: 11px; color: var(--text-sub); margin-bottom: 5px; font-weight: 500; }
+    .login-field input { width: 100%; padding: 9px 12px; background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text); font-family: inherit; font-size: 13px; outline: none; }
+    .login-field input:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(124,58,237,.2); }
+    .login-btn { width: 100%; padding: 10px; border: none; border-radius: var(--r-sm); background: var(--brand); color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; margin-top: 4px; font-family: inherit; transition: opacity .14s; }
+    .login-btn:hover { opacity: .88; }
+    .login-err { color: var(--loss-light); font-size: 12px; margin-top: 10px; min-height: 18px; text-align: center; }
+
+    /* ── Header user chip ─ */
+    .hd-user { display: flex; align-items: center; gap: 8px; }
+    .hd-user-email { font-size: 11px; color: var(--text-sub); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hd-logout-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-sub); font-size: 11px; cursor: pointer; font-family: inherit; }
+    .hd-logout-btn:hover { border-color: var(--border-med); color: var(--text); }
+
+    /* ── HL Credentials modal ── */
+    .creds-modal-bg { position: fixed; inset: 0; z-index: 900; background: rgba(0,0,0,.7); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; }
+    .creds-modal-bg.hidden { display: none; }
+    .creds-modal { width: 420px; background: var(--surface); border: 1px solid var(--border-med); border-radius: var(--r-xl); padding: 28px 28px 24px; box-shadow: 0 16px 48px rgba(0,0,0,.6); }
+    .creds-modal h3 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .creds-modal p.creds-hint { font-size: 11px; color: var(--text-dim); margin-bottom: 18px; line-height: 1.6; }
+    .creds-status { font-size: 11px; margin-top: 10px; min-height: 16px; }
+
   </style>
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
+
+<!-- ═══════════════ LOGIN OVERLAY (multi-user) ═══════════════ -->
+<div id="login-overlay" class="hidden">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="login-logo-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M13 2 3.5 13.5H11L10 22l10.5-11.5H13Z"/></svg></div>
+      <div>
+        <div class="login-title">Garlic Trading</div>
+        <div class="login-sub">Bot Dashboard · Multi-user</div>
+      </div>
+    </div>
+    <div class="login-tabs">
+      <button class="login-tab active" id="lt-login" onclick="loginTabSwitch('login')">Sign in</button>
+      <button class="login-tab" id="lt-register" onclick="loginTabSwitch('register')">Register</button>
+    </div>
+    <div id="login-form">
+      <div class="login-field"><label>Email</label><input id="login-email" type="email" placeholder="you@example.com" autocomplete="email" /></div>
+      <div class="login-field"><label>Password</label><input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password" /></div>
+      <button class="login-btn" onclick="submitLogin()">Sign in</button>
+      <div class="login-err" id="login-err"></div>
+    </div>
+    <div id="register-form" style="display:none">
+      <div class="login-field"><label>Email</label><input id="reg-email" type="email" placeholder="you@example.com" autocomplete="email" /></div>
+      <div class="login-field"><label>Password (min 8 chars)</label><input id="reg-password" type="password" placeholder="••••••••" autocomplete="new-password" /></div>
+      <button class="login-btn" onclick="submitRegister()">Create account</button>
+      <div class="login-err" id="reg-err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ HL CREDENTIALS MODAL ═══════════════ -->
+<div id="creds-modal" class="creds-modal-bg hidden">
+  <div class="creds-modal">
+    <h3>🔑 Hyperliquid Credentials</h3>
+    <p class="creds-hint">Your agent private key is encrypted at rest using AES-256-GCM. It never leaves the server in plaintext. Generate an API agent wallet at app.hyperliquid.xyz → Settings → API.</p>
+    <div class="login-field"><label>Agent Private Key (0x…)</label><input id="creds-key" type="password" placeholder="0x…64 hex chars" /></div>
+    <div class="login-field"><label>Main Wallet Address (0x…)</label><input id="creds-user" type="text" placeholder="0x…40 hex chars" /></div>
+    <div class="login-field">
+      <label>Network</label>
+      <select id="creds-network" style="width:100%;padding:9px 12px;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-family:inherit;font-size:13px">
+        <option value="mainnet">Mainnet</option>
+        <option value="testnet">Testnet</option>
+      </select>
+    </div>
+    <button class="login-btn" onclick="submitCreds()">Save credentials</button>
+    <button style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--border);border-radius:var(--r-sm);background:transparent;color:var(--text-sub);cursor:pointer;font-family:inherit" onclick="closeCreds()">Cancel</button>
+    <div class="creds-status" id="creds-status"></div>
+  </div>
+</div>
 
 <!-- ═══════════════ HEADER ═══════════════ -->
 <header>
@@ -866,9 +959,17 @@
     </div>
   </div>
 
-  <div class="hd-conn">
-    <div class="conn-dot" id="net-dot"></div>
-    <span id="net-label">connecting…</span>
+  <div style="display:flex;align-items:center;gap:12px">
+    <!-- Multi-user: user chip + credentials button + logout -->
+    <div id="hd-user-area" class="hd-user" style="display:none">
+      <button onclick="openCreds()" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-size:11px;cursor:pointer;font-family:inherit">🔑 HL Keys</button>
+      <span class="hd-user-email" id="hd-user-email"></span>
+      <button class="hd-logout-btn" onclick="doLogout()">Sign out</button>
+    </div>
+    <div class="hd-conn">
+      <div class="conn-dot" id="net-dot"></div>
+      <span id="net-label">connecting…</span>
+    </div>
   </div>
 </header>
 
@@ -1509,17 +1610,152 @@
   // ════════════════════════════════════════════════════════
   const $ = (id) => document.getElementById(id)
 
-  let BOT_TOKEN = localStorage.getItem('bot_api_token') || ''
+  // ── Auth layer ──────────────────────────────────────────────────────────
+  // Supports two modes:
+  //   1. Single-tenant (MULTI_USER not set): BOT_API_TOKEN static token flow (unchanged)
+  //   2. Multi-user (MULTI_USER=true): JWT stored in localStorage, login overlay
+  //
+  // Detection: GET /auth/me returns 404 in single-tenant mode, 401 in multi-user.
+
+  let BOT_TOKEN  = localStorage.getItem('bot_api_token') || ''  // single-tenant token
+  let JWT_TOKEN  = localStorage.getItem('auth_jwt') || ''        // multi-user JWT
+  let MULTI_USER = false   // set to true after detection
+  let CURRENT_USER = null  // { id, email, isAdmin }
+
   const _fetch = window.fetch.bind(window)
   window.fetch = (url, opts = {}) => {
-    if (typeof url === 'string' && url.startsWith('/api') && BOT_TOKEN)
-      opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + BOT_TOKEN } }
+    if (typeof url === 'string' && (url.startsWith('/api') || url.startsWith('/settings') || url.startsWith('/admin'))) {
+      const token = MULTI_USER ? JWT_TOKEN : BOT_TOKEN
+      if (token) opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } }
+    }
     return _fetch(url, opts)
   }
-  const sseUrl = (path) =>
-    BOT_TOKEN ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(BOT_TOKEN) : path
 
+  const sseUrl = (path) => {
+    const token = MULTI_USER ? JWT_TOKEN : BOT_TOKEN
+    return token ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : path
+  }
+
+  // ── Login overlay helpers ────────────────────────────────────────────────
+  function loginTabSwitch(tab) {
+    $('login-form').style.display    = tab === 'login' ? '' : 'none'
+    $('register-form').style.display = tab === 'register' ? '' : 'none'
+    $('lt-login').classList.toggle('active', tab === 'login')
+    $('lt-register').classList.toggle('active', tab === 'register')
+    $('login-err').textContent = ''; $('reg-err').textContent = ''
+  }
+
+  async function submitLogin() {
+    const email = $('login-email').value.trim(), password = $('login-password').value
+    $('login-err').textContent = ''
+    try {
+      const r = await _fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) })
+      const data = await r.json()
+      if (!r.ok) { $('login-err').textContent = data.error || 'Login failed'; return }
+      JWT_TOKEN = data.token
+      CURRENT_USER = data.user
+      localStorage.setItem('auth_jwt', JWT_TOKEN)
+      hideLoginOverlay()
+      updateUserChip()
+      await onAuthReady()
+    } catch (e) { $('login-err').textContent = 'Network error: ' + e.message }
+  }
+
+  async function submitRegister() {
+    const email = $('reg-email').value.trim(), password = $('reg-password').value
+    $('reg-err').textContent = ''
+    try {
+      const r = await _fetch('/auth/register', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) })
+      const data = await r.json()
+      if (!r.ok) { $('reg-err').textContent = data.error || 'Registration failed'; return }
+      JWT_TOKEN = data.token
+      CURRENT_USER = data.user
+      localStorage.setItem('auth_jwt', JWT_TOKEN)
+      hideLoginOverlay()
+      updateUserChip()
+      await onAuthReady()
+    } catch (e) { $('reg-err').textContent = 'Network error: ' + e.message }
+  }
+
+  function showLoginOverlay() { $('login-overlay').classList.remove('hidden') }
+  function hideLoginOverlay() { $('login-overlay').classList.add('hidden') }
+
+  function updateUserChip() {
+    if (!MULTI_USER || !CURRENT_USER) return
+    $('hd-user-area').style.display = 'flex'
+    $('hd-user-email').textContent = CURRENT_USER.email
+  }
+
+  function doLogout() {
+    JWT_TOKEN = ''; CURRENT_USER = null
+    localStorage.removeItem('auth_jwt')
+    $('hd-user-area').style.display = 'none'
+    showLoginOverlay()
+  }
+
+  // ── HL Credentials modal ─────────────────────────────────────────────────
+  async function openCreds() {
+    $('creds-modal').classList.remove('hidden')
+    $('creds-status').textContent = ''
+    try {
+      const r = await fetch('/settings/credentials')
+      if (r.ok) {
+        const d = await r.json()
+        $('creds-user').value = d.hlUser || ''
+        $('creds-network').value = d.hlNetwork || 'mainnet'
+        $('creds-key').value = ''
+        if (d.hlConfigured) $('creds-status').textContent = '✓ Key already saved — leave blank to keep current'
+      }
+    } catch { /* pre-fill with blanks is fine */ }
+  }
+
+  function closeCreds() { $('creds-modal').classList.add('hidden') }
+
+  async function submitCreds() {
+    const agentKey = $('creds-key').value.trim()
+    const hlUser   = $('creds-user').value.trim()
+    const network  = $('creds-network').value
+    $('creds-status').textContent = 'Saving…'
+    try {
+      const r = await fetch('/settings/credentials', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ agentKey, hlUser, network }) })
+      const d = await r.json()
+      if (!r.ok) { $('creds-status').textContent = '✗ ' + (d.error || 'Save failed'); return }
+      $('creds-status').textContent = '✓ Credentials saved'
+      setTimeout(closeCreds, 1200)
+    } catch (e) { $('creds-status').textContent = 'Network error: ' + e.message }
+  }
+
+  // ── Mode detection + startup ─────────────────────────────────────────────
   async function ensureToken() {
+    // Detect multi-user mode by probing /auth/me.
+    try {
+      const probe = await _fetch('/auth/me', JWT_TOKEN ? { headers: { Authorization: 'Bearer ' + JWT_TOKEN } } : {})
+      if (probe.status === 404) {
+        // Single-tenant mode — use static BOT_TOKEN flow.
+        MULTI_USER = false
+        await ensureSingleTenantToken()
+        return
+      }
+      // Multi-user mode.
+      MULTI_USER = true
+      if (probe.ok) {
+        CURRENT_USER = await probe.json()
+        // JWT sub is the userId; if server returns JwtPayload directly:
+        if (!CURRENT_USER.email && CURRENT_USER.sub) CURRENT_USER.email = CURRENT_USER.sub
+        updateUserChip()
+      } else {
+        // 401 — JWT invalid or missing. Show login.
+        showLoginOverlay()
+        return // onAuthReady called after successful login
+      }
+    } catch {
+      // Can't reach server — continue and let checkNetwork handle it.
+      MULTI_USER = false
+    }
+    await onAuthReady()
+  }
+
+  async function ensureSingleTenantToken() {
     for (let i = 0; i < 5; i++) {
       let status
       try { const r = await _fetch('/api/bots', BOT_TOKEN ? { headers: { Authorization: 'Bearer ' + BOT_TOKEN } } : {}); status = r.status } catch { return }
@@ -1529,6 +1765,15 @@
       BOT_TOKEN = entered.trim()
       localStorage.setItem('bot_api_token', BOT_TOKEN)
     }
+  }
+
+  async function onAuthReady() {
+    await checkNetwork()
+    setInterval(checkNetwork, 15000)
+    await loadBots()
+    connectSSE()
+    pollGridStats()
+    setInterval(pollGridStats, 2000)
   }
   const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])
   const fmtUsd  = (n) => (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2)
@@ -3071,11 +3316,8 @@
     }
   }
 
+  // Startup — ensureToken detects the mode and either shows login or calls onAuthReady.
   ensureToken()
-    .then(() => { checkNetwork(); setInterval(checkNetwork, 15000) })
-    .then(() => loadBots())
-    .then(() => connectSSE())
-    .then(() => { pollGridStats(); setInterval(pollGridStats, 2000) })
 
   // ── Glow spotlight — tracks pointer position on :root CSS vars ──
   ;(function () {
