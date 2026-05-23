@@ -25,7 +25,7 @@ import {
   type Signal,
   type StrategyId,
 } from './strategy/strategies.js'
-import { executeMarketTrade, getAccountState } from './trade.js'
+import { cancelAssetOrders, getAccountState, placeOrder } from './trade.js'
 
 export interface TradeRecord {
   time: number         // Unix ms
@@ -58,6 +58,8 @@ export interface SignalBotConfig {
   slippagePct: number
   cooldownSec: number
   tradeSide: 'both' | 'buy' | 'sell'
+  tpPct?: number   // take-profit as % from fill price (e.g. 3 = +3%); bracket order placed after fill
+  slPct?: number   // stop-loss as % from fill price (e.g. 2 = −2%); bracket order placed after fill
   // Ensemble mode — run multiple strategies and only trade when ≥ ensembleThreshold agree.
   // When false/absent, strategyId + params drive the single-strategy path.
   ensembleMode?: boolean
@@ -200,9 +202,17 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const dailyLossLimitPct =
     typeof dlRaw === 'number' && dlRaw > 0 && dlRaw <= 100 ? dlRaw : undefined
 
+  // TP / SL as % from fill price
+  const tpRaw = typeof b.tpPct === 'string' ? Number(b.tpPct) : b.tpPct
+  const tpPct = typeof tpRaw === 'number' && tpRaw > 0 ? tpRaw : undefined
+  const slRaw = typeof b.slPct === 'string' ? Number(b.slPct) : b.slPct
+  const slPct = typeof slRaw === 'number' && slRaw > 0 ? slRaw : undefined
+
   return {
     symbol, timeframe, strategyId, params, asset,
     investment, leverage, size, slippagePct, cooldownSec, tradeSide,
+    ...(tpPct !== undefined ? { tpPct } : {}),
+    ...(slPct !== undefined ? { slPct } : {}),
     ...(ensembleMode ? { ensembleMode, ensembleStrategyIds, ensembleThreshold } : {}),
     ...(mtfEnabled && mtfTimeframe ? { mtfEnabled, mtfTimeframe } : {}),
     ...(dailyLossLimitPct !== undefined ? { dailyLossLimitPct } : {}),
@@ -517,13 +527,24 @@ class SignalBot {
       this.log.info(`${sig.toUpperCase()} signal on ${cfg.symbol} ${cfg.timeframe} close — executing`)
       this.lastTradeAt = Date.now()
       try {
-        const result = await executeMarketTrade({
+        // Cancel stale TP/SL bracket orders from the previous trade so they
+        // don't double-close the position when the new signal fires.
+        const cancelled = await cancelAssetOrders(cfg.asset)
+        if (cancelled > 0) this.log.info(`Cleared ${cancelled} stale order(s) for ${cfg.asset}`)
+
+        const result = await placeOrder({
           asset: cfg.asset,
           side: sig,
           size: tradeSize,
+          orderType: 'market',
           maxSlippagePct: cfg.slippagePct,
+          tpPct: cfg.tpPct,
+          slPct: cfg.slPct,
         })
         if (result.filled) this.tradesExecuted++
+        if (result.filled && (result.tpPlaced || result.slPlaced)) {
+          this.log.info(`Bracket orders: ${result.tpPlaced ? 'TP✓' : 'TP✗'} ${result.slPlaced ? 'SL✓' : 'SL✗'}`)
+        }
         // Append to in-session trade journal (capped at 100 entries).
         this.trades.push({
           time: Date.now(),

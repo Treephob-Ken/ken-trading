@@ -14,6 +14,8 @@ import { GridBot } from './grid-bot.js'
 import { createClients } from './hyperliquid.js'
 import { clearLogBuffer, createLogger, getLogBuffer, log, onLog } from './logger.js'
 import {
+  cancelAssetOrders,
+  closePosition,
   executeMarketTrade,
   getAccountState,
   listAssets,
@@ -307,11 +309,42 @@ app.post('/api/order', async (req: Request, res: Response) => {
       reduceOnly: Boolean(b.reduceOnly),
       tpPrice: num('tpPrice'),
       slPrice: num('slPrice'),
+      tpPct: num('tpPct'),
+      slPct: num('slPct'),
       maxSlippagePct: num('maxSlippagePct'),
     })
     res.json(result)
   } catch (e) {
     log.err(`Order failed: ${(e as Error).message}`)
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Close the open position for an asset. Cancels pending TP/SL stops first so
+// they don't fight the closing order, then sends a reduce-only market order.
+app.post('/api/close', async (req: Request, res: Response) => {
+  const b = (req.body ?? {}) as Record<string, unknown>
+  const asset = typeof b.asset === 'string' ? b.asset.trim().toUpperCase() : ''
+  if (!asset) {
+    res.status(400).json({ error: 'asset is required' })
+    return
+  }
+  const slip = (() => {
+    const v = b.maxSlippagePct
+    const n = typeof v === 'string' ? Number(v) : v
+    return typeof n === 'number' && n > 0 ? n : undefined
+  })()
+  try {
+    const cancelled = await cancelAssetOrders(asset)
+    if (cancelled > 0) log.info(`Cancelled ${cancelled} order(s) before closing ${asset}`)
+    const result = await closePosition(asset, slip)
+    if (!result) {
+      res.json({ ok: true, filled: false, message: 'No open position to close' })
+      return
+    }
+    res.json(result)
+  } catch (e) {
+    log.err(`Close position failed: ${(e as Error).message}`)
     res.status(500).json({ error: (e as Error).message })
   }
 })

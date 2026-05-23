@@ -53,27 +53,27 @@ export default function App() {
     }
   }, [])
 
-  const activeLabel = TABS.find((tab) => tab.id === page)?.label
-
   return (
     <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-40 border-b border-border bg-bg/85 backdrop-blur">
+      {/* 3px brand accent stripe */}
+      <div className="h-[3px] w-full shrink-0 bg-brand" />
+      <header className="sticky top-[3px] z-40 border-b border-border bg-bg/90 backdrop-blur">
         <div className="mx-auto flex max-w-[2200px] items-center justify-between gap-4 px-6 py-3">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel">
-              <CandlestickChart className="h-4 w-4 text-text" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-border bg-panel">
+              <CandlestickChart className="h-4 w-4 text-brand" />
             </div>
             <div>
-              <h1 className="text-sm font-semibold leading-tight text-text font-display">
+              <h1 className="text-sm font-semibold leading-tight text-text">
                 Crypto Strategy Lab
               </h1>
               <p className="text-[11px] text-dim">
-                Backtest indicators &amp; optimize grid bots on live market data
+                Backtest strategies &amp; optimize grid bots
               </p>
             </div>
           </div>
 
-          <nav className="flex items-center gap-1 rounded-lg border border-border bg-panel p-1 font-display">
+          <nav className="flex items-center gap-1 rounded-xl border border-border bg-panel p-1">
             {TABS.map((tab) => {
               const Icon = tab.icon
               const active = page === tab.id
@@ -81,9 +81,9 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => setPage(tab.id)}
-                  className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-200 ${
                     active
-                      ? 'bg-panel-2 text-text shadow-sm'
+                      ? 'bg-brand/15 text-brand shadow-sm'
                       : 'text-dim hover:text-text'
                   }`}
                 >
@@ -92,14 +92,6 @@ export default function App() {
                 </button>
               )
             })}
-          </nav>
-        </div>
-
-        <div className="mx-auto max-w-[2200px] px-6 pb-2">
-          <nav className="flex items-center gap-1.5 text-[11px] font-display">
-            <span className="text-dim">Tools</span>
-            <span className="text-border-strong">/</span>
-            <span className="text-muted">{activeLabel}</span>
           </nav>
         </div>
       </header>

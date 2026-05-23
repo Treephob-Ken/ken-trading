@@ -206,11 +206,13 @@ export async function placeOrder(params: {
   reduceOnly?: boolean
   tpPrice?: number
   slPrice?: number
+  tpPct?: number   // % above fill (buy) / below fill (sell) — takes precedence over tpPrice
+  slPct?: number   // % below fill (buy) / above fill (sell) — takes precedence over slPrice
   maxSlippagePct?: number
 }): Promise<PlaceOrderResult> {
   const {
     asset, side, size, orderType, limitPrice,
-    reduceOnly = false, tpPrice, slPrice, maxSlippagePct,
+    reduceOnly = false, tpPrice, slPrice, tpPct, slPct, maxSlippagePct,
   } = params
   const { info, exchange } = clients()
   const meta = await getAssetMeta(info, asset)
@@ -270,35 +272,45 @@ export async function placeOrder(params: {
     result = { ...base, ok: true, filled: false, resting: false, orderId: null, filledSize: 0, avgPx: null, tpPlaced: false, slPlaced: false, message: `Not filled: ${desc}` }
   }
 
-  // Chain TP/SL stops after a market fill.
-  // Both are reduce-only trigger orders using `isMarket:true`.
-  // TP uses tpsl:'tp' (fires in the favourable direction); SL uses tpsl:'sl'.
-  // limitMul places the IOC limit slightly past the trigger to guarantee fill.
-  if (result.filled && result.filledSize > 0 && (tpPrice || slPrice)) {
-    const closeSide: 'buy' | 'sell' = side === 'buy' ? 'sell' : 'buy'
-    const closeQty = roundSize(result.filledSize, meta)
-    const limitMul = closeSide === 'sell' ? 0.95 : 1.05
+  // Chain TP/SL bracket stops after a market fill. Prices can be absolute
+  // (tpPrice/slPrice) or a % offset from the actual fill price (tpPct/slPct).
+  // Percentage form takes precedence. Both orders are reduce-only triggers;
+  // limitMul ensures the IOC limit crosses the book when the trigger fires.
+  if (result.filled && result.filledSize > 0) {
+    const avgPx = result.avgPx ?? meta.midPx
+    const effectiveTp = tpPct
+      ? (side === 'buy' ? avgPx * (1 + tpPct / 100) : avgPx * (1 - tpPct / 100))
+      : tpPrice
+    const effectiveSl = slPct
+      ? (side === 'buy' ? avgPx * (1 - slPct / 100) : avgPx * (1 + slPct / 100))
+      : slPrice
 
-    if (tpPrice && tpPrice > 0) {
-      try {
-        await exchange.order({
-          orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(tpPrice * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(tpPrice, meta), isMarket: true, tpsl: 'tp' } } }],
-          grouping: 'na',
-        })
-        result.tpPlaced = true
-        log.ok(`TP stop placed @ ${tpPrice}`)
-      } catch (e) { log.warn(`TP placement failed: ${(e as Error).message}`) }
-    }
+    if (effectiveTp || effectiveSl) {
+      const closeSide: 'buy' | 'sell' = side === 'buy' ? 'sell' : 'buy'
+      const closeQty = roundSize(result.filledSize, meta)
+      const limitMul = closeSide === 'sell' ? 0.95 : 1.05
 
-    if (slPrice && slPrice > 0) {
-      try {
-        await exchange.order({
-          orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(slPrice * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(slPrice, meta), isMarket: true, tpsl: 'sl' } } }],
-          grouping: 'na',
-        })
-        result.slPlaced = true
-        log.ok(`SL stop placed @ ${slPrice}`)
-      } catch (e) { log.warn(`SL placement failed: ${(e as Error).message}`) }
+      if (effectiveTp && effectiveTp > 0) {
+        try {
+          await exchange.order({
+            orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(effectiveTp * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(effectiveTp, meta), isMarket: true, tpsl: 'tp' } } }],
+            grouping: 'na',
+          })
+          result.tpPlaced = true
+          log.ok(`TP placed @ ${effectiveTp.toFixed(2)}${tpPct ? ` (+${tpPct}% from fill)` : ''}`)
+        } catch (e) { log.warn(`TP placement failed: ${(e as Error).message}`) }
+      }
+
+      if (effectiveSl && effectiveSl > 0) {
+        try {
+          await exchange.order({
+            orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(effectiveSl * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(effectiveSl, meta), isMarket: true, tpsl: 'sl' } } }],
+            grouping: 'na',
+          })
+          result.slPlaced = true
+          log.ok(`SL placed @ ${effectiveSl.toFixed(2)}${slPct ? ` (-${slPct}% from fill)` : ''}`)
+        } catch (e) { log.warn(`SL placement failed: ${(e as Error).message}`) }
+      }
     }
   }
 
@@ -324,6 +336,7 @@ export interface AccountState {
   user: string
   accountValue: number
   withdrawable: number
+  currentPrice: number | null  // mid price for the queried asset; null when no asset supplied
   position: {
     asset: string
     size: number
@@ -339,9 +352,14 @@ export async function getAccountState(asset?: string): Promise<AccountState> {
   const c = clients()
   const state = await c.info.clearinghouseState({ user: c.user })
 
+  let currentPrice: number | null = null
   let position: AccountState['position'] = null
   if (asset) {
     const want = asset.trim().toUpperCase()
+    try {
+      const priceMeta = await getAssetMeta(c.info, want)
+      currentPrice = priceMeta.midPx
+    } catch { /* skip if asset not found on Hyperliquid */ }
     const ap = state.assetPositions.find((p) => p.position.coin === want)
     if (ap) {
       const szi = Number(ap.position.szi)
@@ -362,6 +380,35 @@ export async function getAccountState(asset?: string): Promise<AccountState> {
     user: c.user,
     accountValue: Number(state.marginSummary.accountValue),
     withdrawable: Number(state.withdrawable),
+    currentPrice,
     position,
   }
+}
+
+// Cancel all open orders for a specific asset — called before placing a new
+// signal trade so stale TP/SL bracket orders from the previous position are
+// cleared first. Returns the number of orders cancelled.
+export async function cancelAssetOrders(asset: string): Promise<number> {
+  const { info, exchange, user } = clients()
+  const meta = await getAssetMeta(info, asset)
+  const open = await info.openOrders({ user })
+  const mine = (open as Array<{ coin: string; oid: number }>).filter((o) => o.coin === asset)
+  if (mine.length === 0) return 0
+  await exchange.cancel({ cancels: mine.map((o) => ({ a: meta.index, o: o.oid })) })
+  log.info(`Cancelled ${mine.length} open order(s) for ${asset}`)
+  return mine.length
+}
+
+// Close the current open position for `asset` with a reduce-only market order.
+// Returns null when there is no open position to close.
+export async function closePosition(
+  asset: string,
+  maxSlippagePct?: number,
+): Promise<PlaceOrderResult | null> {
+  const state = await getAccountState(asset)
+  if (!state.position) return null
+  const { side, size } = state.position
+  const closeSide: 'buy' | 'sell' = side === 'long' ? 'sell' : 'buy'
+  log.info(`Closing ${side} ${size} ${asset} with reduce-only ${closeSide}`)
+  return placeOrder({ asset, side: closeSide, size, orderType: 'market', reduceOnly: true, maxSlippagePct })
 }

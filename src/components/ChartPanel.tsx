@@ -53,7 +53,7 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#8b93a7',
-        fontFamily: "'Outfit', system-ui, sans-serif",
+        fontFamily: "'Inter', system-ui, sans-serif",
         panes: { separatorColor: '#222838', separatorHoverColor: '#2f3650' },
       },
       grid: {

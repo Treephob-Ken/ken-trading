@@ -467,7 +467,7 @@ function EquityChart({
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#a1a1a1',
-        fontFamily: "'Outfit', system-ui, sans-serif",
+        fontFamily: "'Inter', system-ui, sans-serif",
       },
       grid: {
         vertLines: { color: 'rgba(255,255,255,0.04)' },

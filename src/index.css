@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,19 +7,19 @@
 @layer base {
   :root {
     --bg: 0 0% 0%;
-    --panel: 0 0% 3.9%;
+    --panel: 0 0% 4%;
     --panel-2: 0 0% 9%;
-    --border: 0 0% 14.9%;
-    --border-strong: 0 0% 22%;
-    --text: 0 0% 93%;
-    --muted: 0 0% 63%;
-    --dim: 0 0% 42%;
-    --brand: 212 100% 47%;
+    --border: 217 20% 16%;
+    --border-strong: 217 20% 24%;
+    --text: 210 20% 94%;
+    --muted: 215 15% 62%;
+    --dim: 215 12% 42%;
+    --brand: 213 94% 65%;
     --gain: 151 83% 43%;
     --loss: 358 75% 59%;
     --warn: 40 96% 53%;
-    --accent: 262 83% 58%;
-    --accent-2: 262 83% 52%;
+    --accent: 262 83% 68%;
+    --accent-2: 262 83% 58%;
   }
 
   html,
@@ -30,10 +30,10 @@
 
   body {
     @apply bg-bg text-text;
-    font-family: 'Outfit', system-ui, sans-serif;
+    font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     font-feature-settings: 'cv11';
-    background-image: 
+    background-image:
       radial-gradient(at 0% 0%, hsla(var(--brand) / 0.07) 0px, transparent 50%),
       radial-gradient(at 100% 0%, hsla(var(--warn) / 0.03) 0px, transparent 40%),
       radial-gradient(at 100% 100%, hsla(var(--gain) / 0.04) 0px, transparent 50%),
@@ -65,41 +65,41 @@
 
 @layer components {
   .card {
-    @apply bg-panel/85 backdrop-blur-sm border border-border rounded-xl transition-all duration-300;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+    @apply bg-panel/85 backdrop-blur-sm border border-border rounded-2xl transition-all duration-300;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
   }
   .card:hover {
     @apply border-border-strong/70;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 1px 1px rgba(255, 255, 255, 0.02);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55), 0 0 1px 1px rgba(255, 255, 255, 0.02);
   }
 
   .field {
-    @apply w-full bg-bg border border-border rounded-lg px-3 py-1.5 text-sm text-text
-           outline-none transition-all duration-200 
-           focus:border-brand/60 focus:ring-1 focus:ring-brand/40
+    @apply w-full bg-bg border border-border rounded-xl px-3 py-1.5 text-sm text-text
+           outline-none transition-all duration-200
+           focus:border-brand/60 focus:ring-1 focus:ring-brand/30
            hover:border-border-strong;
   }
 
   .label {
-    @apply block text-[10px] font-semibold uppercase tracking-wider text-dim mb-1.5 font-display;
+    @apply block text-[10px] font-semibold uppercase tracking-wider text-dim mb-1.5;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold
-           bg-text text-bg transition-all duration-200 hover:opacity-90 active:scale-[0.97]
-           disabled:opacity-40 disabled:cursor-not-allowed font-display shadow-md shadow-black/20;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold
+           bg-brand text-white transition-all duration-200 hover:opacity-90 active:scale-[0.97]
+           disabled:opacity-40 disabled:cursor-not-allowed shadow-sm;
   }
 
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-medium
            bg-panel-2/60 border border-border text-text transition-all duration-200
-           hover:border-border-strong hover:bg-panel-2 hover:text-text active:scale-[0.97] 
+           hover:border-border-strong hover:bg-panel-2 hover:text-text active:scale-[0.97]
            disabled:opacity-40 disabled:cursor-not-allowed;
   }
 
   .seg {
-    @apply flex-1 px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors text-muted
-           hover:text-text font-display;
+    @apply flex-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors text-muted
+           hover:text-text;
   }
   .seg-active {
     @apply bg-panel-2 text-text shadow-sm;
