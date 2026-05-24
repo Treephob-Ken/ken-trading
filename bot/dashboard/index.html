@@ -2481,7 +2481,24 @@
     }
   }
 
-  let stCurrentPrice = null, stSizingTimer = null, stMaxLeverage = null
+  let stCurrentPrice = null, stSizingTimer = null, stMaxLeverage = null, stBotNameIsAuto = false
+
+  // Generate "MACD-ETH-1h" style name from current selections
+  function generateBotName() {
+    const stratId = stSignalMode === 'ensemble' ? 'ENS' : (stStrategyCombo?.getValue() || 'bot')
+    const asset  = (stCurrencyCombo?.getValue() || $('st-asset')?.value || 'ETH').toUpperCase()
+    const tf     = $('st-timeframe')?.value || '1h'
+    return `${stratId.replace(/_/g, '-').toUpperCase()}-${asset}-${tf}`
+  }
+
+  // Update name field when auto-naming is active (user hasn't manually typed a name)
+  function maybeUpdateAutoName() {
+    if (!stBotNameIsAuto) return
+    const el = $('st-bot-name'); if (!el || el.disabled) return
+    el.value = generateBotName()
+    scheduleSave()
+  }
+
   function scheduleSignalSizingPreview() { clearTimeout(stSizingTimer); stSizingTimer = setTimeout(updateSignalSizingPreview, 300); scheduleSave() }
 
   async function updateSignalSizingPreview() {
@@ -2547,6 +2564,7 @@
     $('st-ensemble-section').style.display = mode === 'ensemble' ? '' : 'none'
     if (mode === 'ensemble') { $('st-params-panel').style.display = 'none' }
     else { const strat = stStrategies.find(s => s.id === stStrategyCombo?.getValue()); $('st-params-panel').style.display = strat?.params?.length ? 'block' : 'none' }
+    maybeUpdateAutoName()
     scheduleSave()
   }
 
@@ -2582,6 +2600,7 @@
     if (stSignalMode !== 'single') return
     const strat = stStrategies.find(s => s.id === id)
     if (strat) renderStrategyParams(strat.id, strat.params, {})
+    maybeUpdateAutoName()
     scheduleSave()
   }
 
@@ -2591,6 +2610,10 @@
       const el = $(id); if (el) el.addEventListener('change', scheduleSave)
     })
     $('st-params-grid').addEventListener('change', scheduleSave)
+    // Typing in the name field disables auto-naming
+    const nameEl = $('st-bot-name'); if (nameEl) nameEl.addEventListener('input', () => { stBotNameIsAuto = false })
+    // Timeframe change re-generates the auto name if active
+    const tfEl = $('st-timeframe'); if (tfEl) tfEl.addEventListener('change', maybeUpdateAutoName)
   }
 
   function toggleMTF() { const en = $('st-mtf-enabled')?.checked; const tf = $('st-mtf-timeframe'); if (tf) tf.disabled = !en }
@@ -2687,6 +2710,7 @@
 
   function onCurrencyPicked(asset) {
     $('st-asset').value = asset; $('st-symbol').value = asset + 'USDT'
+    maybeUpdateAutoName()
     stCurrentPrice = null; stMaxLeverage = null
     const levInfo = $('st-max-lev-info'); if (levInfo) levInfo.textContent = 'Max leverage: loading…'
     fetch('/api/asset-info?asset=' + encodeURIComponent(asset))
@@ -2766,11 +2790,11 @@
     try {
       const status = await apiCall('/api/signal/bots', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
+        // name is '' so populateForm detects auto-naming mode and generates from config
         body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', riskUsd: 50, slPct: 2, size: 0, slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
       })
       showToast('Signal bot created'); stSelectedId = status.id
       await loadSignalBots(); selectSignalBot(status.id)
-      if ($('st-bot-name')) $('st-bot-name').value = ''
     } catch (e) { showToast(e.message, true) }
   }
 
@@ -2785,7 +2809,6 @@
   }
 
   function populateForm(cfg, name) {
-    if (name !== undefined && $('st-bot-name')) $('st-bot-name').value = name
     if (!cfg) return
     const mode = cfg.ensembleMode ? 'ensemble' : 'single'; stSignalMode = mode
     $('st-mode-single').classList.toggle('active', mode === 'single')
@@ -2806,6 +2829,12 @@
     const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
     stCurrencyCombo.setValue(cur); $('st-symbol').value = cfg.symbol || (cur + 'USDT'); $('st-asset').value = cfg.asset || cur
     $('st-timeframe').value = cfg.timeframe || '1h'
+    // Name: set after combos so generateBotName() has the right values.
+    // Empty name → auto-naming mode; non-empty → user has named it manually.
+    if (name !== undefined && $('st-bot-name')) {
+      stBotNameIsAuto = !name
+      $('st-bot-name').value = name || generateBotName()
+    }
     $('st-risk-usd').value = cfg.riskUsd ?? ''
     $('st-size').value = cfg.size > 0 ? cfg.size : ''
     $('st-slippage').value = cfg.slippagePct ?? 2; $('st-cooldown').value = cfg.cooldownSec ?? 60
