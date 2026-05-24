@@ -38,6 +38,7 @@ export default function GridPage({
   onTimeframe,
 }: Props) {
   const { symbols } = useHLAssets()
+  const navigate = useNavigate()
   // ── mode ────────────────────────────────────────────────────────────────────
   const [pageMode, setPageMode] = useState<GridPageMode>(
     () => (localStorage.getItem('gd_pageMode') as GridPageMode) || 'static',
@@ -64,13 +65,11 @@ export default function GridPage({
   })
 
   // ── deploy settings ──────────────────────────────────────────────────────────
-  const [botName, setBotName] = useState(() => localStorage.getItem('gd_botName') || '')
   const [leverage, setLeverage] = useState(() => +(localStorage.getItem('gd_leverage') || '1'))
   const [slPct, setSlPct] = useState(() => +(localStorage.getItem('gd_slPct') || '2'))
   const [tpPct, setTpPct] = useState(() => +(localStorage.getItem('gd_tpPct') || '2'))
-  const [useTrigger, setUseTrigger] = useState(() => localStorage.getItem('gd_useTrigger') === 'true')
-  const [useManualSize, setUseManualSize] = useState(() => localStorage.getItem('gd_useManualSize') === 'true')
-  const [manualSize, setManualSize] = useState(() => +(localStorage.getItem('gd_manualSize') || '0.01'))
+  const [deploying, setDeploying] = useState(false)
+  const [deployToast, setDeployToast] = useState<{ ok: boolean; msg: string } | null>(null)
 
   // ── data ─────────────────────────────────────────────────────────────────────
   const [candles, setCandles] = useState<Candle[]>([])
@@ -89,13 +88,9 @@ export default function GridPage({
   useEffect(() => { localStorage.setItem('gd_investment', String(investment)) }, [investment])
   useEffect(() => { localStorage.setItem('gd_reanchor', String(reanchor)) }, [reanchor])
   useEffect(() => { localStorage.setItem('gd_autoParams', JSON.stringify(autoParams)) }, [autoParams])
-  useEffect(() => { localStorage.setItem('gd_botName', botName) }, [botName])
   useEffect(() => { localStorage.setItem('gd_leverage', String(leverage)) }, [leverage])
   useEffect(() => { localStorage.setItem('gd_slPct', String(slPct)) }, [slPct])
   useEffect(() => { localStorage.setItem('gd_tpPct', String(tpPct)) }, [tpPct])
-  useEffect(() => { localStorage.setItem('gd_useTrigger', String(useTrigger)) }, [useTrigger])
-  useEffect(() => { localStorage.setItem('gd_useManualSize', String(useManualSize)) }, [useManualSize])
-  useEffect(() => { localStorage.setItem('gd_manualSize', String(manualSize)) }, [manualSize])
 
   // ── fetch candles ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -165,30 +160,37 @@ export default function GridPage({
   // ── active lines ─────────────────────────────────────────────────────────────
   const activeLines = pageMode === 'auto' ? autoDisplayLines : displayLines
 
-  // ── export: bot config ───────────────────────────────────────────────────────
-  function exportConfig() {
+  // ── deploy to bot ─────────────────────────────────────────────────────────────
+  async function handleDeploy() {
     if (activeLines.length < 2) return
     const asset = symbol.replace(/USDT$/, '')
-    const lower = +activeLines[0].price.toFixed(2)
-    const upper = +activeLines[activeLines.length - 1].price.toFixed(2)
+    const lower = +activeLines[0].price.toFixed(8)
+    const upper = +activeLines[activeLines.length - 1].price.toFixed(8)
     const gridCount = activeLines.length - 1
-    const activeFeePct = pageMode === 'static' ? feePct : 0.05
     const activeMode = pageMode === 'static' ? mode : 'arithmetic'
-    const cfg: Record<string, unknown> = {
-      name: botName || `${asset}-GRID-${gridCount}`,
-      asset, lower, upper, gridCount, mode: activeMode, investment, leverage,
-      stopLossPrice:   +(lower * (1 - slPct / 100)).toFixed(2),
-      takeProfitPrice: +(upper * (1 + tpPct / 100)).toFixed(2),
+    setDeploying(true)
+    setDeployToast(null)
+    try {
+      const res = await apiFetch('/api/bots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `${asset}-GRID-${gridCount}`,
+          asset, lower, upper, gridCount, mode: activeMode,
+          investment, leverage,
+          stopLossPrice:   +(lower * (1 - slPct / 100)).toFixed(8),
+          takeProfitPrice: +(upper * (1 + tpPct / 100)).toFixed(8),
+        }),
+      })
+      const data = (await res.json()) as { id?: string; name?: string; error?: string }
+      if (!res.ok) { setDeployToast({ ok: false, msg: data.error ?? 'Deploy failed' }); return }
+      setDeployToast({ ok: true, msg: `Bot '${data.name ?? data.id}' created ✓` })
+      setTimeout(() => navigate(`/bots?select=${data.id}`), 1200)
+    } catch (e) {
+      setDeployToast({ ok: false, msg: (e as Error).message })
+    } finally {
+      setDeploying(false)
     }
-    if (useManualSize) cfg.orderSize = manualSize
-    if (useTrigger) cfg.triggerPrice = lower
-    const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `grid.${asset.toLowerCase()}.json`
-    a.click()
-    URL.revokeObjectURL(a.href)
-    void activeFeePct
   }
 
   return (
@@ -250,7 +252,7 @@ export default function GridPage({
               onInvestment={setInvestment}
               onReanchor={setReanchor}
               onReload={() => setReloadKey((k) => k + 1)}
-              onExport={exportConfig}
+              onExport={() => {}}
             />
           ) : (
             <AutoControls
@@ -266,62 +268,48 @@ export default function GridPage({
           )}
         </div>
 
-        {/* Deploy card — in sidebar alongside controls */}
-        {pageMode === 'static' && staticResult && (
-          <DeployCard
-            lines={displayLines}
-            symbol={symbol}
-            mode={mode}
-            gridType={gridType}
-            botName={botName}
-            onBotName={setBotName}
-            investment={investment}
-            onInvestment={setInvestment}
-            leverage={leverage}
-            onLeverage={setLeverage}
-            slPct={slPct}
-            onSlPct={setSlPct}
-            tpPct={tpPct}
-            onTpPct={setTpPct}
-            useTrigger={useTrigger}
-            onUseTrigger={setUseTrigger}
-            useManualSize={useManualSize}
-            onUseManualSize={setUseManualSize}
-            manualSize={manualSize}
-            onManualSize={setManualSize}
-            feePct={feePct}
-            spacingPct={staticResult.best.spacingPct}
-          />
-        )}
-        {pageMode === 'auto' && autoResult && (
-          <DeployCard
-            lines={autoDisplayLines}
-            symbol={symbol}
-            mode="arithmetic"
-            gridType="neutral"
-            botName={botName}
-            onBotName={setBotName}
-            investment={investment}
-            onInvestment={setInvestment}
-            leverage={leverage}
-            onLeverage={setLeverage}
-            slPct={slPct}
-            onSlPct={setSlPct}
-            tpPct={tpPct}
-            onTpPct={setTpPct}
-            useTrigger={useTrigger}
-            onUseTrigger={setUseTrigger}
-            useManualSize={useManualSize}
-            onUseManualSize={setUseManualSize}
-            manualSize={manualSize}
-            onManualSize={setManualSize}
-            feePct={0.05}
-            spacingPct={
-              autoResult.currentLines.length >= 2
-                ? ((autoResult.currentLines[1] - autoResult.currentLines[0]) / autoResult.currentLines[0]) * 100
-                : 0
-            }
-          />
+        {/* Deploy — simple card, only when grid lines exist */}
+        {activeLines.length >= 2 && (
+          <div className="card overflow-hidden">
+            <div className="flex items-center gap-2 border-b border-border bg-brand/5 px-4 py-3">
+              <Rocket className="h-4 w-4 text-brand" />
+              <h3 className="text-sm font-semibold text-text">Deploy as Grid Bot</h3>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">Budget (USDC)</label>
+                  <NumberInput step={50} min={10} value={investment} onChange={setInvestment} className="field font-mono text-sm" />
+                </div>
+                <div>
+                  <label className="label">Leverage</label>
+                  <NumberInput step={1} min={1} max={50} value={leverage} onChange={setLeverage} className="field font-mono text-sm" />
+                </div>
+                <div>
+                  <label className="label">Stop Loss %</label>
+                  <NumberInput step={0.5} min={0.1} value={slPct} onChange={setSlPct} className="field font-mono text-sm" />
+                </div>
+                <div>
+                  <label className="label">Take Profit %</label>
+                  <NumberInput step={0.5} min={0.1} value={tpPct} onChange={setTpPct} className="field font-mono text-sm" />
+                </div>
+              </div>
+              {deployToast && (
+                <div className={`rounded-xl px-3 py-2 text-xs font-medium ${deployToast.ok ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
+                  {deployToast.msg}
+                </div>
+              )}
+              <button
+                type="button"
+                disabled={deploying}
+                onClick={handleDeploy}
+                className="btn-primary w-full justify-center py-2.5 disabled:opacity-50"
+              >
+                <Rocket className="h-4 w-4" />
+                {deploying ? 'Deploying…' : 'Deploy as Grid Bot'}
+              </button>
+            </div>
+          </div>
         )}
       </aside>
 
@@ -643,200 +631,6 @@ function SweepChart({ result }: { result: NonNullable<ReturnType<typeof optimize
             </div>
           )
         })}
-      </div>
-    </div>
-  )
-}
-
-// ── Deploy card ────────────────────────────────────────────────────────────────
-
-function DeployCard({
-  lines, symbol, mode, gridType,
-  botName, onBotName, investment, onInvestment, leverage, onLeverage,
-  slPct, onSlPct, tpPct, onTpPct, useTrigger, onUseTrigger,
-  useManualSize, onUseManualSize, manualSize, onManualSize,
-  feePct, spacingPct,
-}: {
-  lines: GridLine[]
-  symbol: string
-  mode: GridMode
-  gridType: GridType
-  botName: string
-  onBotName: (v: string) => void
-  investment: number
-  onInvestment: (v: number) => void
-  leverage: number
-  onLeverage: (v: number) => void
-  slPct: number
-  onSlPct: (v: number) => void
-  tpPct: number
-  onTpPct: (v: number) => void
-  useTrigger: boolean
-  onUseTrigger: (v: boolean) => void
-  useManualSize: boolean
-  onUseManualSize: (v: boolean) => void
-  manualSize: number
-  onManualSize: (v: number) => void
-  feePct: number
-  spacingPct: number
-}) {
-  const navigate = useNavigate()
-  const [deploying, setDeploying] = useState(false)
-  const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null)
-  if (lines.length < 2) return null
-  const asset = symbol.replace(/USDT$/, '')
-  const lower = lines[0].price
-  const upper = lines[lines.length - 1].price
-  const gridCount = lines.length - 1
-  const safety = 0.5
-  const derivedSize = (investment * leverage * safety) / (gridCount * upper)
-  const orderSize = useManualSize ? manualSize : derivedSize
-  const maxNotional = gridCount * orderSize * upper
-  const requiredMargin = maxNotional / leverage
-  const profitPerGridPct = spacingPct - 2 * feePct
-  const slPrice = lower * (1 - slPct / 100)
-  const tpPrice = upper * (1 + tpPct / 100)
-  const maxRiskPct = (((lower - slPrice) * gridCount * orderSize) / investment) * 100
-
-  return (
-    <div className="card overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border bg-brand/5 px-4 py-3">
-        <Rocket className="h-4 w-4 text-brand" />
-        <h3 className="text-sm font-semibold text-text">Deploy to Bot</h3>
-        <span className="ml-auto text-xs text-dim">create bot → start trading</span>
-      </div>
-
-      <div className="p-4 space-y-4">
-        <div>
-          <label className="label">Bot name <span className="font-normal normal-case text-dim">(optional)</span></label>
-          <input
-            type="text"
-            value={botName}
-            onChange={(e) => onBotName(e.target.value)}
-            placeholder={`${asset} ${gridType} grid`}
-            className="field text-sm"
-          />
-        </div>
-
-        {/* Range summary */}
-        <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-bg p-3 font-mono text-xs">
-          <div><div className="mb-0.5 text-[10px] text-dim">Asset</div><div className="font-semibold text-text">{asset}</div></div>
-          <div><div className="mb-0.5 text-[10px] text-dim">Lower</div><div className="text-text">{lower.toFixed(2)}</div></div>
-          <div><div className="mb-0.5 text-[10px] text-dim">Upper</div><div className="text-text">{upper.toFixed(2)}</div></div>
-          <div><div className="mb-0.5 text-[10px] text-dim">Grid Count</div><div className="font-semibold text-brand">{gridCount}</div></div>
-          <div><div className="mb-0.5 text-[10px] text-dim">Mode</div><div className="text-text capitalize">{mode}</div></div>
-          <div><div className="mb-0.5 text-[10px] text-dim">Spacing</div><div className="text-text">{spacingPct.toFixed(2)}%</div></div>
-        </div>
-
-        {/* Position sizing */}
-        <div>
-          <p className="label mb-2">Position Sizing</p>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="label">Budget (USDC)</label>
-              <NumberInput step={50} min={10} value={investment} onChange={onInvestment} className="field font-mono text-sm" />
-            </div>
-            <div>
-              <label className="label">Leverage</label>
-              <NumberInput step={1} min={1} max={50} value={leverage} onChange={onLeverage} className="field font-mono text-sm" />
-            </div>
-          </div>
-          <label className="mt-2 flex cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-bg p-2.5">
-            <input type="checkbox" className="h-3.5 w-3.5 accent-brand" checked={useManualSize} onChange={(e) => onUseManualSize(e.target.checked)} />
-            <span className="text-xs font-medium text-text">Override order size</span>
-            <NumberInput step={0.001} min={0.001} disabled={!useManualSize} value={manualSize} onChange={onManualSize} className="field ml-auto w-24 font-mono text-xs disabled:opacity-40" />
-            <span className="text-[11px] text-dim">{asset}</span>
-          </label>
-          <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-border bg-bg p-3 font-mono text-xs">
-            <div><div className="mb-0.5 text-[10px] text-dim">Order size / grid</div><div className="text-text">{orderSize.toFixed(5)} {asset}</div></div>
-            <div><div className="mb-0.5 text-[10px] text-dim">Margin needed</div><div className="text-text">${requiredMargin.toFixed(0)} USDC</div></div>
-            <div><div className="mb-0.5 text-[10px] text-dim">Max notional</div><div className="text-text">${maxNotional.toFixed(0)}</div></div>
-            <div><div className="mb-0.5 text-[10px] text-dim">Est profit / grid</div><div className={profitPerGridPct > 0 ? 'text-gain' : 'text-loss'}>{profitPerGridPct >= 0 ? '+' : ''}{profitPerGridPct.toFixed(3)}%</div></div>
-          </div>
-        </div>
-
-        {/* Safety triggers */}
-        <div>
-          <p className="label mb-2">Safety Triggers <span className="font-normal normal-case text-dim/70">(always included)</span></p>
-          <div className="space-y-2">
-            <div className="flex items-center gap-3 rounded-xl border border-loss/30 bg-loss/5 p-2.5">
-              <span className="text-xs font-semibold text-loss">Stop Loss</span>
-              <NumberInput step={0.5} min={0.1} value={slPct} onChange={onSlPct} className="field w-20 font-mono text-xs" />
-              <span className="text-[11px] text-dim">% below lower</span>
-              <span className="ml-auto font-mono text-xs text-loss">@ ${slPrice.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center gap-3 rounded-xl border border-gain/30 bg-gain/5 p-2.5">
-              <span className="text-xs font-semibold text-gain">Take Profit</span>
-              <NumberInput step={0.5} min={0.1} value={tpPct} onChange={onTpPct} className="field w-20 font-mono text-xs" />
-              <span className="text-[11px] text-dim">% above upper</span>
-              <span className="ml-auto font-mono text-xs text-gain">@ ${tpPrice.toFixed(2)}</span>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-dim">
-            Max loss if all grids fill and SL hits ≈{' '}
-            <span className="font-mono text-loss">{maxRiskPct.toFixed(1)}%</span> of budget.
-          </p>
-          <label className="mt-3 flex cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-bg p-2.5">
-            <input type="checkbox" className="h-3.5 w-3.5 accent-warn" checked={useTrigger} onChange={(e) => onUseTrigger(e.target.checked)} />
-            <div className="flex-1">
-              <div className="text-xs font-medium text-text">Wait for price to enter range</div>
-              <div className="text-[10px] text-dim">Bot stays idle until price crosses [{lower.toFixed(2)}, {upper.toFixed(2)}]</div>
-            </div>
-          </label>
-        </div>
-
-        {/* Deploy to bot */}
-        {toast && (
-          <div className={`rounded-xl px-3 py-2 text-xs font-medium ${
-            toast.ok ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'
-          }`}>
-            {toast.msg}
-          </div>
-        )}
-        <button
-          type="button"
-          disabled={deploying}
-          onClick={async () => {
-            const lower = lines[0].price
-            const upper = lines[lines.length - 1].price
-            const gridCount = lines.length - 1
-            const payload: Record<string, unknown> = {
-              name: botName || `${asset}-GRID-${gridCount}`,
-              asset,
-              lower: +lower.toFixed(8),
-              upper: +upper.toFixed(8),
-              gridCount,
-              mode,
-              leverage,
-              stopLossPrice:   +(lower * (1 - slPct / 100)).toFixed(8),
-              takeProfitPrice: +(upper * (1 + tpPct / 100)).toFixed(8),
-            }
-            if (useManualSize) payload.orderSize = manualSize
-            else payload.investment = investment
-            if (useTrigger) payload.triggerPrice = lower
-            setDeploying(true)
-            setToast(null)
-            try {
-              const res = await apiFetch('/api/bots', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-              })
-              const data = (await res.json()) as { id?: string; name?: string; error?: string }
-              if (!res.ok) { setToast({ ok: false, msg: data.error ?? 'Deploy failed' }); return }
-              setToast({ ok: true, msg: `Grid bot '${data.name ?? data.id}' created ✓` })
-              setTimeout(() => navigate(`/bots?select=${data.id}`), 1200)
-            } catch (e) {
-              setToast({ ok: false, msg: (e as Error).message })
-            } finally {
-              setDeploying(false)
-            }
-          }}
-          className="btn-primary w-full justify-center py-2.5 disabled:opacity-50"
-        >
-          <Rocket className="h-4 w-4" />
-          {deploying ? 'Deploying…' : 'Deploy as Grid Bot'}
-        </button>
       </div>
     </div>
   )
