@@ -691,3 +691,99 @@ Called from:
 - `wireAutoSave` timeframe `change` handler — alongside `maybeUpdateAutoName()`
 
 **Timing rationale:** 800 ms delay ensures `scheduleSave`'s 450 ms has already fired, the server has saved the new config, and `/api/signal/bots/:id/chart-data` returns indicator data computed from the updated config.
+
+---
+
+## 2026-05-24 — Chart refresh revised (save-triggered, not timer-triggered)
+
+**Problem with previous approach:** Timer-based chart refresh (800 ms after field change) had a race condition on VPS — if the network round-trip for `saveCurrentBot` was slow, the server still had the old config when `/api/signal/bots/:id/chart-data` was fetched.
+
+**Fix:** Removed the independent timer. Added `refreshChartFromForm()` function called directly inside `saveCurrentBot()` after the PUT completes — server is guaranteed to have the new config at that point.
+
+```javascript
+function refreshChartFromForm() {
+  if (!stSelectedId) return
+  const asset   = stCurrencyCombo?.getValue() || $('st-asset')?.value || 'ETH'
+  const tf      = $('st-timeframe')?.value || '1h'
+  const stratId = stSignalMode === 'ensemble' ? 'ensemble' : (stStrategyCombo?.getValue() || 'macd')
+  const cfg = { asset: asset.toUpperCase(), symbol: asset.toUpperCase() + 'USDT', timeframe: tf, strategyId: stratId }
+  initSignalChart(cfg, _signalTrades, stSelectedId)
+}
+// Called at end of saveCurrentBot() after apiCall PUT resolves.
+```
+
+---
+
+## 2026-05-24 — Grid page: asset combo picker + chart refresh
+
+**Problem:** Grid page Asset field was a plain text input. Chart didn't update when asset was changed.
+
+**Fix:**
+- Replaced `<input id="f-asset" type="text">` with `.combo` div (same `createCombo` pattern as signal page)
+- Hidden `<input id="f-asset" type="hidden">` kept so `getFormConfig()` unchanged
+- `initGridPage()` called from `loadBots()` — idempotent, runs once
+- `gbCurrencyCombo` onChange: sets `f-asset`, calls `updateSizingPreview()`, calls `initGridChart(getFormConfig())`
+- `renderFormFromConfig()` syncs both hidden input and combo via `gbCurrencyCombo.setValue(asset)`
+- `getFormConfig()` reads `gbCurrencyCombo?.getValue() || $('f-asset').value`
+
+---
+
+## 2026-05-24 — Grid page: position sizing card (consistent with signal page)
+
+**What changed:**
+- Removed visible Budget (USDC) + Leverage + Override Order Size inputs
+- Added Risk per Trade ($) (`gb-risk-usd`) + Stop Loss % (`gb-sl-pct`) inputs
+- Hidden `f-investment`, `f-leverage`, `f-size` auto-set by `updateSizingPreview()`
+- Fetch `/api/asset-info` on asset pick AND on `renderFormFromConfig` → `gbCurrentPrice`, `gbMaxLeverage`
+- `f-investment` = positionUsd / maxLev (USDC margin to deposit)
+- `f-leverage` = maxLeverage from Hyperliquid
+- SL% sets BOTH `f-sl` (below current price) AND `f-tp` (above) — grid is symmetric, both act as exits
+- Card rows: Position $ | Order Qty per grid | Max Leverage | Margin at max lev | SL below / TP above
+- `riskUsd` and `slPct` stored in config JSON for UI round-trip; not consumed by the grid bot engine
+- Card row label: "SL below / TP above (auto-set)"
+
+---
+
+## 2026-05-24 — Grid page: auto-naming + timeframe selector
+
+**Auto-naming:**
+- `gbBotNameIsAuto` flag (same pattern as signal page's `stBotNameIsAuto`)
+- `generateGridBotName()` → `{ASSET}-GRID-{COUNT}` e.g. `ETH-GRID-8`
+- `maybeUpdateGridAutoName()` called from asset combo onChange and f-count oninput
+- f-name gets `oninput="gbBotNameIsAuto=false"` to disable auto when user types
+- `newBot()` sets `gbBotNameIsAuto = true`, blank name, gridCount=8
+- `renderFormFromConfig` detects auto mode by comparing stored name to `generateGridBotName()`
+
+**Timeframe selector:**
+- `<select id="f-timeframe">` added beside Mode (options 1m–1d, default 1h)
+- `initGridChart` now reads `cfg.timeframe || '1h'` instead of hardcoded `'1h'`
+- `getFormConfig()` includes `timeframe` field; `renderFormFromConfig` restores it
+- `onchange="initGridChart(getFormConfig())"` — instant chart reload on change
+
+---
+
+## 2026-05-24 — Signal bot: position-aware trade execution
+
+**Problem:** Bot was not position-aware. In "both" mode, a SELL signal after a LONG only closed the long (net flat) — did not flip to short. "Long only" and "Short only" modes had the same issue.
+
+**Fix (`bot/src/signal-bot.ts`):** Replaced simple `placeOrder` call with position-aware logic:
+
+**Long & Short (both):**
+- BUY signal → close existing SHORT (reduce-only) if any → open LONG + SL bracket
+- SELL signal → close existing LONG (reduce-only) if any → open SHORT + SL bracket
+- True flip, never flat between signals
+
+**Long only:**
+- BUY signal → open LONG + SL (skip if already long)
+- SELL signal → close LONG (reduce-only), no short opened
+
+**Short only:**
+- SELL signal → open SHORT + SL (skip if already short)
+- BUY signal → close SHORT (reduce-only), no long opened
+
+**Key details:**
+- `getAccountState()` called at start of each tick to read live position
+- Cooldown only applies to opening new positions, not to protective closes
+- Close trades are recorded to the trade journal (reduce-only closes)
+- SL bracket (`slPct`) placed on every opening trade, never on closes
+- TypeScript strict build passes (`npm run build` clean)
