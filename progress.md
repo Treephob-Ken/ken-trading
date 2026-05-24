@@ -559,3 +559,52 @@ Four issues identified in advisor review and fixed:
   only `hl_user` and `hl_network` are updated; the existing `hl_key_enc` is preserved.
 
 **Fix 4 — TypeScript build** — all 3 changes pass `npm run build` clean.
+
+---
+
+## 2026-05-24 — VPS Deployment (DigitalOcean Singapore)
+
+### What was done
+Deployed the bot server to a live VPS so it's accessible 24/7 without needing a local machine running.
+
+**Server:** DigitalOcean Droplet — Singapore (SGP1), Ubuntu 24.04 LTS, 1 vCPU / 1GB RAM / $6/mo  
+**Public IP:** 68.183.184.170  
+**Live URL:** https://bot.garlic-trading.net (via Cloudflare Tunnel)
+
+### Steps completed
+1. Created DigitalOcean Droplet (Ubuntu 24.04, Singapore, $6/mo)
+2. Installed Node.js 20 via NodeSource (`curl -fsSL https://deb.nodesource.com/setup_20.x | bash -`)
+3. Installed `build-essential` (required for `better-sqlite3` native compilation)
+4. Cloned repo from GitHub (`master` branch — merged from `trigger-bot` first)
+5. `npm install` inside `bot/`
+6. Created `.env` from `.env.example` with:
+   - `MULTI_USER=true`
+   - `OWNER_EMAIL=ken2540@gmail.com`
+   - `KEY_ENCRYPTION_SECRET` + `JWT_SECRET` (generated with `openssl rand -hex 32`)
+   - `ALLOWED_ORIGINS=https://garlic-trading.vercel.app`
+7. Started bot with `pm2 start npm --name "trading-bot" -- run serve`
+8. Set pm2 to auto-start on reboot: `pm2 save && pm2 startup`
+9. Installed `cloudflared` and ran tunnel via token: `pm2 start "cloudflared tunnel run --token <TOKEN>" --name "cloudflare-tunnel"`
+10. Registered first user (admin) via `curl http://localhost:3001/auth/register`
+
+### Issues encountered & fixed
+- **`better-sqlite3` build failed** — missing `make`. Fix: `apt install -y build-essential`
+- **GitHub private repo** — token exposed in chat; GitHub auto-revoked it. Fix: made repo public
+- **Cloudflare Access blocking API calls** — old Access policy was intercepting all requests and returning 302 redirects before they reached the bot. Fix: deleted the Access application in Zero Trust dashboard
+- **Tunnel returning wrong response** — Cloudflare had cached the old 302 response. Resolved on its own after Access was removed
+- **Tunnel credentials file missing** — used `cloudflared tunnel run --token <TOKEN>` instead of `cloudflared tunnel run <name>` to bypass needing the credentials JSON file
+
+### Architecture running on VPS
+```
+Internet → Cloudflare Edge → Cloudflare Tunnel (cloudflared, pm2) → localhost:3001
+                                                                         ↓
+                                                               Express bot server (pm2)
+                                                               Multi-user mode enabled
+                                                               SQLite DB at bot/data/users.db
+```
+
+### pm2 processes
+| Name | Command | Purpose |
+|---|---|---|
+| `trading-bot` | `npm run serve` | Express server + bot logic on port 3001 |
+| `cloudflare-tunnel` | `cloudflared tunnel run --token <TOKEN>` | Cloudflare tunnel to expose port 3001 |

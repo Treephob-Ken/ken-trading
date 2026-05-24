@@ -2,6 +2,90 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Live deployment
+
+| Component | URL | Host |
+|---|---|---|
+| Web app (backtester + grid optimizer) | https://garlic-trading.vercel.app | Vercel |
+| Bot server + dashboard | https://bot.garlic-trading.net | DigitalOcean SGP1 (68.183.184.170) |
+
+### High-level architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Internet                             │
+└────────────┬───────────────────────────────┬────────────────┘
+             │                               │
+    garlic-trading.vercel.app       bot.garlic-trading.net
+    (React web app)                 (Cloudflare Tunnel)
+             │                               │
+        Vercel CDN               Cloudflare Edge → cloudflared
+                                             │
+                                    VPS: localhost:3001
+                                    Express server (pm2)
+                                    ┌────────────────────┐
+                                    │  Multi-user mode   │
+                                    │  SQLite users.db   │
+                                    │  Per-user bot data │
+                                    │  JWT auth (7d)     │
+                                    └────────────────────┘
+                                             │
+                                    Hyperliquid API (testnet/mainnet)
+                                    Binance REST (market data)
+```
+
+### User registration flow
+
+1. User visits **https://bot.garlic-trading.net**
+2. Dashboard detects multi-user mode by calling `GET /auth/me` — gets `401` → shows login overlay
+3. User clicks **Register** tab → enters email + password
+4. `POST /auth/register` creates account in SQLite (`bot/data/users.db`), returns JWT
+5. JWT stored in `localStorage`; all subsequent API calls send `Authorization: Bearer <token>`
+6. User goes to **Settings** → enters their Hyperliquid agent key + wallet address
+7. `PUT /settings/credentials` AES-256-GCM encrypts the key and saves to DB
+8. User can now create signal bots and grid bots — all isolated to their account
+
+### What happens behind the scenes (multi-user)
+
+- **Auth:** `bot/src/auth.ts` — `requireAuth` middleware validates JWT on every `/api/*` request. No-op in single-tenant mode.
+- **Storage:** `bot/src/users.ts` — SQLite via `better-sqlite3`. Each user row stores encrypted HL agent key (`hl_key_enc`), wallet address (`hl_user`), network (`hl_network`).
+- **Encryption:** AES-256-GCM using `KEY_ENCRYPTION_SECRET` from `.env`. Key is unrecoverable if the secret is lost.
+- **Bot isolation:** Signal bot configs in `bot/data/<userId>/signal-bots/`, grid configs in `bot/data/<userId>/configs/`. Bots run with each user's own decrypted credentials.
+- **Admin:** First registered user always gets admin. Admin can see all users, stop any user's bots (`DELETE /admin/users/:id`, `POST /admin/users/:id/kill-bots`).
+- **Migration:** On first admin registration, existing single-tenant configs are copied to `bot/data/<adminId>/` (idempotent, marker file `bot/data/.migrated`).
+
+### VPS management commands
+
+```bash
+# Check status
+pm2 status
+
+# View bot logs
+pm2 logs trading-bot --lines 50
+
+# Restart bot (e.g. after code update)
+cd ~/ken-trading && git pull && cd bot && npm install
+pm2 restart trading-bot
+
+# Restart tunnel
+pm2 restart cloudflare-tunnel
+
+# SSH in
+ssh root@68.183.184.170
+```
+
+### Updating the VPS after a code change
+
+```bash
+# Local: push changes
+git add . && git commit -m "..." && git push origin master
+
+# On VPS:
+cd ~/ken-trading && git pull
+cd bot && npm install   # only if package.json changed
+pm2 restart trading-bot
+```
+
 ## Repository layout
 
 Two independent apps share this repo:
