@@ -624,3 +624,37 @@ Internet → Cloudflare Edge → Cloudflare Tunnel (cloudflared, pm2) → localh
 **Fix:** `npm rebuild` inside `bot/` recompiles the native addon against Node 22. Then `pm2 restart trading-bot`.
 
 **Gotcha:** Always run `npm rebuild` after upgrading Node.js when the project uses native addons (`better-sqlite3`, `canvas`, etc.).
+
+---
+
+### 2026-05-24 — Risk-based position sizing for signal bots
+
+**Problem:** Position sizing was "Budget (USDC) × Leverage" — meaningless without knowing SL distance. User wanted formula: Position size ($) = Risk per Trade ($) / SL%.
+
+**What changed:**
+
+**`bot/src/hyperliquid.ts`:**
+- Added `maxLeverage: number` to `AssetMeta` interface and extracted `u.maxLeverage` from HL metadata.
+
+**`bot/src/trade.ts`:**
+- `getAssetInfo` now returns `maxLeverage` (forwarded from `AssetMeta`). The `/api/asset-info` endpoint exposes this to the dashboard.
+
+**`bot/src/signal-bot.ts`:**
+- Added `riskUsd?: number` to `SignalBotConfig` (risk per trade in USDC).
+- Added `riskUsd?`, `slPct?`, `positionUsd?` to `TradeRecord` so the trade log shows risk context.
+- `parseSignalConfig` now parses `riskUsd` and accepts it as a sizing mode (alongside legacy `investment`/`leverage` and fixed `size`).
+- Tick logic: if `riskUsd` + `slPct` are set, computes `positionUsd = riskUsd / (slPct/100)` → `computedSize = positionUsd / livePrice`. Legacy budget mode (`investment × leverage / price`) still works.
+- Trade record now stores `riskUsd`, `slPct`, `positionUsd` when risk mode is active.
+
+**`bot/dashboard/index.html`:**
+- Replaced "Budget (USDC)" + "Leverage" inputs with "Risk per Trade ($)" (`st-risk-usd`).
+- Hidden `st-investment`/`st-leverage` fields kept for backward compat (old saved configs).
+- Max leverage shown as info text next to risk field — auto-fetched via `/api/asset-info` when currency is picked.
+- `updateSignalSizingPreview()` rewritten: shows `Position $X = $Y risk / Z% SL · Max lev: Nx`.
+- `onCurrencyPicked` and `populateForm` both fetch max leverage and current price from `/api/asset-info` (not Binance), so preview is instant and uses HL mark price.
+- `collectSignalConfig` uses `riskUsd` mode; validates that SL% is set when risk mode is chosen.
+- Trade journal table now has columns: Time, Side, Size, Price, Position $, Risk $, SL%, ✓.
+- New bot default: `{ riskUsd: 50, slPct: 2 }` (so Start works without any user input).
+- `updateSLPreview` now uses `stCurrentPrice` (set by asset-info fetch) instead of scraping a DOM element.
+
+**Gotcha:** Risk mode requires SL% to be set — `collectSignalConfig` enforces this and shows a clear error if the user tries to start without it.

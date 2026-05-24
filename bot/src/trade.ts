@@ -345,12 +345,12 @@ export async function getAssetInfo(
   creds?: EnvConfig | null,
 ): Promise<{
   asset: string; midPx: number; markPx: number
-  szDecimals: number; minSz: number; minNotional: number
+  szDecimals: number; minSz: number; minNotional: number; maxLeverage: number
 }> {
   const { info } = getClients(creds)
   const meta = await getAssetMeta(info, asset.trim().toUpperCase())
   const minSz = Math.pow(10, -meta.szDecimals)
-  return { asset: meta.name, midPx: meta.midPx, markPx: meta.markPx, szDecimals: meta.szDecimals, minSz, minNotional: minSz * meta.midPx }
+  return { asset: meta.name, midPx: meta.midPx, markPx: meta.markPx, szDecimals: meta.szDecimals, minSz, minNotional: minSz * meta.midPx, maxLeverage: meta.maxLeverage }
 }
 
 export async function listAssets(creds?: EnvConfig | null): Promise<string[]> {

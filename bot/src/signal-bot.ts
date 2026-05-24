@@ -41,6 +41,9 @@ export interface TradeRecord {
   size: number
   price: number | null // avgPx if filled
   filled: boolean
+  riskUsd?: number     // risk per trade in USDC (risk mode)
+  slPct?: number       // SL % used to compute position (risk mode)
+  positionUsd?: number // notional position value at entry
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -65,11 +68,13 @@ export interface SignalBotConfig {
   strategyId: StrategyId
   params: Record<string, number>
   asset: string // Hyperliquid asset, e.g. ETH
-  // Budget mode: size is computed at start as (investment × leverage) / currentPrice.
+  // Risk mode: positionUsd = riskUsd / (slPct/100); size = positionUsd / currentPrice.
+  // Budget mode (legacy): size = (investment × leverage) / currentPrice.
   // Manual mode: size is specified directly. Exactly one must be provided.
-  investment?: number // USDC budget
-  leverage?: number   // multiplier (used only when investment is set)
-  size: number        // fixed size; 0 signals budget mode (size computed at runtime)
+  riskUsd?: number    // risk per trade in USDC; requires slPct to be set
+  investment?: number // USDC budget (legacy budget mode)
+  leverage?: number   // multiplier (legacy budget mode only)
+  size: number        // fixed size; 0 signals computed mode (risk or budget)
   slippagePct: number
   cooldownSec: number
   tradeSide: 'both' | 'buy' | 'sell'
@@ -150,6 +155,10 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ? b.asset.trim().toUpperCase()
     : symbol.replace(/USDT$/, '')
 
+  const riskRaw = typeof b.riskUsd === 'string' ? Number(b.riskUsd) : b.riskUsd
+  const riskUsd =
+    typeof riskRaw === 'number' && Number.isFinite(riskRaw) && riskRaw > 0 ? riskRaw : undefined
+
   const invRaw = typeof b.investment === 'string' ? Number(b.investment) : b.investment
   const investment =
     typeof invRaw === 'number' && Number.isFinite(invRaw) && invRaw > 0 ? invRaw : undefined
@@ -162,8 +171,8 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const sizeOk = typeof sizeRaw === 'number' && Number.isFinite(sizeRaw) && sizeRaw > 0
   const size = sizeOk ? sizeRaw : 0
 
-  if (!investment && !sizeOk) {
-    throw new Error('Provide either investment + leverage (budget mode) or a positive size')
+  if (!riskUsd && !investment && !sizeOk) {
+    throw new Error('Provide a risk per trade (riskUsd), a budget (investment), or a fixed size')
   }
 
   const slipRaw = typeof b.slippagePct === 'string' ? Number(b.slippagePct) : b.slippagePct
@@ -210,6 +219,7 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
 
   return {
     symbol, timeframe, strategyId, params, asset,
+    ...(riskUsd !== undefined ? { riskUsd } : {}),
     investment, leverage, size, slippagePct, cooldownSec, tradeSide,
     ...(tpPct !== undefined ? { tpPct } : {}),
     ...(slPct !== undefined ? { slPct } : {}),
@@ -390,16 +400,27 @@ class SignalBot {
         return
       }
 
-      // Budget mode: derive order size from investment × leverage / current price.
-      // Computed once per session so price drift doesn't silently change position size.
-      if (this.computedSize === null && cfg.investment && cfg.leverage) {
+      // Risk mode: positionUsd = riskUsd / (slPct/100); size = positionUsd / currentPrice.
+      // Budget mode (legacy): size = (investment × leverage) / currentPrice.
+      // Both computed once per session at startup so price drift doesn't silently alter size.
+      if (this.computedSize === null) {
         const livePrice = candles[candles.length - 1].close
-        this.computedSize = (cfg.investment * cfg.leverage) / livePrice
-        this.log.info(
-          `Budget mode: $${cfg.investment} × ${cfg.leverage}x` +
-            ` = $${(cfg.investment * cfg.leverage).toFixed(2)} notional` +
-            ` / ${livePrice} = ${this.computedSize.toFixed(6)} ${cfg.asset} per trade`,
-        )
+        if (cfg.riskUsd && cfg.slPct && cfg.slPct > 0) {
+          const positionUsd = cfg.riskUsd / (cfg.slPct / 100)
+          this.computedSize = positionUsd / livePrice
+          this.log.info(
+            `Risk mode: $${cfg.riskUsd} risk / ${cfg.slPct}% SL` +
+              ` = $${positionUsd.toFixed(2)} position` +
+              ` / ${livePrice} = ${this.computedSize.toFixed(6)} ${cfg.asset} per trade`,
+          )
+        } else if (cfg.investment && cfg.leverage) {
+          this.computedSize = (cfg.investment * cfg.leverage) / livePrice
+          this.log.info(
+            `Budget mode: $${cfg.investment} × ${cfg.leverage}x` +
+              ` = $${(cfg.investment * cfg.leverage).toFixed(2)} notional` +
+              ` / ${livePrice} = ${this.computedSize.toFixed(6)} ${cfg.asset} per trade`,
+          )
+        }
       }
 
       // The last element is the still-forming bar; the one before it is the
@@ -526,9 +547,8 @@ class SignalBot {
         return
       }
 
-      const tradeSize = (cfg.investment && cfg.leverage && this.computedSize !== null)
-        ? this.computedSize
-        : cfg.size
+      // Risk mode or budget mode → use computedSize; fixed size → use cfg.size directly.
+      const tradeSize = this.computedSize !== null ? this.computedSize : cfg.size
       this.log.info(`${sig.toUpperCase()} signal on ${cfg.symbol} ${cfg.timeframe} close — executing`)
       this.lastTradeAt = Date.now()
       try {
@@ -550,6 +570,7 @@ class SignalBot {
         if (result.filled && (result.tpPlaced || result.slPlaced)) {
           this.log.info(`Bracket orders: ${result.tpPlaced ? 'TP✓' : 'TP✗'} ${result.slPlaced ? 'SL✓' : 'SL✗'}`)
         }
+        const positionUsd = result.avgPx ? result.filledSize * result.avgPx : undefined
         this.trades.push({
           time: Date.now(),
           side: sig,
@@ -557,6 +578,9 @@ class SignalBot {
           size: result.filledSize,
           price: result.avgPx,
           filled: result.filled,
+          ...(cfg.riskUsd !== undefined ? { riskUsd: cfg.riskUsd } : {}),
+          ...(cfg.slPct !== undefined ? { slPct: cfg.slPct } : {}),
+          ...(positionUsd !== undefined ? { positionUsd } : {}),
         })
         if (this.trades.length > 100) this.trades = this.trades.slice(-100)
         this.log.fill(result.message)

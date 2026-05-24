@@ -1316,11 +1316,18 @@
           <!-- Position Sizing -->
           <div class="card-title" style="margin-bottom:var(--s2)">Position Sizing</div>
           <div class="field-row">
-            <div class="field"><label>Budget (USDC)</label><input id="st-investment" type="number" step="any" placeholder="e.g. 500" oninput="scheduleSignalSizingPreview()" /></div>
-            <div class="field"><label>Leverage</label><input id="st-leverage" type="number" min="1" step="any" value="1" placeholder="1" oninput="scheduleSignalSizingPreview()" /></div>
+            <div class="field">
+              <label>Risk per Trade ($)</label>
+              <input id="st-risk-usd" type="number" min="1" step="any" placeholder="e.g. 50" oninput="scheduleSignalSizingPreview()" />
+            </div>
+            <div class="field" style="display:flex;align-items:flex-end">
+              <div id="st-max-lev-info" style="font-size:11px;color:var(--text-dim);padding-bottom:9px">Max leverage: —</div>
+            </div>
           </div>
-          <div class="field"><label>Override Order Size</label><input id="st-size" type="number" step="any" placeholder="(auto from budget)" oninput="scheduleSignalSizingPreview()" /></div>
-          <div id="st-sizing-preview" class="preview-box">Enter budget + leverage, or a fixed order size…</div>
+          <div class="field"><label>Override Order Size (coins)</label><input id="st-size" type="number" step="any" placeholder="(optional manual override)" oninput="scheduleSignalSizingPreview()" /></div>
+          <!-- Hidden legacy fields kept for backward-compat on bots created before risk mode -->
+          <input id="st-investment" type="hidden" /><input id="st-leverage" type="hidden" />
+          <div id="st-sizing-preview" class="preview-box">Set risk per trade + stop loss % to preview position size…</div>
 
           <div class="card-divider"></div>
 
@@ -1347,7 +1354,7 @@
           <div class="field-row">
             <div class="field">
               <label>Stop Loss %</label>
-              <input id="st-sl-pct" type="number" min="0.1" max="100" step="0.1" placeholder="off (no SL)" oninput="scheduleSave();updateSLPreview()" />
+              <input id="st-sl-pct" type="number" min="0.1" max="100" step="0.1" placeholder="off (no SL)" oninput="scheduleSignalSizingPreview();updateSLPreview()" />
             </div>
             <div class="field" id="st-sl-preview-wrap" style="display:flex;align-items:flex-end">
               <div id="st-sl-preview" style="font-size:11px;color:var(--text-dim);padding-bottom:9px">Est. SL price shown after entry</div>
@@ -1462,7 +1469,10 @@
       <span id="st-journal-count"></span>
       <div id="st-journal-empty"></div>
       <div id="st-journal-table">
-        <table class="journal-table"><tbody id="st-journal-body"></tbody></table>
+        <table class="journal-table">
+          <thead><tr><th>Time</th><th>Side</th><th>Size</th><th>Price</th><th>Position $</th><th>Risk $</th><th>SL%</th><th>✓</th></tr></thead>
+          <tbody id="st-journal-body"></tbody>
+        </table>
       </div>
       <span id="st-balance">—</span>
       <span id="st-withdrawable">—</span>
@@ -2471,25 +2481,42 @@
     }
   }
 
-  let stCurrentPrice = null, stSizingTimer = null
+  let stCurrentPrice = null, stSizingTimer = null, stMaxLeverage = null
   function scheduleSignalSizingPreview() { clearTimeout(stSizingTimer); stSizingTimer = setTimeout(updateSignalSizingPreview, 300); scheduleSave() }
 
   async function updateSignalSizingPreview() {
     const box = $('st-sizing-preview'); if (!box) return
-    const inv = parseFloat($('st-investment').value), lev = parseFloat($('st-leverage').value)
-    const sz  = parseFloat($('st-size').value)
-    const asset = (stCurrencyCombo?.getValue() || $('st-asset')?.value || '').toUpperCase()
-    if (sz > 0) { const priceHint = stCurrentPrice ? ` ≈ <b>$${(sz * stCurrentPrice).toFixed(2)}</b> notional` : ''; box.innerHTML = `Fixed size <b>${sz}</b> ${asset}${priceHint} <span style="color:var(--text-dim)">(manual override)</span>`; return }
-    if (!(inv > 0) || !(lev >= 1)) { box.innerHTML = 'Enter <b>Budget + Leverage</b>, or a fixed <b>Order Size</b>…'; return }
-    const notional = inv * lev
+    const riskUsd = parseFloat($('st-risk-usd')?.value)
+    const slPct   = parseFloat($('st-sl-pct')?.value)
+    const sz       = parseFloat($('st-size')?.value)
+    const asset    = (stCurrencyCombo?.getValue() || $('st-asset')?.value || '').toUpperCase()
+
+    // Manual override takes priority over risk mode
+    if (sz > 0) {
+      const priceHint = stCurrentPrice ? ` ≈ <b>$${(sz * stCurrentPrice).toFixed(2)}</b> notional` : ''
+      box.innerHTML = `Manual size <b>${sz}</b> ${asset}${priceHint} <span style="color:var(--text-dim)">(override)</span>`
+      return
+    }
+
+    if (!(riskUsd > 0)) { box.innerHTML = 'Enter <b>Risk per Trade ($)</b> + <b>Stop Loss %</b> to preview position size…'; return }
+
+    // Fetch current price if we don't have it
     if (asset && !stCurrentPrice) {
       try { const r = await fetch(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${asset}USDT`); if (r.ok) { const d = await r.json(); stCurrentPrice = parseFloat(d.price) } } catch {}
     }
+
+    if (!(slPct > 0)) {
+      box.innerHTML = `Risk <b>$${riskUsd}</b> — set <b>Stop Loss %</b> to calculate position size`
+      return
+    }
+
+    const positionUsd = riskUsd / (slPct / 100)
     if (stCurrentPrice) {
-      const estSize = notional / stCurrentPrice
-      box.innerHTML = `Budget <b>$${inv}</b> × <b>${lev}x</b> = <b>$${notional.toFixed(0)}</b> notional<br>Est. size ≈ <b>${estSize.toFixed(6)}</b> ${asset} <span style="color:var(--text-dim)">(at $${stCurrentPrice.toFixed(2)})</span><br>Margin ≈ <b>$${inv.toFixed(0)} USDC</b>`
+      const estSize = positionUsd / stCurrentPrice
+      const maxLev  = stMaxLeverage || '—'
+      box.innerHTML = `Position <b>$${positionUsd.toFixed(0)}</b> = <b>$${riskUsd}</b> risk / <b>${slPct}%</b> SL<br>Est. size ≈ <b>${estSize.toFixed(6)}</b> ${asset} <span style="color:var(--text-dim)">(at $${stCurrentPrice.toFixed(2)})</span> · Max lev: <b>${maxLev}x</b>`
     } else {
-      box.innerHTML = `Budget <b>$${inv}</b> × <b>${lev}x</b> = <b>$${notional.toFixed(0)}</b> notional<br><span style="color:var(--text-dim)">Select a currency to see estimated size</span>`
+      box.innerHTML = `Position <b>$${positionUsd.toFixed(0)}</b> = <b>$${riskUsd}</b> risk / <b>${slPct}%</b> SL<br><span style="color:var(--text-dim)">Select a currency to see estimated size</span>`
     }
   }
 
@@ -2559,7 +2586,7 @@
   }
 
   function wireAutoSave() {
-    ['st-bot-name','st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown',
+    ['st-bot-name','st-timeframe','st-risk-usd','st-size','st-slippage','st-cooldown',
      'st-direction','st-ensemble-threshold','st-mtf-timeframe','st-daily-loss','st-sl-pct'].forEach((id) => {
       const el = $(id); if (el) el.addEventListener('change', scheduleSave)
     })
@@ -2572,10 +2599,8 @@
     const slPct = parseFloat($('st-sl-pct')?.value)
     const preview = $('st-sl-preview')
     if (!preview) return
-    if (!slPct || slPct <= 0) { preview.textContent = 'Est. SL price shown after entry'; return }
-    // Try to get current price from the account/position display
-    const priceEl = $('tr-current-price') || $('st-current-price')
-    const price = priceEl ? parseFloat(priceEl.textContent?.replace(/[^0-9.]/g, '') || '') : NaN
+    if (!slPct || slPct <= 0) { preview.textContent = 'Est. SL price shown after entry'; preview.style.color = ''; return }
+    const price = stCurrentPrice || NaN
     if (price > 0) {
       const slLong  = (price * (1 - slPct / 100)).toFixed(4)
       const slShort = (price * (1 + slPct / 100)).toFixed(4)
@@ -2600,7 +2625,10 @@
         const ts = d.toLocaleDateString('en',{month:'2-digit',day:'2-digit'}) + ' ' + d.toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})
         const sc = t.side === 'buy' ? 'var(--gain-light)' : 'var(--loss-light)'
         const px = t.price ? Number(t.price).toPrecision(6) : '—'
-        return `<tr><td style="color:var(--text-dim)">${ts}</td><td style="font-weight:700;color:${sc}">${t.side.toUpperCase()}</td><td style="text-align:right">${Number(t.size).toPrecision(4)}</td><td style="text-align:right">${px}</td><td style="text-align:right;color:${t.filled ? 'var(--gain-light)' : 'var(--loss-light)'}">${t.filled ? '✓' : '✗'}</td></tr>`
+        const posUsd = t.positionUsd ? `$${Number(t.positionUsd).toFixed(0)}` : '—'
+        const rUsd = t.riskUsd ? `$${t.riskUsd}` : '—'
+        const sl = t.slPct ? `${t.slPct}%` : '—'
+        return `<tr><td style="color:var(--text-dim)">${ts}</td><td style="font-weight:700;color:${sc}">${t.side.toUpperCase()}</td><td style="text-align:right">${Number(t.size).toPrecision(4)}</td><td style="text-align:right">${px}</td><td style="text-align:right">${posUsd}</td><td style="text-align:right;color:var(--loss-light)">${rUsd}</td><td style="text-align:right">${sl}</td><td style="text-align:right;color:${t.filled ? 'var(--gain-light)' : 'var(--loss-light)'}">${t.filled ? '✓' : '✗'}</td></tr>`
       }).join('')
       // Keep signal chart markers in sync on every poll tick
       _signalTrades = Array.isArray(trades) ? trades : []
@@ -2659,7 +2687,22 @@
 
   function onCurrencyPicked(asset) {
     $('st-asset').value = asset; $('st-symbol').value = asset + 'USDT'
-    stCurrentPrice = null; updateSignalSizingPreview(); scheduleSave()
+    stCurrentPrice = null; stMaxLeverage = null
+    const levInfo = $('st-max-lev-info'); if (levInfo) levInfo.textContent = 'Max leverage: loading…'
+    fetch('/api/asset-info?asset=' + encodeURIComponent(asset))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && d.maxLeverage) {
+          stMaxLeverage = d.maxLeverage
+          if (levInfo) levInfo.textContent = `Max leverage: ${d.maxLeverage}x`
+        } else {
+          if (levInfo) levInfo.textContent = 'Max leverage: —'
+        }
+        if (d && d.midPx) stCurrentPrice = d.midPx
+        updateSignalSizingPreview(); updateSLPreview()
+      })
+      .catch(() => { if (levInfo) levInfo.textContent = 'Max leverage: —'; updateSignalSizingPreview(); updateSLPreview() })
+    scheduleSave()
   }
 
   async function loadSignalBots() {
@@ -2723,7 +2766,7 @@
     try {
       const status = await apiCall('/api/signal/bots', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', investment: 100, leverage: 1, slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
+        body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', riskUsd: 50, slPct: 2, size: 0, slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
       })
       showToast('Signal bot created'); stSelectedId = status.id
       await loadSignalBots(); selectSignalBot(status.id)
@@ -2762,15 +2805,27 @@
     }
     const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
     stCurrencyCombo.setValue(cur); $('st-symbol').value = cfg.symbol || (cur + 'USDT'); $('st-asset').value = cfg.asset || cur
-    $('st-timeframe').value = cfg.timeframe || '1h'; $('st-investment').value = cfg.investment ?? ''
-    $('st-leverage').value = cfg.leverage ?? ''; $('st-size').value = cfg.size > 0 ? cfg.size : ''
+    $('st-timeframe').value = cfg.timeframe || '1h'
+    $('st-risk-usd').value = cfg.riskUsd ?? ''
+    $('st-size').value = cfg.size > 0 ? cfg.size : ''
     $('st-slippage').value = cfg.slippagePct ?? 2; $('st-cooldown').value = cfg.cooldownSec ?? 60
     $('st-direction').value = cfg.tradeSide || 'both'
     const mtfEn = cfg.mtfEnabled || false; $('st-mtf-enabled').checked = mtfEn
     const mtfTfEl = $('st-mtf-timeframe'); if (mtfTfEl) { mtfTfEl.value = cfg.mtfTimeframe || '1h'; mtfTfEl.disabled = !mtfEn }
     $('st-daily-loss').value = cfg.dailyLossLimitPct || ''
     $('st-sl-pct').value = cfg.slPct || ''
-    stCurrentPrice = null; updateSignalSizingPreview(); updateSLPreview()
+    stCurrentPrice = null; stMaxLeverage = null
+    // Fetch max leverage for this asset
+    const levInfo = $('st-max-lev-info'); if (levInfo) levInfo.textContent = 'Max leverage: loading…'
+    fetch('/api/asset-info?asset=' + encodeURIComponent(cur))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && d.maxLeverage) { stMaxLeverage = d.maxLeverage; if (levInfo) levInfo.textContent = `Max leverage: ${d.maxLeverage}x` }
+        else { if (levInfo) levInfo.textContent = 'Max leverage: —' }
+        if (d && d.midPx) stCurrentPrice = d.midPx
+        updateSignalSizingPreview(); updateSLPreview()
+      })
+      .catch(() => { if (levInfo) levInfo.textContent = 'Max leverage: —'; updateSignalSizingPreview(); updateSLPreview() })
   }
 
   async function pollSignal() {
@@ -2809,7 +2864,8 @@
     const sizeInfo = status.computedSize != null
       ? `${Number(status.computedSize).toFixed(5)} ${status.config?.asset || ''}/trade`
       : status.config?.size > 0 ? `${status.config.size} ${status.config?.asset || ''}/trade`
-      : status.config?.investment ? `$${status.config.investment}@${status.config.leverage}x` : ''
+      : status.config?.riskUsd && status.config?.slPct ? `$${status.config.riskUsd} risk/${status.config.slPct}%SL`
+      : ''
     $('st-banner-meta').textContent = `${sym} · ${tf} · ${status.running ? 'RUNNING' : 'stopped'}` + (sizeInfo ? ` · ${sizeInfo}` : '')
     banner.className = 'bot-banner ' + (status.running ? 'running' : status.lastError ? 'error' : 'stopped')
     const pill = $('st-state-pill')
@@ -2850,7 +2906,7 @@
       }
     }
     const lock = s.running
-    ;['st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown','st-direction','st-mtf-timeframe','st-daily-loss','st-sl-pct'].forEach((id) => { const el = $(id); if (el) el.disabled = lock })
+    ;['st-timeframe','st-risk-usd','st-size','st-slippage','st-cooldown','st-direction','st-mtf-timeframe','st-daily-loss','st-sl-pct'].forEach((id) => { const el = $(id); if (el) el.disabled = lock })
     ;['st-mtf-enabled','st-bot-name'].forEach(id => { const el = $(id); if (el) el.disabled = lock })
     document.querySelectorAll('#st-params-grid input').forEach((el) => { el.disabled = lock })
     if (stStrategyCombo) stStrategyCombo.setEnabled(!lock); if (stCurrencyCombo) stCurrencyCombo.setEnabled(!lock)
@@ -2859,7 +2915,12 @@
     if (!lock) toggleMTF()
     const hint = $('st-running-hint'); if (hint) hint.style.display = lock ? 'block' : 'none'
     const preview = $('st-sizing-preview')
-    if (lock && s.computedSize != null) { preview.innerHTML = `Effective size <b>${Number(s.computedSize).toFixed(6)}</b> ${s.config?.asset || ''} per trade <span style="color:var(--text-dim)">(computed at start)</span>` }
+    if (lock && s.computedSize != null) {
+      const rInfo = s.config?.riskUsd && s.config?.slPct
+        ? ` · $${s.config.riskUsd} risk / ${s.config.slPct}% SL`
+        : ''
+      preview.innerHTML = `Effective size <b>${Number(s.computedSize).toFixed(6)}</b> ${s.config?.asset || ''} per trade${rInfo} <span style="color:var(--text-dim)">(computed at start)</span>`
+    }
     else if (!lock) { updateSignalSizingPreview() }
   }
 
@@ -2895,17 +2956,20 @@
       if (!strategyId) { warn('Pick a strategy'); return null }
       params = collectParams(strategyId)
     }
-    const investment = parseFloat($('st-investment').value), leverage = parseFloat($('st-leverage').value), size = parseFloat($('st-size').value)
-    const hasBudget = investment > 0 && leverage >= 1, hasSize = size > 0
-    if (!hasBudget && !hasSize) { warn('Set a Budget + Leverage, or a manual Order Size'); return null }
+    const riskUsd = parseFloat($('st-risk-usd')?.value), size = parseFloat($('st-size')?.value)
+    const slPct = parseFloat($('st-sl-pct')?.value)
+    const hasRisk = riskUsd > 0, hasSize = size > 0
+    if (!hasRisk && !hasSize) { warn('Set a Risk per Trade ($), or a manual Order Size'); return null }
+    if (hasRisk && !(slPct > 0)) { warn('Risk mode requires Stop Loss % to be set'); return null }
     return {
       strategyId, symbol: asset + 'USDT', timeframe: $('st-timeframe').value, params, asset,
-      investment: hasBudget ? investment : undefined, leverage: hasBudget ? leverage : undefined, size: hasSize ? size : 0,
+      ...(hasRisk ? { riskUsd } : {}),
+      size: hasSize ? size : 0,
       slippagePct: parseFloat($('st-slippage').value) || 2, cooldownSec: parseInt($('st-cooldown').value) || 60,
       tradeSide: $('st-direction').value, ...ensembleExtra,
       ...($('st-mtf-enabled')?.checked && $('st-mtf-timeframe')?.value ? { mtfEnabled: true, mtfTimeframe: $('st-mtf-timeframe').value } : {}),
       ...(parseFloat($('st-daily-loss')?.value) > 0 ? { dailyLossLimitPct: parseFloat($('st-daily-loss').value) } : {}),
-      ...(parseFloat($('st-sl-pct')?.value) > 0 ? { slPct: parseFloat($('st-sl-pct').value) } : {}),
+      ...(slPct > 0 ? { slPct } : {}),
     }
   }
 
@@ -2913,7 +2977,9 @@
     if (!stSelectedId) { showToast('Select a signal bot first', true); return }
     const cfg = collectSignalConfig(); if (!cfg) return
     const dir = { both: 'Buy & Sell signals', buy: 'Buy signals only', sell: 'Sell signals only' }[cfg.tradeSide]
-    const sizing = cfg.investment && cfg.leverage ? `$${cfg.investment} budget @ ${cfg.leverage}x leverage` : `fixed size ${cfg.size} ${cfg.asset}`
+    const sizing = cfg.riskUsd && cfg.slPct
+      ? `$${cfg.riskUsd} risk / ${cfg.slPct}% SL → ~$${(cfg.riskUsd / (cfg.slPct / 100)).toFixed(0)} position`
+      : cfg.size > 0 ? `fixed size ${cfg.size} ${cfg.asset}` : 'no size set'
     const stratLine = cfg.ensembleMode && cfg.ensembleStrategyIds?.length
       ? `Ensemble: ${cfg.ensembleStrategyIds.length} strategies, need ${cfg.ensembleThreshold} votes`
       : `Strategy: ${getStrategyLabel(cfg.strategyId)}`

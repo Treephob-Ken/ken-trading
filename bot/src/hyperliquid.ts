@@ -39,6 +39,7 @@ export interface AssetMeta {
   pxDecimals: number
   markPx: number
   midPx: number
+  maxLeverage: number
 }
 
 // Look up the asset's index, size decimals, and current price. The grid bot
@@ -59,7 +60,7 @@ export async function getAssetMeta(
   const midPx = Number(ctx.midPx ?? ctx.markPx)
   // Perp price precision: up to (6 - szDecimals) decimals AND max 5 sig figs.
   const pxDecimals = Math.max(0, 6 - u.szDecimals)
-  return { index, name: asset, szDecimals: u.szDecimals, pxDecimals, markPx, midPx }
+  return { index, name: asset, szDecimals: u.szDecimals, pxDecimals, markPx, midPx, maxLeverage: u.maxLeverage }
 }
 
 // Round a price to satisfy Hyperliquid's 5-sig-fig + decimal-place limits.
