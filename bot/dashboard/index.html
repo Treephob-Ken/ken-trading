@@ -1091,7 +1091,7 @@
         <div class="card-title">Bot Config</div>
         <div style="display:flex;flex-direction:column;gap:var(--s2)">
           <div class="field-row" style="grid-template-columns:2fr 1fr">
-            <div class="field"><label>Display Name</label><input id="f-name" type="text" placeholder="ETH Neutral Grid" /></div>
+            <div class="field"><label>Display Name</label><input id="f-name" type="text" placeholder="e.g. ETH-GRID-8" oninput="gbBotNameIsAuto=false" /></div>
             <div class="field">
               <label>Asset</label>
               <div class="combo" id="gb-currency-combo">
@@ -1107,7 +1107,7 @@
             <div class="field"><label>Upper</label><input id="f-upper" type="number" step="any" oninput="updateSizingPreview()" /></div>
           </div>
           <div class="field-row">
-            <div class="field"><label>Grid Count</label><input id="f-count" type="number" min="2" oninput="updateSizingPreview()" /></div>
+            <div class="field"><label>Grid Count</label><input id="f-count" type="number" min="2" oninput="updateSizingPreview();maybeUpdateGridAutoName()" /></div>
             <div class="field"><label>Mode</label>
               <select id="f-mode">
                 <option value="arithmetic">Arithmetic</option>
@@ -1137,7 +1137,7 @@
               <div class="sizing-result-row"><span class="sizing-result-key">Order Qty (per grid)</span><span class="sizing-result-val" id="gb-res-order-size">—</span></div>
               <div class="sizing-result-row"><span class="sizing-result-key">Max Leverage</span><span class="sizing-result-val" id="gb-res-maxlev">—</span></div>
               <div class="sizing-result-row"><span class="sizing-result-key">Margin at max lev</span><span class="sizing-result-val" id="gb-res-margin">—</span></div>
-              <div class="sizing-result-row"><span class="sizing-result-key">SL price (Long / Short)</span><span class="sizing-result-val sl" id="gb-res-sl">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">SL below / TP above (auto-set)</span><span class="sizing-result-val sl" id="gb-res-sl">—</span></div>
             </div>
           </div>
           <div id="gb-sizing-empty" class="sizing-empty">Enter <b>Risk $</b> + <b>Stop Loss %</b> above to see position size</div>
@@ -2278,7 +2278,20 @@
   // ════════════════════════════════════════════════════════
   let selectedBotId = null, bots = [], gridAutoScroll = true, gridActiveFilter = 'all', gridLogCount = 0
   const gridLogBox = () => $('log-box'), gridJumpBtn = () => $('jump-btn')
-  let gbCurrencyCombo = null, gbCurrentPrice = null, gbMaxLeverage = null
+  let gbCurrencyCombo = null, gbCurrentPrice = null, gbMaxLeverage = null, gbBotNameIsAuto = false
+
+  function generateGridBotName() {
+    const asset = (gbCurrencyCombo?.getValue() || $('f-asset')?.value || '').toUpperCase()
+    const count = parseInt($('f-count')?.value) || 0
+    if (!asset) return ''
+    return count > 0 ? `${asset}-GRID-${count}` : `${asset}-GRID`
+  }
+
+  function maybeUpdateGridAutoName() {
+    if (!gbBotNameIsAuto) return
+    const el = $('f-name'); if (!el) return
+    const name = generateGridBotName(); if (name) el.value = name
+  }
 
   function initGridPage() {
     if (gbCurrencyCombo) return   // already done
@@ -2293,9 +2306,10 @@
           if (d && d.maxLeverage) { gbMaxLeverage = d.maxLeverage; if (levInfo) levInfo.textContent = `Max leverage: ${d.maxLeverage}x` }
           else { if (levInfo) levInfo.textContent = 'Max leverage: —' }
           if (d && d.midPx) gbCurrentPrice = d.midPx
+          maybeUpdateGridAutoName()
           updateSizingPreview()
         })
-        .catch(() => { if (levInfo) levInfo.textContent = 'Max leverage: —'; updateSizingPreview() })
+        .catch(() => { if (levInfo) levInfo.textContent = 'Max leverage: —'; maybeUpdateGridAutoName(); updateSizingPreview() })
       initGridChart(getFormConfig())
     })
     fetch('/api/assets').then(r => r.json()).then(assets => {
@@ -2383,12 +2397,15 @@
   }
 
   function renderFormFromConfig(cfg) {
-    $('f-name').value = cfg.name || ''
     const asset = (cfg.asset || '').toUpperCase()
     $('f-asset').value = asset
     if (gbCurrencyCombo) gbCurrencyCombo.setValue(asset)
     $('f-lower').value = cfg.lower ?? ''; $('f-upper').value = cfg.upper ?? ''
     $('f-count').value = cfg.gridCount ?? ''; $('f-mode').value = cfg.mode || 'arithmetic'
+    // Auto-name detection: if stored name matches the generated pattern, keep auto mode
+    const generatedName = generateGridBotName()
+    gbBotNameIsAuto = !cfg.name || cfg.name === generatedName
+    $('f-name').value = cfg.name || generatedName || ''
     // Hidden sizing fields — populated by updateSizingPreview when risk mode is used
     $('f-investment').value = cfg.investment ?? ''; $('f-leverage').value = cfg.leverage ?? ''
     $('f-size').value = cfg.orderSize ?? ''; $('f-sl').value = cfg.stopLossPrice ?? ''
@@ -2437,20 +2454,18 @@
         ? (margin * lev * 0.5) / (c.gridCount * upperRef)
         : null
 
-      // SL price from current mid price (informational — Safety section sets the actual SL order)
-      const midPx  = gbCurrentPrice
-      const slLong  = midPx ? (midPx * (1 - slPct / 100)).toFixed(4) : null
-      const slShort = midPx ? (midPx * (1 + slPct / 100)).toFixed(4) : null
-      // Also push the long SL into the hidden f-sl so saveConfig stores it
-      if (slLong && $('f-sl') && !$('f-sl').value) $('f-sl').value = slLong
+      // SL% sets both stop-loss (below) and take-profit (above) — grid is symmetric
+      const midPx   = gbCurrentPrice
+      const slPrice = midPx ? (midPx * (1 - slPct / 100)).toFixed(4) : null   // below — acts as SL for long side
+      const tpPrice = midPx ? (midPx * (1 + slPct / 100)).toFixed(4) : null   // above — acts as SL for short side
+      if (slPrice && $('f-sl')) $('f-sl').value = slPrice
+      if (tpPrice && $('f-tp')) $('f-tp').value = tpPrice
 
-      if ($('gb-res-notional'))  $('gb-res-notional').textContent  = `$${positionUsd.toFixed(2)}`
+      if ($('gb-res-notional'))   $('gb-res-notional').textContent  = `$${positionUsd.toFixed(2)}`
       if ($('gb-res-order-size')) $('gb-res-order-size').textContent = orderSize ? `${orderSize.toFixed(5)} ${c.asset || ''}` : '—'
-      if ($('gb-res-maxlev'))    $('gb-res-maxlev').textContent    = `${maxLev}x`
-      if ($('gb-res-margin'))    $('gb-res-margin').textContent    = `$${margin.toFixed(2)} USDC`
-      if ($('gb-res-sl')) {
-        $('gb-res-sl').textContent = slLong ? `$${slLong} / $${slShort}` : '—'
-      }
+      if ($('gb-res-maxlev'))     $('gb-res-maxlev').textContent    = `${maxLev}x`
+      if ($('gb-res-margin'))     $('gb-res-margin').textContent    = `$${margin.toFixed(2)} USDC`
+      if ($('gb-res-sl'))         $('gb-res-sl').textContent        = slPrice ? `$${slPrice} / $${tpPrice}` : '—'
       showCard(true)
     } else {
       showCard(false)
@@ -2478,10 +2493,11 @@
 
   async function newBot() {
     selectedBotId = null
+    gbBotNameIsAuto = true
     $('empty-right').style.display = 'none'; $('selected-panels').style.display = 'flex'
     $('edit-panel').style.display = 'block'; $('control-panel').style.display = 'none'
     const dz = $('grid-danger-zone'); if (dz) dz.style.display = 'none'
-    renderFormFromConfig({ name: 'New Bot', asset: '', lower: '', upper: '', gridCount: 7, mode: 'arithmetic', investment: 500, leverage: 1 })
+    renderFormFromConfig({ name: '', asset: '', lower: '', upper: '', gridCount: 8, mode: 'arithmetic' })
     $('sel-name').textContent = 'New Bot (unsaved)'; $('sel-meta').textContent = 'Fill in config and click Save'
     renderBotList()
   }
