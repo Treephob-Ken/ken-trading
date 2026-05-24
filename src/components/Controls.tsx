@@ -38,7 +38,6 @@ interface Props {
   initialCapital: number
   feePct: number
   stopLossPct: number
-  takeProfitPct: number
   sizingMode: SizingMode
   targetRiskPct: number
   loading: boolean
@@ -52,7 +51,6 @@ interface Props {
   onCapital: (v: number) => void
   onFee: (v: number) => void
   onStopLoss: (v: number) => void
-  onTakeProfit: (v: number) => void
   onSizingMode: (v: SizingMode) => void
   onTargetRisk: (v: number) => void
   onReload: () => void
@@ -327,43 +325,25 @@ export default function Controls(props: Props) {
       )}
 
       <div>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
-              Stop Loss %
-              <InfoTip term="Stop Loss" className="text-dim hover:text-muted" />
-            </label>
-            <NumberInput
-              className="field"
-              value={props.stopLossPct}
-              min={0}
-              step={0.1}
-              placeholder="0 = off"
-              onChange={props.onStopLoss}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
-              Take Profit %
-              <InfoTip term="Take Profit" className="text-dim hover:text-muted" />
-            </label>
-            <NumberInput
-              className="field"
-              value={props.takeProfitPct}
-              min={0}
-              step={0.1}
-              placeholder="0 = off"
-              onChange={props.onTakeProfit}
-            />
-          </div>
-        </div>
+        <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+          Stop Loss %
+          <InfoTip term="Stop Loss" className="text-dim hover:text-muted" />
+        </label>
+        <NumberInput
+          className="field"
+          value={props.stopLossPct}
+          min={0}
+          step={0.1}
+          placeholder="0 = off"
+          onChange={props.onStopLoss}
+        />
         {slMissing ? (
           <p className="mt-1.5 rounded-md border border-warn/30 bg-warn/5 px-2 py-1 text-[11px] text-warn">
             Risk-based sizing needs a Stop Loss % to compute order size on the bot.
           </p>
         ) : (
           <p className="mt-1.5 text-[11px] text-dim">
-            Applied intrabar on every trade. 0 = disabled.
+            Positions exit on the opposite signal automatically — Stop Loss only cuts losses early before that signal arrives. 0 = off.
           </p>
         )}
       </div>

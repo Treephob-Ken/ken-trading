@@ -61,9 +61,6 @@ export default function BacktesterPage({
   const [stopLossPct, setStopLossPct] = useState(
     () => +(localStorage.getItem('bt_stopLossPct') || '0'),
   )
-  const [takeProfitPct, setTakeProfitPct] = useState(
-    () => +(localStorage.getItem('bt_takeProfitPct') || '0'),
-  )
   // Sizing mode — only Fixed and Volatility (Compounding removed; no bot equivalent).
   // Migrate any stored "compounding" value to "fixed" on load.
   const [sizingMode, setSizingMode] = useState<SizingMode>(() => {
@@ -94,9 +91,6 @@ export default function BacktesterPage({
     localStorage.setItem('bt_stopLossPct', String(stopLossPct))
   }, [stopLossPct])
   useEffect(() => {
-    localStorage.setItem('bt_takeProfitPct', String(takeProfitPct))
-  }, [takeProfitPct])
-  useEffect(() => {
     localStorage.setItem('bt_positionMode', sizingMode)
   }, [sizingMode])
   useEffect(() => {
@@ -121,7 +115,7 @@ export default function BacktesterPage({
     setSelectedTrade(null)
   }, [
     symbol, timeframe, startDate, endDate, strategyId, params, direction,
-    initialCapital, feePct, stopLossPct, takeProfitPct, sizingMode, targetRiskPct,
+    initialCapital, feePct, stopLossPct, sizingMode, targetRiskPct,
   ])
 
   useEffect(() => {
@@ -189,7 +183,7 @@ export default function BacktesterPage({
       feePct / 100,
       direction,
       stopLossPct,
-      takeProfitPct,
+      0, // Take Profit removed — opposite signal closes the position naturally
       sizingMode,
       targetRiskPct,
       ATR_MULTIPLIER,
@@ -197,7 +191,7 @@ export default function BacktesterPage({
     return { output: out, result: res }
   }, [
     candles, strategyId, params, initialCapital, feePct, direction,
-    stopLossPct, takeProfitPct, sizingMode, targetRiskPct,
+    stopLossPct, sizingMode, targetRiskPct,
   ])
 
   const handleStrategy = (id: StrategyId) => {
@@ -219,7 +213,6 @@ export default function BacktesterPage({
       params,
       direction,
       slPct: stopLossPct > 0 ? stopLossPct : undefined,
-      tpPct: takeProfitPct > 0 ? takeProfitPct : undefined,
     }
     if (sizingMode === 'volatility') {
       return {
@@ -231,7 +224,7 @@ export default function BacktesterPage({
     return { ...base, size: deploySize }
   }, [
     symbol, strategyId, timeframe, params, direction,
-    stopLossPct, takeProfitPct, sizingMode, initialCapital, targetRiskPct, deploySize,
+    stopLossPct, sizingMode, initialCapital, targetRiskPct, deploySize,
   ])
 
   const canDeploy = sizingMode === 'fixed' ? deploySize > 0 : stopLossPct > 0
@@ -255,7 +248,6 @@ export default function BacktesterPage({
             initialCapital={initialCapital}
             feePct={feePct}
             stopLossPct={stopLossPct}
-            takeProfitPct={takeProfitPct}
             sizingMode={sizingMode}
             targetRiskPct={targetRiskPct}
             loading={loading}
@@ -269,7 +261,6 @@ export default function BacktesterPage({
             onCapital={setInitialCapital}
             onFee={setFeePct}
             onStopLoss={setStopLossPct}
-            onTakeProfit={setTakeProfitPct}
             onSizingMode={setSizingMode}
             onTargetRisk={setTargetRiskPct}
             onReload={() => setReloadKey((k) => k + 1)}
@@ -303,10 +294,14 @@ export default function BacktesterPage({
                 <span className="font-mono text-text capitalize">{direction}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-dim">SL / TP</span>
-                <span className={`font-mono ${stopLossPct > 0 || takeProfitPct > 0 ? 'text-text' : 'text-dim'}`}>
-                  {stopLossPct > 0 ? `${stopLossPct}%` : 'off'} / {takeProfitPct > 0 ? `${takeProfitPct}%` : 'off'}
+                <span className="text-dim">Stop Loss</span>
+                <span className={`font-mono ${stopLossPct > 0 ? 'text-text' : 'text-dim'}`}>
+                  {stopLossPct > 0 ? `${stopLossPct}%` : 'off'}
                 </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-dim">Exit</span>
+                <span className="font-mono text-text text-[9px]">opposite signal</span>
               </div>
             </div>
 
@@ -430,7 +425,7 @@ export default function BacktesterPage({
               result={result}
               candles={candles}
               stopLossPct={stopLossPct}
-              takeProfitPct={takeProfitPct}
+              takeProfitPct={0}
               selectedTrade={selectedTrade}
               onSelectTrade={setSelectedTrade}
             />
