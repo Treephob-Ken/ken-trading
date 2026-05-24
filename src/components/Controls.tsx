@@ -82,6 +82,9 @@ export default function Controls(props: Props) {
 
   return (
     <div className="flex flex-col gap-5">
+
+      {/* ─── Data selection ─────────────────────────────────────── */}
+
       <div>
         <label className="label flex items-center gap-1">
           Market Pair
@@ -105,18 +108,28 @@ export default function Controls(props: Props) {
           onChange={(e) => props.onTimeframe(e.target.value)}
         >
           {INTERVALS.map((iv) => (
-            <option key={iv} value={iv}>
-              {iv}
-            </option>
+            <option key={iv} value={iv}>{iv}</option>
           ))}
         </select>
       </div>
 
       <div>
-        <label className="label flex items-center gap-1">
-          Date Range
-          <InfoTip term="Date Range" className="text-dim hover:text-muted" />
-        </label>
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className="label flex items-center gap-1">
+            Date Range
+            <InfoTip term="Date Range" className="text-dim hover:text-muted" />
+          </label>
+          <button
+            type="button"
+            onClick={props.onReload}
+            disabled={props.loading}
+            title="Reload market data"
+            className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-dim transition-colors hover:text-muted disabled:opacity-40"
+          >
+            <RefreshCw className={`h-3 w-3 ${props.loading ? 'animate-spin' : ''}`} />
+            Reload
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <input
             type="date"
@@ -148,10 +161,7 @@ export default function Controls(props: Props) {
           <button
             type="button"
             className="flex-1 rounded-md border border-border bg-panel-2 py-1 text-xs text-muted transition-colors hover:border-border-strong hover:text-text"
-            onClick={() => {
-              props.onStartDate('')
-              props.onEndDate('')
-            }}
+            onClick={() => { props.onStartDate(''); props.onEndDate('') }}
           >
             Max
           </button>
@@ -163,9 +173,7 @@ export default function Controls(props: Props) {
               ? 'border-gain/40 bg-gain/10 text-gain shadow-[0_0_8px_rgba(34,197,94,0.15)]'
               : 'border-border bg-panel hover:bg-panel-2 text-muted hover:text-text'
           }`}
-          onClick={() => {
-            props.onEndDate('')
-          }}
+          onClick={() => props.onEndDate('')}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${props.endDate === '' ? 'bg-gain animate-pulse' : 'bg-dim'}`} />
           {props.endDate === '' ? 'Live Mode Active' : 'Switch to Live Mode'}
@@ -178,6 +186,13 @@ export default function Controls(props: Props) {
       </div>
 
       <div className="h-px bg-border" />
+
+      {/* ─── Strategy — all fields below map to the deployed bot ─── */}
+
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Strategy</p>
+        <span className="rounded-full border border-brand/30 bg-brand/5 px-1.5 py-0.5 text-[9px] text-brand">deploys to bot</span>
+      </div>
 
       <div>
         <label className="label flex items-center gap-1">
@@ -192,9 +207,7 @@ export default function Controls(props: Props) {
           {grouped.map(([category, list]) => (
             <optgroup key={category} label={category}>
               {list.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </optgroup>
           ))}
@@ -229,7 +242,7 @@ export default function Controls(props: Props) {
 
       <div>
         <label className="label flex items-center gap-1">
-          Position Direction
+          Trade Direction
           <InfoTip term="Position Direction" className="text-dim hover:text-muted" />
         </label>
         <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
@@ -250,6 +263,52 @@ export default function Controls(props: Props) {
               ? 'Sell signals open shorts; buy signals close them.'
               : 'Always in the market — every signal flips the position.'}
         </p>
+      </div>
+
+      <div>
+        <label className="label">Risk Controls</label>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+              Stop Loss %
+              <InfoTip term="Stop Loss" className="text-dim hover:text-muted" />
+            </label>
+            <NumberInput
+              className="field"
+              value={props.stopLossPct}
+              min={0}
+              step={0.1}
+              placeholder="0 = off"
+              onChange={props.onStopLoss}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+              Take Profit %
+              <InfoTip term="Take Profit" className="text-dim hover:text-muted" />
+            </label>
+            <NumberInput
+              className="field"
+              value={props.takeProfitPct}
+              min={0}
+              step={0.1}
+              placeholder="0 = off"
+              onChange={props.onTakeProfit}
+            />
+          </div>
+        </div>
+        <p className="mt-1.5 text-[11px] text-dim">
+          Applied intrabar to every trade. 0 = disabled.
+        </p>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* ─── Simulation — affects P&L numbers only, not deployed ─── */}
+
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Simulation</p>
+        <span className="rounded-full border border-dim/30 px-1.5 py-0.5 text-[9px] text-dim">backtest only</span>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -293,16 +352,16 @@ export default function Controls(props: Props) {
               className={`seg ${props.positionMode === m ? 'seg-active' : ''}`}
               onClick={() => props.onPositionMode(m)}
             >
-              {m === 'fixed' ? 'Fixed Size' : m === 'compounding' ? 'Compounding' : 'Volatility'}
+              {m === 'fixed' ? 'Fixed' : m === 'compounding' ? 'Compound' : 'Volatility'}
             </button>
           ))}
         </div>
         <p className="mt-1.5 text-[11px] text-dim">
           {props.positionMode === 'fixed'
-            ? 'Same $ per trade — realistic. P&L accumulates but position size stays constant.'
+            ? 'Same $ per trade. Deploy card shows an order size input.'
             : props.positionMode === 'compounding'
-              ? 'Position grows with equity — each win risks more, each loss risks less.'
-              : 'Sizes positions dynamically based on ATR to risk a fixed capital percentage.'}
+              ? 'Position grows with equity. Deploy card shows an order size input.'
+              : 'Sizes by ATR so each trade risks a fixed % of capital. Deploy pre-fills Risk USD → Signal Bot.'}
         </p>
       </div>
 
@@ -339,49 +398,6 @@ export default function Controls(props: Props) {
         </div>
       )}
 
-      <div className="h-px bg-border" />
-
-      <div>
-        <label className="label">Risk Controls</label>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
-              Stop Loss %
-              <InfoTip term="Stop Loss" className="text-dim hover:text-muted" />
-            </label>
-            <NumberInput
-              className="field"
-              value={props.stopLossPct}
-              min={0}
-              step={0.1}
-              placeholder="0 = off"
-              onChange={props.onStopLoss}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
-              Take Profit %
-              <InfoTip term="Take Profit" className="text-dim hover:text-muted" />
-            </label>
-            <NumberInput
-              className="field"
-              value={props.takeProfitPct}
-              min={0}
-              step={0.1}
-              placeholder="0 = off"
-              onChange={props.onTakeProfit}
-            />
-          </div>
-        </div>
-        <p className="mt-1.5 text-[11px] text-dim">
-          Applied intrabar to every trade. 0 = disabled. See Risk Manager below for suggested levels.
-        </p>
-      </div>
-
-      <button className="btn-ghost" onClick={props.onReload} disabled={props.loading}>
-        <RefreshCw className={`h-4 w-4 ${props.loading ? 'animate-spin' : ''}`} />
-        {props.loading ? 'Loading data…' : 'Reload market data'}
-      </button>
     </div>
   )
 }

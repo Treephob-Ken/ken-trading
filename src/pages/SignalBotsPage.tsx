@@ -428,6 +428,12 @@ export default function SignalBotsPage() {
           const pre = JSON.parse(pending) as {
             asset?: string; strategy?: string; timeframe?: string
             params?: Record<string, number>; direction?: string
+            // Direct sizing (fixed / compounding mode)
+            size?: number
+            // Risk-based sizing fields (volatility mode — pre-fill sizing calculator)
+            riskUsd?: number; sizingSlPct?: number
+            // Bot risk controls
+            slPct?: number; tpPct?: number
           }
           const stratId = pre.strategy ?? strats[0]?.id ?? 'macd'
           const stratMeta = strats.find(s => s.id === stratId)
@@ -440,13 +446,20 @@ export default function SignalBotsPage() {
             timeframe: pre.timeframe ?? '1h',
             strategyId: stratId,
             params,
-            size: 0.01, slippagePct: 1, cooldownSec: 60,
+            size: pre.size ?? 0.01,
+            slippagePct: 1,
+            cooldownSec: 60,
             tradeSide: (pre.direction === 'short' ? 'sell' : pre.direction === 'both' ? 'both' : 'buy') as TradeSide,
+            slPct: pre.slPct,
+            tpPct: pre.tpPct,
           }
           setIsNew(true)
           setSelectedId(null)
           setCfg(newCfg)
           setDirty(true)
+          // Pre-fill Risk Mode calculator when backtester used volatility sizing
+          if (pre.riskUsd) setRiskUsd(pre.riskUsd)
+          if (pre.sizingSlPct) setSizingSlPct(pre.sizingSlPct)
           return
         } catch { /* bad sessionStorage — ignore */ }
       }

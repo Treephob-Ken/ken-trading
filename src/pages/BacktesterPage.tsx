@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, Rocket } from 'lucide-react'
+import { Activity, Info, Rocket } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { Candle, Direction, StrategyId, Trade } from '@/types'
 import { fetchKlines, MAX_BARS, subscribeKline } from '@/lib/binance'
@@ -9,6 +9,7 @@ import { fmtPrice } from '@/lib/format'
 import { useHLAssets } from '@/lib/hlAssets'
 import ChartPanel from '@/components/ChartPanel'
 import Controls from '@/components/Controls'
+import NumberInput from '@/components/NumberInput'
 import Results from '@/components/Results'
 import SummaryPanel from '@/components/SummaryPanel'
 import { analyzeRegime } from '@/lib/markov'
@@ -69,6 +70,11 @@ export default function BacktesterPage({
     () => +(localStorage.getItem('bt_atrMultiplier') || '1.5'),
   )
 
+  // Deploy card state
+  const [deploySize, setDeploySize] = useState(
+    () => +(localStorage.getItem('bt_deploySize') || '0.01'),
+  )
+
   useEffect(() => { localStorage.setItem('bt_startDate', startDate) }, [startDate])
   useEffect(() => { localStorage.setItem('bt_endDate', endDate) }, [endDate])
   useEffect(() => { localStorage.setItem('bt_strategyId', strategyId) }, [strategyId])
@@ -95,6 +101,9 @@ export default function BacktesterPage({
   useEffect(() => {
     localStorage.setItem('bt_atrMultiplier', String(atrMultiplier))
   }, [atrMultiplier])
+  useEffect(() => {
+    localStorage.setItem('bt_deploySize', String(deploySize))
+  }, [deploySize])
 
   const [candles, setCandles] = useState<Candle[]>([])
   const [liveCandle, setLiveCandle] = useState<Candle | null>(null)
@@ -201,6 +210,32 @@ export default function BacktesterPage({
     setParams(initialParams)
   }
 
+  // What gets passed to the Signal Bot on deploy.
+  // Volatility mode → translate to Risk USD + SL% so Signal Bot's sizing calculator is pre-filled.
+  const deployPayload = useMemo(() => {
+    const base = {
+      asset: symbol.replace(/USDT$/, ''),
+      strategy: strategyId,
+      timeframe,
+      params,
+      direction,
+      slPct: stopLossPct > 0 ? stopLossPct : undefined,
+      tpPct: takeProfitPct > 0 ? takeProfitPct : undefined,
+    }
+    if (positionMode === 'volatility') {
+      // Risk USD = targetRiskPct% of capital; SL% already set in risk controls.
+      return {
+        ...base,
+        riskUsd: parseFloat((initialCapital * targetRiskPct / 100).toFixed(2)),
+        sizingSlPct: stopLossPct > 0 ? stopLossPct : undefined,
+      }
+    }
+    return { ...base, size: deploySize }
+  }, [
+    symbol, strategyId, timeframe, params, direction,
+    stopLossPct, takeProfitPct, positionMode, initialCapital, targetRiskPct, deploySize,
+  ])
+
   const pairLabel = symbol.replace(/USDT$/, '/USDT')
   const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
   const dataCapped = candles.length >= MAX_BARS
@@ -244,28 +279,98 @@ export default function BacktesterPage({
           />
         </div>
 
+        {/* ── Deploy card — only shown once there are backtest results ── */}
         {result && (
           <div className="card p-4">
-            <p className="mb-1 text-xs font-semibold text-text">Deploy as Signal Bot</p>
-            <p className="mb-3 text-[11px] text-dim leading-relaxed">
-              Run this strategy live on Hyperliquid with your current settings.
-            </p>
+            <div className="mb-3 flex items-center gap-1.5">
+              <Rocket className="h-3.5 w-3.5 text-brand" />
+              <p className="text-xs font-semibold text-text">Deploy as Signal Bot</p>
+            </div>
+
+            {/* What gets deployed */}
+            <div className="mb-3 rounded-lg border border-border bg-panel-2 px-2.5 py-2 text-[10px] space-y-1">
+              <div className="flex justify-between">
+                <span className="text-dim">Asset</span>
+                <span className="font-mono text-text">{pairLabel}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-dim">Strategy</span>
+                <span className="font-mono text-text">{strategyMeta(strategyId).name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-dim">Timeframe</span>
+                <span className="font-mono text-text">{timeframe}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-dim">Direction</span>
+                <span className="font-mono text-text capitalize">{direction}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-dim">SL / TP</span>
+                <span className={`font-mono ${stopLossPct > 0 || takeProfitPct > 0 ? 'text-text' : 'text-dim'}`}>
+                  {stopLossPct > 0 ? `${stopLossPct}%` : 'off'} / {takeProfitPct > 0 ? `${takeProfitPct}%` : 'off'}
+                </span>
+              </div>
+            </div>
+
+            {/* Order sizing — translates from backtest positionMode */}
+            {positionMode === 'volatility' ? (
+              <div className="mb-3 rounded-lg border border-brand/20 bg-brand/5 px-2.5 py-2 text-[10px] space-y-1">
+                <div className="flex items-center gap-1 text-brand font-semibold mb-1">
+                  <Info className="h-3 w-3" />
+                  Risk mode will be pre-filled
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-dim">Risk USD</span>
+                  <span className="font-mono text-text">
+                    ${(initialCapital * targetRiskPct / 100).toFixed(2)}
+                    <span className="text-dim ml-1">({targetRiskPct}% of ${initialCapital.toLocaleString()})</span>
+                  </span>
+                </div>
+                {stopLossPct > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-dim">SL % (sizing)</span>
+                    <span className="font-mono text-text">{stopLossPct}%</span>
+                  </div>
+                )}
+                <p className="text-[9px] text-dim mt-1 leading-relaxed">
+                  Signal Bot will auto-compute qty from these values.
+                </p>
+              </div>
+            ) : (
+              <div className="mb-3">
+                {positionMode === 'compounding' && (
+                  <p className="mb-2 rounded-md border border-warn/30 bg-warn/5 px-2 py-1 text-[10px] text-warn">
+                    Compounding isn't supported by the bot — will run as fixed size.
+                  </p>
+                )}
+                <label className="mb-1 block text-[11px] text-dim">Order Size (qty per trade)</label>
+                <NumberInput
+                  className="field"
+                  value={deploySize}
+                  min={0.0001}
+                  step={0.001}
+                  onChange={setDeploySize}
+                />
+                <p className="mt-1 text-[10px] text-dim">
+                  Number of contracts the bot places on each signal.
+                </p>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => {
-                sessionStorage.setItem('pending_signal_bot_config', JSON.stringify({
-                  asset: symbol.replace(/USDT$/, ''),
-                  strategy: strategyId,
-                  timeframe,
-                  params,
-                  direction,
-                }))
+                sessionStorage.setItem(
+                  'pending_signal_bot_config',
+                  JSON.stringify(deployPayload),
+                )
                 navigate('/signal')
               }}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
             >
               <Rocket className="h-4 w-4" />
-              Deploy
+              Deploy to Signal Bot
             </button>
           </div>
         )}
