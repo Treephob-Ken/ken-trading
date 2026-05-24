@@ -387,7 +387,12 @@ export default function GridPage({
               Loading market data…
             </div>
           ) : (
-            <GridChart candles={chartCandles} lines={pageMode === 'auto' ? autoDisplayLines : displayLines} />
+            <GridChart
+              candles={chartCandles}
+              lines={pageMode === 'auto' ? autoDisplayLines : displayLines}
+              slPrice={activeLines.length >= 2 ? +(activeLines[0].price * (1 - slPct / 100)).toFixed(8) : undefined}
+              tpPrice={activeLines.length >= 2 ? +(activeLines[activeLines.length - 1].price * (1 + tpPct / 100)).toFixed(8) : undefined}
+            />
           )}
         </div>
 

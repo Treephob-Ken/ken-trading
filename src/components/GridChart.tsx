@@ -13,6 +13,8 @@ import type { GridLine } from '@/lib/grid'
 interface Props {
   candles: Candle[]
   lines: GridLine[]
+  slPrice?: number
+  tpPrice?: number
 }
 
 const t = (n: number) => n as UTCTimestamp
@@ -23,7 +25,7 @@ const COLORS: Record<GridLine['kind'], string> = {
   mid: '#ffd23f',
 }
 
-export default function GridChart({ candles, lines }: Props) {
+export default function GridChart({ candles, lines, slPrice, tpPrice }: Props) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -82,9 +84,30 @@ export default function GridChart({ candles, lines }: Props) {
       })
     }
 
+    if (slPrice) {
+      candleSeries.createPriceLine({
+        price: slPrice,
+        color: '#ef5350',
+        lineWidth: 2,
+        lineStyle: LineStyle.SparseDotted,
+        axisLabelVisible: true,
+        title: 'SL',
+      })
+    }
+    if (tpPrice) {
+      candleSeries.createPriceLine({
+        price: tpPrice,
+        color: '#26a69a',
+        lineWidth: 2,
+        lineStyle: LineStyle.SparseDotted,
+        axisLabelVisible: true,
+        title: 'TP',
+      })
+    }
+
     chart.timeScale().fitContent()
     return () => chart.remove()
-  }, [candles, lines])
+  }, [candles, lines, slPrice, tpPrice])
 
   return <div ref={ref} className="h-[480px] w-full" />
 }
