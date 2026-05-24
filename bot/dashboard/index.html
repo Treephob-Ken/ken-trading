@@ -2723,7 +2723,7 @@
     try {
       const status = await apiCall('/api/signal/bots', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
+        body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', investment: 100, leverage: 1, slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
       })
       showToast('Signal bot created'); stSelectedId = status.id
       await loadSignalBots(); selectSignalBot(status.id)
@@ -2850,7 +2850,7 @@
       }
     }
     const lock = s.running
-    ;['st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown','st-direction','st-mtf-timeframe','st-daily-loss'].forEach((id) => { const el = $(id); if (el) el.disabled = lock })
+    ;['st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown','st-direction','st-mtf-timeframe','st-daily-loss','st-sl-pct'].forEach((id) => { const el = $(id); if (el) el.disabled = lock })
     ;['st-mtf-enabled','st-bot-name'].forEach(id => { const el = $(id); if (el) el.disabled = lock })
     document.querySelectorAll('#st-params-grid input').forEach((el) => { el.disabled = lock })
     if (stStrategyCombo) stStrategyCombo.setEnabled(!lock); if (stCurrencyCombo) stCurrencyCombo.setEnabled(!lock)
