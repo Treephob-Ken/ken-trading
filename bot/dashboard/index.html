@@ -1119,24 +1119,28 @@
           <div class="card-divider"></div>
           <div class="card-title" style="margin-bottom:var(--s2)">Position Sizing</div>
           <div class="field-row">
-            <div class="field"><label>Budget (USDC)</label><input id="f-investment" type="number" step="any" oninput="updateSizingPreview()" /></div>
-            <div class="field"><label>Leverage</label><input id="f-leverage" type="number" min="1" step="any" oninput="updateSizingPreview()" /></div>
+            <div class="field"><label>Risk per Trade ($)</label><input id="gb-risk-usd" type="number" step="any" placeholder="e.g. 50" oninput="updateSizingPreview()" /></div>
+            <div class="field"><label>Stop Loss % (sizing + SL order)</label><input id="gb-sl-pct" type="number" step="any" placeholder="e.g. 5" oninput="updateSizingPreview()" /></div>
           </div>
-          <div class="field"><label>Override Order Size</label><input id="f-size" type="number" step="any" placeholder="(auto from budget)" oninput="updateSizingPreview()" /></div>
+          <div id="gb-max-lev-info" style="font-size:11px;color:var(--text-dim);margin-top:2px;margin-bottom:var(--s2)"></div>
+          <!-- hidden — auto-set by updateSizingPreview, consumed by getFormConfig/saveConfig -->
+          <input id="f-investment" type="hidden" />
+          <input id="f-leverage"   type="hidden" />
+          <input id="f-size"       type="hidden" />
 
           <div id="gb-sizing-card" class="sizing-result" style="display:none">
             <div class="sizing-result-header">
-              <span class="sizing-result-label">Total Notional</span>
+              <span class="sizing-result-label">Position Size</span>
               <span class="sizing-result-value" id="gb-res-notional">—</span>
             </div>
             <div class="sizing-result-rows">
-              <div class="sizing-result-row"><span class="sizing-result-key">Per-grid order size</span><span class="sizing-result-val" id="gb-res-order-size">—</span></div>
-              <div class="sizing-result-row"><span class="sizing-result-key">Grid spacing</span><span class="sizing-result-val" id="gb-res-spacing">—</span></div>
-              <div class="sizing-result-row"><span class="sizing-result-key">Est. profit / grid</span><span class="sizing-result-val" id="gb-res-profit">—</span></div>
-              <div class="sizing-result-row"><span class="sizing-result-key">Required margin</span><span class="sizing-result-val" id="gb-res-margin">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">Order Qty (per grid)</span><span class="sizing-result-val" id="gb-res-order-size">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">Max Leverage</span><span class="sizing-result-val" id="gb-res-maxlev">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">Margin at max lev</span><span class="sizing-result-val" id="gb-res-margin">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">SL price (Long / Short)</span><span class="sizing-result-val sl" id="gb-res-sl">—</span></div>
             </div>
           </div>
-          <div id="gb-sizing-empty" class="sizing-empty">Enter <b>range</b>, <b>grid count</b> and <b>budget</b> to see position size</div>
+          <div id="gb-sizing-empty" class="sizing-empty">Enter <b>Risk $</b> + <b>Stop Loss %</b> above to see position size</div>
 
           <div class="card-divider"></div>
           <div class="card-title" style="margin-bottom:var(--s2)">Safety <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-dim)">(optional)</span></div>
@@ -2274,13 +2278,24 @@
   // ════════════════════════════════════════════════════════
   let selectedBotId = null, bots = [], gridAutoScroll = true, gridActiveFilter = 'all', gridLogCount = 0
   const gridLogBox = () => $('log-box'), gridJumpBtn = () => $('jump-btn')
-  let gbCurrencyCombo = null
+  let gbCurrencyCombo = null, gbCurrentPrice = null, gbMaxLeverage = null
 
   function initGridPage() {
     if (gbCurrencyCombo) return   // already done
     gbCurrencyCombo = createCombo('gb-currency-combo', (asset) => {
       $('f-asset').value = asset
-      updateSizingPreview()
+      // Reset price/leverage so card shows "loading" until fetch completes
+      gbCurrentPrice = null; gbMaxLeverage = null
+      const levInfo = $('gb-max-lev-info'); if (levInfo) levInfo.textContent = 'Max leverage: loading…'
+      fetch('/api/asset-info?asset=' + encodeURIComponent(asset))
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d && d.maxLeverage) { gbMaxLeverage = d.maxLeverage; if (levInfo) levInfo.textContent = `Max leverage: ${d.maxLeverage}x` }
+          else { if (levInfo) levInfo.textContent = 'Max leverage: —' }
+          if (d && d.midPx) gbCurrentPrice = d.midPx
+          updateSizingPreview()
+        })
+        .catch(() => { if (levInfo) levInfo.textContent = 'Max leverage: —'; updateSizingPreview() })
       initGridChart(getFormConfig())
     })
     fetch('/api/assets').then(r => r.json()).then(assets => {
@@ -2361,6 +2376,9 @@
     const sl  = num('f-sl');         if (sl > 0)  cfg.stopLossPrice = sl
     const tp  = num('f-tp');         if (tp > 0)  cfg.takeProfitPrice = tp
     const trg = num('f-trigger');    if (trg > 0) cfg.triggerPrice = trg
+    // risk-mode fields — stored so UI round-trips correctly; not used by the bot engine
+    const risk = num('gb-risk-usd'); if (risk > 0) cfg.riskUsd = risk
+    const slp  = num('gb-sl-pct');   if (slp > 0)  cfg.slPct   = slp
     return cfg
   }
 
@@ -2371,41 +2389,74 @@
     if (gbCurrencyCombo) gbCurrencyCombo.setValue(asset)
     $('f-lower').value = cfg.lower ?? ''; $('f-upper').value = cfg.upper ?? ''
     $('f-count').value = cfg.gridCount ?? ''; $('f-mode').value = cfg.mode || 'arithmetic'
+    // Hidden sizing fields — populated by updateSizingPreview when risk mode is used
     $('f-investment').value = cfg.investment ?? ''; $('f-leverage').value = cfg.leverage ?? ''
     $('f-size').value = cfg.orderSize ?? ''; $('f-sl').value = cfg.stopLossPrice ?? ''
     $('f-tp').value = cfg.takeProfitPrice ?? ''; $('f-trigger').value = cfg.triggerPrice ?? ''
-    updateSizingPreview()
+    // Restore risk-mode inputs if saved
+    if ($('gb-risk-usd')) $('gb-risk-usd').value = cfg.riskUsd ?? ''
+    if ($('gb-sl-pct'))   $('gb-sl-pct').value   = cfg.slPct   ?? ''
+    // Fetch price + leverage for selected asset so card can render
+    if (asset) {
+      gbCurrentPrice = null; gbMaxLeverage = null
+      const levInfo = $('gb-max-lev-info'); if (levInfo) levInfo.textContent = 'Max leverage: loading…'
+      fetch('/api/asset-info?asset=' + encodeURIComponent(asset))
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d && d.maxLeverage) { gbMaxLeverage = d.maxLeverage; if (levInfo) levInfo.textContent = `Max leverage: ${d.maxLeverage}x` }
+          else { if (levInfo) levInfo.textContent = 'Max leverage: —' }
+          if (d && d.midPx) gbCurrentPrice = d.midPx
+          updateSizingPreview()
+        })
+        .catch(() => { if ($('gb-max-lev-info')) $('gb-max-lev-info').textContent = 'Max leverage: —'; updateSizingPreview() })
+    } else {
+      updateSizingPreview()
+    }
   }
 
   function updateSizingPreview() {
-    const c = getFormConfig()
-    const card = $('gb-sizing-card'), empty = $('gb-sizing-empty')
+    const c       = getFormConfig()
+    const riskUsd = parseFloat($('gb-risk-usd')?.value)
+    const slPct   = parseFloat($('gb-sl-pct')?.value)
+    const card    = $('gb-sizing-card'), empty = $('gb-sizing-empty')
     const showCard = (show) => { if (card) card.style.display = show ? '' : 'none'; if (empty) empty.style.display = show ? 'none' : '' }
 
-    if (!c.lower || !c.upper || !c.gridCount) { showCard(false) }
-    else {
-      const lev = c.leverage ?? 1; const safety = 0.5; let orderSize
-      if (c.orderSize) { orderSize = c.orderSize }
-      else if (c.investment) { orderSize = (c.investment * lev * safety) / (c.gridCount * c.upper) }
-      if (!orderSize) { showCard(false) }
-      else {
-        const maxNotional      = c.gridCount * orderSize * c.upper
-        const requiredMargin   = maxNotional / lev
-        const spacing          = (c.upper - c.lower) / c.gridCount
-        const spacingPct       = (spacing / ((c.upper + c.lower) / 2)) * 100
-        const profitPerGridPct = spacingPct - 0.1
-        const profitColor      = profitPerGridPct > 0 ? 'var(--gain-light)' : 'var(--loss-light)'
+    if (riskUsd > 0 && slPct > 0) {
+      const positionUsd = riskUsd / (slPct / 100)
+      const maxLev      = gbMaxLeverage || 1
+      const margin      = positionUsd / maxLev          // USDC to deposit
+      const lev         = maxLev
 
-        if ($('gb-res-notional'))   $('gb-res-notional').textContent   = `$${maxNotional.toFixed(2)}`
-        if ($('gb-res-order-size')) $('gb-res-order-size').textContent = `${orderSize.toFixed(5)} ${c.asset || ''}`
-        if ($('gb-res-spacing'))    $('gb-res-spacing').textContent    = `${spacing.toFixed(4)}  (${spacingPct.toFixed(3)}%)`
-        if ($('gb-res-profit'))     { $('gb-res-profit').textContent   = `${profitPerGridPct.toFixed(3)}%`; $('gb-res-profit').style.color = profitColor }
-        if ($('gb-res-margin'))     $('gb-res-margin').textContent     = `$${requiredMargin.toFixed(2)} USDC @ ${lev}x`
-        showCard(true)
+      // Auto-fill hidden inputs so getFormConfig/saveConfig work unchanged
+      if ($('f-investment')) $('f-investment').value = margin.toFixed(6)
+      if ($('f-leverage'))   $('f-leverage').value   = lev
+
+      // Per-grid order size (same formula the grid bot uses)
+      const upperRef  = c.upper || gbCurrentPrice || 0
+      const orderSize = upperRef > 0 && c.gridCount > 0
+        ? (margin * lev * 0.5) / (c.gridCount * upperRef)
+        : null
+
+      // SL price from current mid price (informational — Safety section sets the actual SL order)
+      const midPx  = gbCurrentPrice
+      const slLong  = midPx ? (midPx * (1 - slPct / 100)).toFixed(4) : null
+      const slShort = midPx ? (midPx * (1 + slPct / 100)).toFixed(4) : null
+      // Also push the long SL into the hidden f-sl so saveConfig stores it
+      if (slLong && $('f-sl') && !$('f-sl').value) $('f-sl').value = slLong
+
+      if ($('gb-res-notional'))  $('gb-res-notional').textContent  = `$${positionUsd.toFixed(2)}`
+      if ($('gb-res-order-size')) $('gb-res-order-size').textContent = orderSize ? `${orderSize.toFixed(5)} ${c.asset || ''}` : '—'
+      if ($('gb-res-maxlev'))    $('gb-res-maxlev').textContent    = `${maxLev}x`
+      if ($('gb-res-margin'))    $('gb-res-margin').textContent    = `$${margin.toFixed(2)} USDC`
+      if ($('gb-res-sl')) {
+        $('gb-res-sl').textContent = slLong ? `$${slLong} / $${slShort}` : '—'
       }
+      showCard(true)
+    } else {
+      showCard(false)
     }
 
-    // Grid overlay lines on the chart — logic and inputs unchanged
+    // Grid overlay lines on the chart — logic unchanged
     if (candlestickSeries && c.lower && c.upper && c.gridCount) {
       const cp = activeCandles?.length ? activeCandles[activeCandles.length - 1].close : (c.lower + c.upper) / 2
       updateGridLines(buildLines(c.lower, c.upper, c.gridCount, c.mode), cp, c.stopLossPrice, c.takeProfitPrice)
