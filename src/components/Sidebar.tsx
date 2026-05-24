@@ -7,6 +7,7 @@ import {
   LayoutGrid,
   LineChart,
   Radio,
+  Settings,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -21,8 +22,9 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/grid',    icon: LayoutGrid,       label: 'Grid Optimizer'      },
   { path: '/signal',  icon: Radio,            label: 'Signal Bots'         },
   { path: '/bots',    icon: BotMessageSquare, label: 'Grid Bots'           },
-  { path: '/trade',   icon: ArrowUpDown,      label: 'Trade'               },
-  { path: '/logs',    icon: Activity,         label: 'Logs'                },
+  { path: '/trade',    icon: ArrowUpDown,      label: 'Trade'               },
+  { path: '/logs',     icon: Activity,         label: 'Logs'                },
+  { path: '/settings', icon: Settings,         label: 'Settings'            },
 ]
 
 export default function Sidebar() {

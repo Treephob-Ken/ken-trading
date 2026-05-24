@@ -9,6 +9,7 @@ import SignalBotsPage from '@/pages/SignalBotsPage'
 import GridBotsPage from '@/pages/GridBotsPage'
 import TradePage from '@/pages/TradePage'
 import LogsPage from '@/pages/LogsPage'
+import SettingsPage from '@/pages/SettingsPage'
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -81,6 +82,9 @@ export default function App() {
 
           {/* Phase 5 — Logs */}
           <Route path="logs" element={<LogsPage />} />
+
+          {/* Settings */}
+          <Route path="settings" element={<SettingsPage />} />
 
           {/* Catch-all → backtest */}
           <Route path="*" element={<Navigate to="/backtest" replace />} />
