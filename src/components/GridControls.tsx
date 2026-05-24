@@ -1,4 +1,4 @@
-import { Download, RefreshCw, Zap } from 'lucide-react'
+import { Download, RefreshCw } from 'lucide-react'
 import type { SymbolInfo } from '@/lib/binance'
 import type { GridMode, GridType } from '@/lib/grid'
 import NumberInput from './NumberInput'
@@ -213,16 +213,11 @@ export default function GridControls(props: GridControlsProps) {
         <span className="text-sm text-muted">Re-anchor grid to current price</span>
       </label>
 
-      <button
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand py-2.5 text-sm font-semibold text-white transition hover:opacity-90 active:scale-[.98] disabled:opacity-40"
-        onClick={props.onReload}
-        disabled={props.loading}
-      >
-        {props.loading
-          ? <><RefreshCw className="h-4 w-4 animate-spin" /> Optimizing…</>
-          : <><Zap className="h-4 w-4" /> Run Optimizer</>
-        }
-      </button>
+      {props.loading && (
+        <div className="flex items-center justify-center gap-2 rounded-lg border border-border bg-panel py-2.5 text-sm text-dim">
+          <RefreshCw className="h-4 w-4 animate-spin" /> Optimizing…
+        </div>
+      )}
 
       {props.canExport && (
         <>
