@@ -1317,7 +1317,7 @@
           <div class="card-title" style="margin-bottom:var(--s2)">Position Sizing</div>
           <div class="field-row">
             <div class="field"><label>Budget (USDC)</label><input id="st-investment" type="number" step="any" placeholder="e.g. 500" oninput="scheduleSignalSizingPreview()" /></div>
-            <div class="field"><label>Leverage</label><input id="st-leverage" type="number" min="1" step="any" placeholder="1" oninput="scheduleSignalSizingPreview()" /></div>
+            <div class="field"><label>Leverage</label><input id="st-leverage" type="number" min="1" step="any" value="1" placeholder="1" oninput="scheduleSignalSizingPreview()" /></div>
           </div>
           <div class="field"><label>Override Order Size</label><input id="st-size" type="number" step="any" placeholder="(auto from budget)" oninput="scheduleSignalSizingPreview()" /></div>
           <div id="st-sizing-preview" class="preview-box">Enter budget + leverage, or a fixed order size…</div>
@@ -1332,9 +1332,9 @@
           </div>
           <div class="field-row">
             <div class="field">
-              <label>Trade Direction</label>
-              <select id="st-direction">
-                <option value="both">Both signals</option>
+              <label>Override Trade Direction</label>
+              <select id="st-direction" onchange="scheduleSave()">
+                <option value="both" selected>— auto (follow signal) —</option>
                 <option value="buy">Buy only (Long)</option>
                 <option value="sell">Sell only (Short)</option>
               </select>
@@ -1342,6 +1342,15 @@
             <div class="field">
               <label>Daily Loss Limit %</label>
               <input id="st-daily-loss" type="number" min="0.5" max="50" step="0.5" placeholder="off (no limit)" oninput="scheduleSave()" />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label>Stop Loss %</label>
+              <input id="st-sl-pct" type="number" min="0.1" max="100" step="0.1" placeholder="off (no SL)" oninput="scheduleSave();updateSLPreview()" />
+            </div>
+            <div class="field" id="st-sl-preview-wrap" style="display:flex;align-items:flex-end">
+              <div id="st-sl-preview" style="font-size:11px;color:var(--text-dim);padding-bottom:9px">Est. SL price shown after entry</div>
             </div>
           </div>
           <div class="field-row" style="align-items:center;margin-top:var(--s1)">
@@ -2551,13 +2560,32 @@
 
   function wireAutoSave() {
     ['st-bot-name','st-timeframe','st-investment','st-leverage','st-size','st-slippage','st-cooldown',
-     'st-direction','st-ensemble-threshold','st-mtf-timeframe','st-daily-loss'].forEach((id) => {
+     'st-direction','st-ensemble-threshold','st-mtf-timeframe','st-daily-loss','st-sl-pct'].forEach((id) => {
       const el = $(id); if (el) el.addEventListener('change', scheduleSave)
     })
     $('st-params-grid').addEventListener('change', scheduleSave)
   }
 
   function toggleMTF() { const en = $('st-mtf-enabled')?.checked; const tf = $('st-mtf-timeframe'); if (tf) tf.disabled = !en }
+
+  function updateSLPreview() {
+    const slPct = parseFloat($('st-sl-pct')?.value)
+    const preview = $('st-sl-preview')
+    if (!preview) return
+    if (!slPct || slPct <= 0) { preview.textContent = 'Est. SL price shown after entry'; return }
+    // Try to get current price from the account/position display
+    const priceEl = $('tr-current-price') || $('st-current-price')
+    const price = priceEl ? parseFloat(priceEl.textContent?.replace(/[^0-9.]/g, '') || '') : NaN
+    if (price > 0) {
+      const slLong  = (price * (1 - slPct / 100)).toFixed(4)
+      const slShort = (price * (1 + slPct / 100)).toFixed(4)
+      preview.textContent = `Long SL ≈ $${slLong} · Short SL ≈ $${slShort}`
+      preview.style.color = 'var(--loss-light)'
+    } else {
+      preview.textContent = `−${slPct}% from entry price`
+      preview.style.color = 'var(--loss-light)'
+    }
+  }
 
   async function refreshTradeJournal() {
     if (!stSelectedId) return
@@ -2695,10 +2723,11 @@
     try {
       const status = await apiCall('/api/signal/bots', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', size: 0.01, slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
+        body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
       })
       showToast('Signal bot created'); stSelectedId = status.id
       await loadSignalBots(); selectSignalBot(status.id)
+      if ($('st-bot-name')) $('st-bot-name').value = ''
     } catch (e) { showToast(e.message, true) }
   }
 
@@ -2740,7 +2769,8 @@
     const mtfEn = cfg.mtfEnabled || false; $('st-mtf-enabled').checked = mtfEn
     const mtfTfEl = $('st-mtf-timeframe'); if (mtfTfEl) { mtfTfEl.value = cfg.mtfTimeframe || '1h'; mtfTfEl.disabled = !mtfEn }
     $('st-daily-loss').value = cfg.dailyLossLimitPct || ''
-    stCurrentPrice = null; updateSignalSizingPreview()
+    $('st-sl-pct').value = cfg.slPct || ''
+    stCurrentPrice = null; updateSignalSizingPreview(); updateSLPreview()
   }
 
   async function pollSignal() {
@@ -2875,6 +2905,7 @@
       tradeSide: $('st-direction').value, ...ensembleExtra,
       ...($('st-mtf-enabled')?.checked && $('st-mtf-timeframe')?.value ? { mtfEnabled: true, mtfTimeframe: $('st-mtf-timeframe').value } : {}),
       ...(parseFloat($('st-daily-loss')?.value) > 0 ? { dailyLossLimitPct: parseFloat($('st-daily-loss').value) } : {}),
+      ...(parseFloat($('st-sl-pct')?.value) > 0 ? { slPct: parseFloat($('st-sl-pct').value) } : {}),
     }
   }
 
