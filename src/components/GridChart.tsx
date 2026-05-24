@@ -73,14 +73,7 @@ export default function GridChart({ candles, lines, slPrice, tpPrice }: Props) {
         lineWidth: ln.kind === 'mid' ? 2 : 1,
         lineStyle: ln.kind === 'mid' ? LineStyle.Solid : LineStyle.Dashed,
         axisLabelVisible: ln.kind === 'mid' || !dense,
-        title:
-          ln.kind === 'mid'
-            ? 'MID'
-            : dense
-              ? ''
-              : ln.kind === 'long'
-                ? 'LONG'
-                : 'SHRT',
+        title: ln.kind === 'mid' ? 'MID' : '',
       })
     }
 
