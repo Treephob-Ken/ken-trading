@@ -21,6 +21,10 @@ import {
 } from 'lightweight-charts'
 import { apiFetch } from '@/contexts/AuthContext'
 import { useHLAssets } from '@/lib/hlAssets'
+import { fetchKlines } from '@/lib/binance'
+import { generateSignals } from '@/lib/strategies'
+import type { StrategyOutput } from '@/lib/strategies'
+import type { Candle, StrategyId } from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -50,14 +54,6 @@ interface SignalBotStatus {
 interface TradeRecord {
   time: number; side: 'buy' | 'sell'; asset: string; size: number; price: number | null
 }
-interface ChartCandle {
-  time: number; open: number; high: number; low: number; close: number
-}
-interface SeriesLine {
-  id: string; color: string; data: Array<{ time: number; value: number }>
-}
-type SubPane = { title: string; lines: SeriesLine[]; refLines?: number[] }
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d']
@@ -81,44 +77,48 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ── Signal chart sub-component ────────────────────────────────────────────────
 
-type ChartEntry = {
-  candles: ChartCandle[]
-  mainLines: SeriesLine[]
-  subPane: SubPane | null
-  trades: TradeRecord[]
-}
-
-function SignalChart({ botId }: { botId: string | null }) {
+function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfig }) {
   const mainRef = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
-  const [entry, setEntry] = useState<ChartEntry | null>(null)
+  const [candles, setCandles] = useState<Candle[]>([])
+  const [loadingCandles, setLoadingCandles] = useState(false)
+  const [trades, setTrades] = useState<TradeRecord[]>([])
 
-  // Fetch candles + indicator data whenever the selected bot changes
+  // Fetch Binance candles whenever asset or timeframe changes
   useEffect(() => {
-    if (!botId) { setEntry(null); return }
     let cancelled = false
-    Promise.all([
-      apiFetch(`/api/signal/bots/${botId}/chart-data`).then(r => r.ok ? r.json() : null),
-      apiFetch(`/api/signal/bots/${botId}/trades`).then(r => r.ok ? r.json() : []),
-    ]).then(([cd, trades]: [
-      { candles: ChartCandle[]; mainLines?: SeriesLine[]; subPane?: SubPane } | null,
-      TradeRecord[],
-    ]) => {
-      if (cancelled) return
-      setEntry({
-        candles: cd?.candles ?? [],
-        mainLines: cd?.mainLines ?? [],
-        subPane: cd?.subPane ?? null,
-        trades: trades ?? [],
-      })
-    }).catch(() => {})
+    setLoadingCandles(true)
+    setCandles([])
+    fetchKlines({ symbol: cfg.symbol, interval: cfg.timeframe })
+      .then(data => { if (!cancelled) { setCandles(data); setLoadingCandles(false) } })
+      .catch(() => { if (!cancelled) { setCandles([]); setLoadingCandles(false) } })
+    return () => { cancelled = true }
+  }, [cfg.symbol, cfg.timeframe])
+
+  // Fetch actual executed trades for saved bots
+  useEffect(() => {
+    if (!botId) { setTrades([]); return }
+    let cancelled = false
+    apiFetch(`/api/signal/bots/${botId}/trades`)
+      .then(r => r.ok ? r.json() : [])
+      .then((d: TradeRecord[]) => { if (!cancelled) setTrades(d) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [botId])
 
-  // Build / tear down LW Charts instances whenever fetched data changes
+  // Run strategy client-side — same as Backtester, so signals match exactly
+  const paramsKey = JSON.stringify(cfg.params)
+  const strategyOutput = useMemo<StrategyOutput | null>(() => {
+    if (candles.length < 35) return null
+    try { return generateSignals(cfg.strategyId as StrategyId, candles, cfg.params) }
+    catch { return null }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles, cfg.strategyId, paramsKey])
+
+  // Build / tear down LW Charts whenever data changes
   useEffect(() => {
     const el = mainRef.current
-    if (!entry || !el || !entry.candles.length) return
+    if (!el || !candles.length || !strategyOutput) return
 
     const sharedLayout = {
       background: { type: ColorType.Solid, color: 'transparent' },
@@ -144,34 +144,52 @@ function SignalChart({ botId }: { botId: string | null }) {
       borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
     })
     candleSeries.setData(
-      entry.candles.map(c => ({ time: t(c.time / 1000), open: c.open, high: c.high, low: c.low, close: c.close }))
+      candles.map(c => ({ time: t(c.time), open: c.open, high: c.high, low: c.low, close: c.close }))
     )
 
-    // Strategy indicator overlays (EMA, Bollinger, etc.)
-    for (const ln of entry.mainLines) {
+    // Strategy indicator overlays
+    for (const ln of strategyOutput.mainLines) {
       const s = chart.addSeries(LineSeries, {
         color: ln.color, lineWidth: 2,
         priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       })
-      s.setData(ln.data.map(p => ({ time: t(p.time / 1000), value: p.value })))
+      s.setData(ln.data.map(p => ({ time: t(p.time), value: p.value })))
     }
 
-    const markers = createSeriesMarkers(candleSeries, [])
-    markers.setMarkers(
-      entry.trades.filter(tr => tr.price).map(tr => ({
+    // Strategy signals (teal/red arrows — identical to Backtester style)
+    const allMarkers: SeriesMarker<Time>[] = []
+    strategyOutput.signals.forEach((sig, i) => {
+      if (!sig) return
+      allMarkers.push({
+        time: t(candles[i].time) as Time,
+        position: sig === 'buy' ? 'belowBar' : 'aboveBar',
+        color: sig === 'buy' ? '#26a69a' : '#ef5350',
+        shape: sig === 'buy' ? 'arrowUp' : 'arrowDown',
+        text: sig === 'buy' ? 'B' : 'S',
+        size: 1,
+      })
+    })
+
+    // Actual executed trades (yellow/orange — distinguish from signals)
+    trades.filter(tr => tr.price).forEach(tr => {
+      allMarkers.push({
         time: t(Math.floor(tr.time / 1000)) as Time,
         position: tr.side === 'buy' ? 'belowBar' : 'aboveBar',
-        color: tr.side === 'buy' ? '#26a69a' : '#ef5350',
+        color: tr.side === 'buy' ? '#facc15' : '#f97316',
         shape: tr.side === 'buy' ? 'arrowUp' : 'arrowDown',
-        text: tr.side === 'buy' ? 'B' : 'S',
-        size: 1,
-      } as SeriesMarker<Time>))
-    )
+        text: tr.side === 'buy' ? '▲' : '▼',
+        size: 2,
+      })
+    })
+
+    // LW Charts requires markers sorted ascending by time
+    allMarkers.sort((a, b) => Number(a.time) - Number(b.time))
+    const markersPlugin = createSeriesMarkers(candleSeries, allMarkers)
     chart.timeScale().fitContent()
 
-    // Sub-pane chart for oscillators (RSI, MACD, Stoch …)
+    // Sub-pane for oscillators (RSI, MACD, Stoch …)
     let subChart: IChartApi | null = null
-    const sp = entry.subPane
+    const sp = strategyOutput.subPane
     if (sp && subRef.current) {
       subChart = createChart(subRef.current, {
         autoSize: true,
@@ -184,7 +202,6 @@ function SignalChart({ botId }: { botId: string | null }) {
         handleScale: false,
       })
       const sc = subChart
-      // Keep sub-pane in sync with main chart scroll/zoom
       chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
         if (range) sc.timeScale().setVisibleLogicalRange(range)
       })
@@ -193,8 +210,7 @@ function SignalChart({ botId }: { botId: string | null }) {
           color: ln.color, lineWidth: 2,
           priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
         })
-        s.setData(ln.data.map(p => ({ time: t(p.time / 1000), value: p.value })))
-        // Reference levels (e.g. RSI 30/70) on first line only
+        s.setData(ln.data.map(p => ({ time: t(p.time), value: p.value })))
         if (sp.refLines && ln === sp.lines[0]) {
           for (const level of sp.refLines) {
             s.createPriceLine({
@@ -208,29 +224,43 @@ function SignalChart({ botId }: { botId: string | null }) {
     }
 
     return () => {
-      markers.detach()
+      markersPlugin.detach()
       chart.remove()
       subChart?.remove()
     }
-  }, [entry])
-
-  if (!botId) return null
+  }, [candles, strategyOutput, trades])
 
   return (
     <div className="card overflow-hidden p-0">
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <h3 className="text-sm font-semibold text-text">Chart</h3>
-        {entry?.mainLines && entry.mainLines.length > 0 && (
-          <span className="font-mono text-[10px] text-dim">
-            {entry.mainLines.map(l => l.id).join(' · ')}
+        <h3 className="text-sm font-semibold text-text">
+          Chart
+          <span className="ml-2 text-xs font-normal font-sans text-dim">
+            {cfg.symbol.replace(/USDT$/, '/USDT')} · {cfg.timeframe}
           </span>
-        )}
+        </h3>
+        <div className="flex items-center gap-2">
+          {strategyOutput?.mainLines && strategyOutput.mainLines.length > 0 && (
+            <span className="font-mono text-[10px] text-dim">
+              {strategyOutput.mainLines.map(l => l.id).join(' · ')}
+            </span>
+          )}
+          {loadingCandles && (
+            <span className="text-[10px] text-dim animate-pulse">Loading…</span>
+          )}
+        </div>
       </div>
-      <div ref={mainRef} className="h-[300px] w-full" />
-      {entry?.subPane && (
+      {loadingCandles && !candles.length ? (
+        <div className="flex h-[300px] items-center justify-center text-sm text-dim">
+          Loading chart…
+        </div>
+      ) : (
+        <div ref={mainRef} className="h-[300px] w-full" />
+      )}
+      {strategyOutput?.subPane && (
         <>
           <div className="border-t border-border bg-panel px-3 py-1 font-mono text-[10px] text-dim">
-            {entry.subPane.title}
+            {strategyOutput.subPane.title}
           </div>
           <div ref={subRef} className="h-[108px] w-full" />
         </>
@@ -774,8 +804,8 @@ export default function SignalBotsPage() {
           </div>
         )}
 
-        {/* Chart */}
-        <SignalChart botId={selectedId && !isNew ? selectedId : null} />
+        {/* Chart — renders for both new and saved bots as soon as cfg is set */}
+        {cfg && <SignalChart botId={selectedId && !isNew ? selectedId : null} cfg={cfg} />}
 
         {/* Activity log */}
         {logs.length > 0 && (
