@@ -532,34 +532,88 @@ class SignalBot {
       this.lastSignal = sig
       this.lastSignalAt = Date.now()
 
-      if (cfg.tradeSide !== 'both' && cfg.tradeSide !== sig) {
-        this.log.info(`${sig.toUpperCase()} signal ignored (bot set to ${cfg.tradeSide}-only)`)
-        return
-      }
-
-      const cooldownMs = cfg.cooldownSec * 1000
-      const sinceLast = Date.now() - this.lastTradeAt
-      if (cooldownMs > 0 && sinceLast < cooldownMs) {
-        this.log.warn(
-          `${sig.toUpperCase()} signal skipped — cooldown ` +
-            `(${Math.ceil((cooldownMs - sinceLast) / 1000)}s left)`,
-        )
-        return
-      }
-
-      // Risk mode or budget mode → use computedSize; fixed size → use cfg.size directly.
+      // ── Position-aware execution ─────────────────────────────────────────
+      // Fetch live position so we know what to close before opening.
+      const state = await getAccountState(cfg.asset, this.creds)
+      const pos = state.position   // { side: 'long'|'short', size: number } | null
       const tradeSize = this.computedSize !== null ? this.computedSize : cfg.size
+
+      // Decide what to do: willOpen = place a new entry; willClose = reduce-only
+      // close of the existing opposite position first.
+      let willOpen = false
+      let willClose = false
+      let closeSize = 0
+      let closeSide: 'buy' | 'sell' = 'buy'
+      let openSide: 'buy' | 'sell' = sig
+
+      if (cfg.tradeSide === 'both') {
+        // Long & Short: always enter in signal direction; close the opposite first.
+        willOpen = true
+        if (sig === 'buy') {
+          openSide = 'buy'
+          if (pos && pos.side === 'short') { willClose = true; closeSide = 'buy'; closeSize = pos.size }
+        } else {
+          openSide = 'sell'
+          if (pos && pos.side === 'long') { willClose = true; closeSide = 'sell'; closeSize = pos.size }
+        }
+      } else if (cfg.tradeSide === 'buy') {
+        // Long only: BUY → open long (skip if already long); SELL → close long, no short.
+        if (sig === 'buy') {
+          if (pos && pos.side === 'long') { this.log.info(`Already LONG ${cfg.asset} — BUY skipped`); return }
+          willOpen = true; openSide = 'buy'
+        } else {
+          if (pos && pos.side === 'long') { willClose = true; closeSide = 'sell'; closeSize = pos.size }
+          else { this.log.info(`No long position to close — SELL skipped`); return }
+        }
+      } else {
+        // Short only: SELL → open short (skip if already short); BUY → close short, no long.
+        if (sig === 'sell') {
+          if (pos && pos.side === 'short') { this.log.info(`Already SHORT ${cfg.asset} — SELL skipped`); return }
+          willOpen = true; openSide = 'sell'
+        } else {
+          if (pos && pos.side === 'short') { willClose = true; closeSide = 'buy'; closeSize = pos.size }
+          else { this.log.info(`No short position to close — BUY skipped`); return }
+        }
+      }
+
+      // Cooldown only guards opening a new position, not protective closes.
+      if (willOpen) {
+        const cooldownMs = cfg.cooldownSec * 1000
+        const sinceLast = Date.now() - this.lastTradeAt
+        if (cooldownMs > 0 && sinceLast < cooldownMs) {
+          this.log.warn(
+            `${sig.toUpperCase()} signal skipped — cooldown ` +
+              `(${Math.ceil((cooldownMs - sinceLast) / 1000)}s left)`,
+          )
+          return
+        }
+      }
+
       this.log.info(`${sig.toUpperCase()} signal on ${cfg.symbol} ${cfg.timeframe} close — executing`)
-      this.lastTradeAt = Date.now()
       try {
-        // Cancel stale TP/SL bracket orders from the previous trade so they
-        // don't double-close the position when the new signal fires.
+        // Cancel stale TP/SL bracket orders first so they don't double-close.
         const cancelled = await cancelAssetOrders(cfg.asset, this.creds)
         if (cancelled > 0) this.log.info(`Cleared ${cancelled} stale order(s) for ${cfg.asset}`)
 
+        // Close opposite position (reduce-only) before opening the new one.
+        if (willClose && closeSize > 0) {
+          this.log.info(`Closing ${closeSide === 'buy' ? 'SHORT' : 'LONG'} ${closeSize} ${cfg.asset} (reduce-only)`)
+          const closeRes = await placeOrder({
+            asset: cfg.asset, side: closeSide, size: closeSize,
+            orderType: 'market', reduceOnly: true, maxSlippagePct: cfg.slippagePct,
+          }, this.creds)
+          this.trades.push({ time: Date.now(), side: closeSide, asset: cfg.asset, size: closeRes.filledSize, price: closeRes.avgPx, filled: closeRes.filled })
+          if (this.trades.length > 100) this.trades = this.trades.slice(-100)
+          this.log.fill(closeRes.message)
+        }
+
+        if (!willOpen) return
+
+        // Open the new position with SL (and optional TP) bracket.
+        this.lastTradeAt = Date.now()
         const result = await placeOrder({
           asset: cfg.asset,
-          side: sig,
+          side: openSide,
           size: tradeSize,
           orderType: 'market',
           maxSlippagePct: cfg.slippagePct,
@@ -573,7 +627,7 @@ class SignalBot {
         const positionUsd = result.avgPx ? result.filledSize * result.avgPx : undefined
         this.trades.push({
           time: Date.now(),
-          side: sig,
+          side: openSide,
           asset: cfg.asset,
           size: result.filledSize,
           price: result.avgPx,
