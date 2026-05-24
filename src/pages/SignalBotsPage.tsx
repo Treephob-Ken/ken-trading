@@ -479,6 +479,7 @@ export default function SignalBotsPage() {
 
   // When switching to a bot, clear new-bot state
   const selectBot = (id: string) => {
+    if (id === selectedId && !isNew) return  // already selected — don't null cfg and break the form
     setSelectedId(id)
     setIsNew(false)
     setDirty(false)
@@ -643,58 +644,34 @@ export default function SignalBotsPage() {
 
               {/* ── Position Sizing Calculator ── */}
               <div className="my-1 h-px bg-border" />
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-dim">Position Sizing</span>
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Risk per Trade ($)">
-                    <input
-                      type="number" step="any" min="0" placeholder="e.g. 50"
-                      value={riskUsd}
-                      onChange={(e) => setRiskUsd(e.target.value === '' ? '' : Number(e.target.value))}
-                      className={inputCls}
-                    />
-                  </Field>
-                  <Field label="Stop Loss %">
-                    <input
-                      type="number" step="0.1" min="0" placeholder="e.g. 2"
-                      value={sizingSlPct}
-                      onChange={(e) => setSizingSlPct(e.target.value === '' ? '' : Number(e.target.value))}
-                      className={inputCls}
-                    />
-                  </Field>
-                </div>
-                {sizingResult ? (
-                  <div className="rounded-xl border border-border bg-panel-2 p-3">
-                    <div className="mb-2 flex items-baseline justify-between">
-                      <span className="text-[10px] text-dim">Position $</span>
-                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.positionUsd}</span>
-                    </div>
-                    <div className="mb-2 flex items-baseline justify-between">
-                      <span className="text-[10px] text-dim">Order Qty</span>
-                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.qty}</span>
-                    </div>
-                    <div className="mb-2 flex items-baseline justify-between">
-                      <span className="text-[10px] text-dim">Max Leverage</span>
-                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.maxLev}</span>
-                    </div>
-                    <div className="mb-2 flex items-baseline justify-between">
-                      <span className="text-[10px] text-dim">Margin at max lev</span>
-                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.margin}</span>
-                    </div>
-                    <div className="mb-3 flex items-baseline justify-between">
-                      <span className="text-[10px] text-dim">SL price (L / S)</span>
-                      <span className="font-mono text-[10px] font-semibold text-loss">{sizingResult.slPrices}</span>
-                    </div>
-                    <p className="mt-1 text-center text-[10px] text-gain">
-                      ✓ Order size auto-set to {sizingResult.rawQty?.toFixed(6) ?? '—'} {cfg.asset}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="rounded-xl border border-border bg-panel-2 px-3 py-2 text-[10px] text-dim">
-                    Enter Risk $ + Stop Loss % above to compute position size.
-                  </p>
-                )}
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Risk mode (auto-sizes)</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Risk USD">
+                  <input
+                    type="number" step="any" min="0" placeholder="e.g. 50"
+                    value={riskUsd}
+                    onChange={(e) => setRiskUsd(e.target.value === '' ? '' : Number(e.target.value))}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="SL %">
+                  <input
+                    type="number" step="0.1" min="0" placeholder="e.g. 2"
+                    value={sizingSlPct}
+                    onChange={(e) => setSizingSlPct(e.target.value === '' ? '' : Number(e.target.value))}
+                    className={inputCls}
+                  />
+                </Field>
               </div>
+              {sizingResult && (
+                <div className="rounded-lg border border-brand/20 bg-brand/5 px-3 py-2 text-[10px] space-y-1">
+                  <div className="flex justify-between"><span className="text-dim">Notional</span><span className="font-mono text-text">{sizingResult.positionUsd}</span></div>
+                  <div className="flex justify-between"><span className="text-dim">Order size</span><span className="font-mono text-text">{sizingResult.qty}</span></div>
+                  <div className="flex justify-between"><span className="text-dim">Leverage</span><span className="font-mono text-text">{sizingResult.maxLev}</span></div>
+                  <div className="flex justify-between"><span className="text-dim">Margin (USDC)</span><span className="font-mono text-text">{sizingResult.margin}</span></div>
+                  <div className="flex justify-between"><span className="text-dim">SL/TP</span><span className="font-mono text-loss">{sizingResult.slPrices}</span></div>
+                </div>
+              )}
               <div className="my-1 h-px bg-border" />
 
               <button
