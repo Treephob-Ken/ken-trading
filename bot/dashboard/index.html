@@ -1123,7 +1123,20 @@
             <div class="field"><label>Leverage</label><input id="f-leverage" type="number" min="1" step="any" oninput="updateSizingPreview()" /></div>
           </div>
           <div class="field"><label>Override Order Size</label><input id="f-size" type="number" step="any" placeholder="(auto from budget)" oninput="updateSizingPreview()" /></div>
-          <div id="sizing-preview" class="preview-box">Enter range, grids, and budget…</div>
+
+          <div id="gb-sizing-card" class="sizing-result" style="display:none">
+            <div class="sizing-result-header">
+              <span class="sizing-result-label">Total Notional</span>
+              <span class="sizing-result-value" id="gb-res-notional">—</span>
+            </div>
+            <div class="sizing-result-rows">
+              <div class="sizing-result-row"><span class="sizing-result-key">Per-grid order size</span><span class="sizing-result-val" id="gb-res-order-size">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">Grid spacing</span><span class="sizing-result-val" id="gb-res-spacing">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">Est. profit / grid</span><span class="sizing-result-val" id="gb-res-profit">—</span></div>
+              <div class="sizing-result-row"><span class="sizing-result-key">Required margin</span><span class="sizing-result-val" id="gb-res-margin">—</span></div>
+            </div>
+          </div>
+          <div id="gb-sizing-empty" class="sizing-empty">Enter <b>range</b>, <b>grid count</b> and <b>budget</b> to see position size</div>
 
           <div class="card-divider"></div>
           <div class="card-title" style="margin-bottom:var(--s2)">Safety <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-dim)">(optional)</span></div>
@@ -2365,16 +2378,34 @@
   }
 
   function updateSizingPreview() {
-    const c = getFormConfig(); const box = $('sizing-preview')
-    if (!c.lower || !c.upper || !c.gridCount) { box.innerHTML = 'Enter range, grids, and budget…'; return }
-    const lev = c.leverage ?? 1; const safety = 0.5; let orderSize, source
-    if (c.orderSize) { orderSize = c.orderSize; source = 'override' }
-    else if (c.investment) { orderSize = (c.investment * lev * safety) / (c.gridCount * c.upper); source = `from $${c.investment} @ ${lev}x` }
-    else { box.innerHTML = 'Enter <b>Budget</b> or <b>Order Size</b>'; return }
-    const maxNotional = c.gridCount * orderSize * c.upper; const requiredMargin = maxNotional / lev
-    const spacing = (c.upper - c.lower) / c.gridCount; const spacingPct = (spacing / ((c.upper + c.lower) / 2)) * 100
-    const profitPerGridPct = spacingPct - 0.1
-    box.innerHTML = `Order size <b>${orderSize.toFixed(5)}</b> <span style="color:var(--text-dim)">(${source})</span><br>Spacing <b>${spacing.toFixed(2)}</b> = <b>${spacingPct.toFixed(3)}%</b><br>Est. profit/grid <b style="color:${profitPerGridPct > 0 ? 'var(--gain-light)' : 'var(--loss-light)'}">${profitPerGridPct.toFixed(3)}%</b> <span style="color:var(--text-dim)">(after fees)</span><br>Max notional <b>${maxNotional.toFixed(0)}</b> · Margin <b>${requiredMargin.toFixed(0)} USDC</b>`
+    const c = getFormConfig()
+    const card = $('gb-sizing-card'), empty = $('gb-sizing-empty')
+    const showCard = (show) => { if (card) card.style.display = show ? '' : 'none'; if (empty) empty.style.display = show ? 'none' : '' }
+
+    if (!c.lower || !c.upper || !c.gridCount) { showCard(false) }
+    else {
+      const lev = c.leverage ?? 1; const safety = 0.5; let orderSize
+      if (c.orderSize) { orderSize = c.orderSize }
+      else if (c.investment) { orderSize = (c.investment * lev * safety) / (c.gridCount * c.upper) }
+      if (!orderSize) { showCard(false) }
+      else {
+        const maxNotional      = c.gridCount * orderSize * c.upper
+        const requiredMargin   = maxNotional / lev
+        const spacing          = (c.upper - c.lower) / c.gridCount
+        const spacingPct       = (spacing / ((c.upper + c.lower) / 2)) * 100
+        const profitPerGridPct = spacingPct - 0.1
+        const profitColor      = profitPerGridPct > 0 ? 'var(--gain-light)' : 'var(--loss-light)'
+
+        if ($('gb-res-notional'))   $('gb-res-notional').textContent   = `$${maxNotional.toFixed(2)}`
+        if ($('gb-res-order-size')) $('gb-res-order-size').textContent = `${orderSize.toFixed(5)} ${c.asset || ''}`
+        if ($('gb-res-spacing'))    $('gb-res-spacing').textContent    = `${spacing.toFixed(4)}  (${spacingPct.toFixed(3)}%)`
+        if ($('gb-res-profit'))     { $('gb-res-profit').textContent   = `${profitPerGridPct.toFixed(3)}%`; $('gb-res-profit').style.color = profitColor }
+        if ($('gb-res-margin'))     $('gb-res-margin').textContent     = `$${requiredMargin.toFixed(2)} USDC @ ${lev}x`
+        showCard(true)
+      }
+    }
+
+    // Grid overlay lines on the chart — logic and inputs unchanged
     if (candlestickSeries && c.lower && c.upper && c.gridCount) {
       const cp = activeCandles?.length ? activeCandles[activeCandles.length - 1].close : (c.lower + c.upper) / 2
       updateGridLines(buildLines(c.lower, c.upper, c.gridCount, c.mode), cp, c.stopLossPrice, c.takeProfitPrice)
