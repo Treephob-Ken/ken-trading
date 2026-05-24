@@ -2268,6 +2268,7 @@
     gbCurrencyCombo = createCombo('gb-currency-combo', (asset) => {
       $('f-asset').value = asset
       updateSizingPreview()
+      initGridChart(getFormConfig())
     })
     fetch('/api/assets').then(r => r.json()).then(assets => {
       gbCurrencyCombo.setItems((Array.isArray(assets) ? assets : []).map(a => ({ value: a, label: a })))
