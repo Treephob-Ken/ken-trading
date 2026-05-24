@@ -152,6 +152,14 @@ function userCreds(req: Request) {
 // ─── Auth routes ──────────────────────────────────────────────────────────────
 
 const OWNER_EMAIL = (process.env.OWNER_EMAIL ?? '').trim().toLowerCase()
+// Comma-separated email whitelist. When set, only these emails may register.
+// Leave blank to allow anyone to register (original behaviour).
+const ALLOWED_EMAILS: Set<string> = new Set(
+  (process.env.ALLOWED_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
+)
 
 app.post('/auth/register', (req: Request, res: Response) => {
   if (!MULTI_USER) { res.status(404).json({ error: 'Multi-user mode is not enabled' }); return }
@@ -161,6 +169,10 @@ app.post('/auth/register', (req: Request, res: Response) => {
   }
   if ((password as string).length < 8) {
     res.status(400).json({ error: 'password must be at least 8 characters' }); return
+  }
+  // Whitelist check — if ALLOWED_EMAILS is set, reject anyone not on the list
+  if (ALLOWED_EMAILS.size > 0 && !ALLOWED_EMAILS.has((email as string).trim().toLowerCase())) {
+    res.status(403).json({ error: 'Registration is invite-only. Contact the admin to get access.' }); return
   }
   try {
     if (findUserByEmail(email)) { res.status(409).json({ error: 'Email already registered' }); return }
