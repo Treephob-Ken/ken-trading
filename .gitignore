@@ -65,7 +65,7 @@ bot/.env
 bot/.env.*
 !bot/.env.example
 bot/dist/
-bot/public/
+# bot/public/ — intentionally tracked so VPS gets the pre-built React app via git pull
 bot/configs/
 bot/signal-bot.json
 bot/signal-bots/
