@@ -1115,6 +1115,18 @@
               </select>
             </div>
           </div>
+          <div class="field-row">
+            <div class="field"><label>Timeframe (chart)</label>
+              <select id="f-timeframe" onchange="initGridChart(getFormConfig())">
+                <option value="1m">1m</option><option value="3m">3m</option>
+                <option value="5m">5m</option><option value="15m">15m</option>
+                <option value="30m">30m</option><option value="1h" selected>1h</option>
+                <option value="2h">2h</option><option value="4h">4h</option>
+                <option value="6h">6h</option><option value="12h">12h</option>
+                <option value="1d">1d</option>
+              </select>
+            </div>
+          </div>
 
           <div class="card-divider"></div>
           <div class="card-title" style="margin-bottom:var(--s2)">Position Sizing</div>
@@ -2066,9 +2078,10 @@
     if (gridChart) { try { gridChart.remove() } catch {} gridChart = null }
     candlestickSeries = null; activeCandles = []; _gridPriceLines = []
     const sym = ((cfg.asset || 'ETH').toUpperCase()) + 'USDT'
-    const info = $('grid-chart-info'); if (info) info.textContent = `${sym} · 1h · loading…`
+    const tf  = cfg.timeframe || '1h'
+    const info = $('grid-chart-info'); if (info) info.textContent = `${sym} · ${tf} · loading…`
     try {
-      const candles = await _fetchCandles(sym, '1h', 300)
+      const candles = await _fetchCandles(sym, tf, 300)
       activeCandles = candles
       gridChart = _makeLWChart(el)
       candlestickSeries = gridChart.addCandlestickSeries({
@@ -2086,7 +2099,7 @@
         )
       }
       gridChart.timeScale().fitContent()
-      if (info) info.textContent = `${sym} · 1h · ${candles.length} bars · ${cfg.gridCount || 0} grid lines`
+      if (info) info.textContent = `${sym} · ${tf} · ${candles.length} bars · ${cfg.gridCount || 0} grid lines`
       new ResizeObserver(() => {
         if (gridChart && el.clientWidth > 0 && el.clientHeight > 0)
           gridChart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
@@ -2382,7 +2395,7 @@
 
   function getFormConfig() {
     const asset = (gbCurrencyCombo?.getValue() || $('f-asset').value.trim()).toUpperCase()
-    const cfg = { id: selectedBotId, name: $('f-name').value.trim() || undefined, asset, lower: parseFloat($('f-lower').value), upper: parseFloat($('f-upper').value), gridCount: parseInt($('f-count').value), mode: $('f-mode').value }
+    const cfg = { id: selectedBotId, name: $('f-name').value.trim() || undefined, asset, lower: parseFloat($('f-lower').value), upper: parseFloat($('f-upper').value), gridCount: parseInt($('f-count').value), mode: $('f-mode').value, timeframe: $('f-timeframe')?.value || '1h' }
     const num = (id) => { const n = parseFloat($(id).value); return isNaN(n) ? undefined : n }
     const inv = num('f-investment'); if (inv > 0) cfg.investment = inv
     const lev = num('f-leverage');   if (lev >= 1) cfg.leverage = lev
@@ -2402,6 +2415,7 @@
     if (gbCurrencyCombo) gbCurrencyCombo.setValue(asset)
     $('f-lower').value = cfg.lower ?? ''; $('f-upper').value = cfg.upper ?? ''
     $('f-count').value = cfg.gridCount ?? ''; $('f-mode').value = cfg.mode || 'arithmetic'
+    if ($('f-timeframe')) $('f-timeframe').value = cfg.timeframe || '1h'
     // Auto-name detection: if stored name matches the generated pattern, keep auto mode
     const generatedName = generateGridBotName()
     gbBotNameIsAuto = !cfg.name || cfg.name === generatedName
