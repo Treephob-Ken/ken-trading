@@ -65,6 +65,7 @@ bot/.env
 bot/.env.*
 !bot/.env.example
 bot/dist/
+bot/public/
 bot/configs/
 bot/signal-bot.json
 bot/signal-bots/

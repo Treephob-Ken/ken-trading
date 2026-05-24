@@ -52,6 +52,8 @@ import { runMigrationIfNeeded } from './migrate.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DASHBOARD_PATH = join(__dirname, '..', 'dashboard', 'index.html')
+// React SPA build output (npm run build from repo root)
+const PUBLIC_DIR = join(__dirname, '..', 'public')
 
 // ─── Grid bot manager ─────────────────────────────────────────────────────────
 
@@ -120,6 +122,11 @@ if (API_TOKEN && !MULTI_USER) {
 
 app.use(express.json())
 
+// ─── React SPA (static files) ─────────────────────────────────────────────────
+// Serves the Vite build output (react app) before any API routes.
+// express.static silently skips this middleware if PUBLIC_DIR doesn't exist yet.
+app.use(express.static(PUBLIC_DIR))
+
 // ─── SSE log stream ───────────────────────────────────────────────────────────
 
 const sseClients = new Set<Response>()
@@ -128,9 +135,9 @@ onLog((line) => {
   for (const res of sseClients) res.write(data)
 })
 
-// ─── Static dashboard ─────────────────────────────────────────────────────────
+// ─── Legacy dashboard (fallback access while React SPA is being built out) ────
 
-app.get('/', (_req: Request, res: Response) => {
+app.get('/legacy', (_req: Request, res: Response) => {
   res.sendFile(DASHBOARD_PATH)
 })
 
@@ -629,6 +636,20 @@ app.get('/api/signal/bots/:id/chart-data', requireAuth, async (req: Request, res
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }
+})
+
+// ─── SPA catch-all ────────────────────────────────────────────────────────────
+// For any GET that isn't /api or /auth, send the React app's index.html so
+// React Router can handle client-side navigation (e.g. /backtest, /signal).
+// Falls back to the vanilla dashboard if the React build doesn't exist yet.
+app.get('*', (req: Request, res: Response) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/auth')) {
+    res.status(404).end(); return
+  }
+  const indexPath = join(PUBLIC_DIR, 'index.html')
+  res.sendFile(indexPath, (err) => {
+    if (err) res.sendFile(DASHBOARD_PATH)
+  })
 })
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
