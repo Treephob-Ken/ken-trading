@@ -870,3 +870,27 @@ function refreshChartFromForm() {
   that fires after `setEntry()` updates state — so `subRef.current` is in the DOM by then.
 - `sizingSlPct` is local UI state (not saved to bot config). `cfg.slPct` (the bracket-order SL)
   remains separate.
+
+---
+
+## 2026-05-24 — Backtester left pane redesign + deploy bug fix
+
+### What changed
+- **`src/components/Controls.tsx`** — reorganized into three clear labeled sections:
+  1. **Data** (asset, timeframe, date range with inline Reload icon — no standalone reload button)
+  2. **Strategy** (badged "deploys to bot"): strategy, params, direction, SL%, TP%
+  3. **Simulation** (badged "backtest only"): capital, fee, position sizing
+- **`src/pages/BacktesterPage.tsx`** — deploy card now:
+  - Shows a live summary of what will be deployed (asset, strategy, TF, direction, SL/TP)
+  - Translates `positionMode` into Signal Bot sizing:
+    - `fixed` → order size (qty) input, passed as `size`
+    - `compounding` → same qty input with a "compounding not supported by bot" warning
+    - `volatility` → computes `riskUsd = targetRiskPct% × capital`, shows preview panel, passes `riskUsd` + `sizingSlPct`
+  - **Fixes bug**: `stopLossPct` and `takeProfitPct` were never included in the sessionStorage payload → bot always got `slPct: undefined / tpPct: undefined`
+- **`src/pages/SignalBotsPage.tsx`** — pending-config reader now handles:
+  - `size`, `slPct`, `tpPct` — applied directly to the new bot config
+  - `riskUsd` + `sizingSlPct` — pre-fills the Risk Mode sizing calculator so volatility-mode deploy flows end-to-end without manual re-entry
+
+### Gotchas
+- `positionMode` and related state are still persisted in BacktesterPage so existing users don't lose their settings. The backtest itself still runs all three modes correctly.
+- `deployPayload` is a `useMemo` that recomputes whenever any relevant value changes — no stale deploy data.
