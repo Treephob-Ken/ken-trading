@@ -99,6 +99,8 @@ The web app's optimizer produces a grid spec (range, count, mode, spacing) that 
 
 ### Web app (run from repo root)
 
+> **Node.js requirement:** The bot requires **Node.js 22+** on the VPS. Node 20 lacks native `WebSocket` which `@nktkas/hyperliquid`'s `WebSocketTransport` requires. After any Node.js upgrade, run `npm rebuild` in `bot/` to recompile `better-sqlite3`.
+
 ```bash
 npm install
 npm run dev               # Vite dev server (default http://localhost:5173)

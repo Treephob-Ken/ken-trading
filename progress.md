@@ -608,3 +608,19 @@ Internet → Cloudflare Edge → Cloudflare Tunnel (cloudflared, pm2) → localh
 |---|---|---|
 | `trading-bot` | `npm run serve` | Express server + bot logic on port 3001 |
 | `cloudflare-tunnel` | `cloudflared tunnel run --token <TOKEN>` | Cloudflare tunnel to expose port 3001 |
+
+---
+
+## 2026-05-24 — VPS post-deploy fixes
+
+### Node.js WebSocket + better-sqlite3 rebuild
+
+**Problem 1 — Account API hanging:** `GET /api/account` hung indefinitely. Root cause: Node.js 20 has no native `WebSocket` global; `@nktkas/hyperliquid`'s `WebSocketTransport` threw "No WebSocket implementation found" silently and the request never resolved.
+
+**Fix:** Upgraded Node.js from 20 → 22 on the VPS (`curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt install -y nodejs`). Node.js 22 ships native WebSocket.
+
+**Problem 2 — Bot crash after Node upgrade:** `better-sqlite3` is a native addon compiled against Node's ABI version. After upgrading Node 20 → 22, the prebuilt binary was incompatible (`NODE_MODULE_VERSION 115` vs required `127`). Bot crashed on startup with `ERR_DLOPEN_FAILED`.
+
+**Fix:** `npm rebuild` inside `bot/` recompiles the native addon against Node 22. Then `pm2 restart trading-bot`.
+
+**Gotcha:** Always run `npm rebuild` after upgrading Node.js when the project uses native addons (`better-sqlite3`, `canvas`, etc.).
