@@ -68,8 +68,16 @@ export default function GridPage({
   const [leverage, setLeverage] = useState(() => +(localStorage.getItem('gd_leverage') || '1'))
   const [slPct, setSlPct] = useState(() => +(localStorage.getItem('gd_slPct') || '2'))
   const [tpPct, setTpPct] = useState(() => +(localStorage.getItem('gd_tpPct') || '2'))
+  const [riskUsd, setRiskUsd] = useState<number | ''>('')
   const [deploying, setDeploying] = useState(false)
   const [deployToast, setDeployToast] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  // When risk + SL% + leverage are all set, compute the budget automatically
+  const riskBudget = (typeof riskUsd === 'number' && riskUsd > 0 && slPct > 0 && leverage > 0)
+    ? (riskUsd / (slPct / 100)) / leverage
+    : null
+  // Effective investment used for deploy: risk-computed or manual
+  const effectiveInvestment = riskBudget ?? investment
 
   // ── data ─────────────────────────────────────────────────────────────────────
   const [candles, setCandles] = useState<Candle[]>([])
@@ -177,7 +185,7 @@ export default function GridPage({
         body: JSON.stringify({
           name: `${asset}-GRID-${gridCount}`,
           asset, lower, upper, gridCount, mode: activeMode,
-          investment, leverage,
+          investment: effectiveInvestment, leverage,
           stopLossPrice:   +(lower * (1 - slPct / 100)).toFixed(8),
           takeProfitPrice: +(upper * (1 + tpPct / 100)).toFixed(8),
         }),
@@ -278,10 +286,6 @@ export default function GridPage({
             <div className="p-4 space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="label">Budget (USDC)</label>
-                  <NumberInput step={50} min={10} value={investment} onChange={setInvestment} className="field font-mono text-sm" />
-                </div>
-                <div>
                   <label className="label">Leverage</label>
                   <NumberInput step={1} min={1} max={50} value={leverage} onChange={setLeverage} className="field font-mono text-sm" />
                 </div>
@@ -293,7 +297,23 @@ export default function GridPage({
                   <label className="label">Take Profit %</label>
                   <NumberInput step={0.5} min={0.1} value={tpPct} onChange={setTpPct} className="field font-mono text-sm" />
                 </div>
+                <div>
+                  <label className="label">Risk USD <span className="font-normal normal-case text-dim">(opt)</span></label>
+                  <NumberInput step={10} min={0} value={riskUsd === '' ? 0 : riskUsd} onChange={(v) => setRiskUsd(v > 0 ? v : '')} className="field font-mono text-sm" />
+                </div>
               </div>
+              {/* Risk mode: auto-compute budget from risk + SL% + leverage */}
+              {riskBudget ? (
+                <div className="rounded-lg border border-brand/20 bg-brand/5 px-3 py-2 text-[10px] space-y-1">
+                  <div className="flex justify-between"><span className="text-dim">Notional</span><span className="font-mono text-text">${(riskBudget * leverage).toFixed(0)}</span></div>
+                  <div className="flex justify-between"><span className="text-dim">Budget (margin)</span><span className="font-mono text-brand font-semibold">${riskBudget.toFixed(2)}</span></div>
+                </div>
+              ) : (
+                <div>
+                  <label className="label">Budget (USDC)</label>
+                  <NumberInput step={50} min={10} value={investment} onChange={setInvestment} className="field font-mono text-sm" />
+                </div>
+              )}
               {deployToast && (
                 <div className={`rounded-xl px-3 py-2 text-xs font-medium ${deployToast.ok ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'}`}>
                   {deployToast.msg}
