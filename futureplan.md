@@ -42,43 +42,29 @@ yet pass `userId`, so all audit entries still go to the global `bot/trade-audit.
 
 ---
 
-## ▶ Phase A — Deploy on a 24/7 server
+## ✅ Phase A — Deploy on a 24/7 server (DONE — 2026-05-24)
 
-Move the bot off the local PC onto an always-on VPS so it trades around the clock.
-Full walkthrough is in **`bot/DEPLOY_VPS.md`** — summary:
+Bot is live on **DigitalOcean Singapore** ($6/mo, 1 vCPU / 1GB RAM), always on.
 
-1. **Pick a server** — good cheap options:
-   - **Hetzner CX22** (~€4/mo, Germany) — best price/perf, needs ID verification
-   - **Oracle Cloud Free Tier** (Always Free, US region) — truly free, ARM, slower signup
-   - **DigitalOcean Basic** (~$6/mo) — simplest UX, instant signup
-   → Hetzner CX22 recommended once ID clears.
+- **Server:** 68.183.184.170 (Ubuntu 24.04, Node.js 22)
+- **Bot URL:** https://bot.garlic-trading.net (Cloudflare Tunnel via pm2)
+- **Web app:** https://garlic-trading.vercel.app (Vercel, analytics only)
+- **Process manager:** pm2 — both `trading-bot` and `cloudflare-tunnel` auto-restart on reboot
+- **Auth:** Multi-user JWT (no Cloudflare Access — removed; bot's own login handles it)
 
-2. **Install** — SSH in; `apt install nodejs npm git`; install `pm2` globally;
-   clone the repo; `cd bot && npm install`.
-
-3. **Configure `.env`** — copy the agent wallet key + user address; set
-   `ALLOWED_ORIGINS`, safety caps (`MAX_TRADE_NOTIONAL_USD`, `ALLOWED_ASSETS`,
-   `MAX_TRADES_PER_HOUR`).
-
-4. **Move the Cloudflare tunnel to the VPS** — install `cloudflared`, migrate the
-   `trading-bot` tunnel credentials there, re-point `bot.garlic-trading.net`.
-   Cloudflare Access (email-OTP) policy stays the same — no config change needed.
-
-5. **Process supervision** — `pm2 start "npm run serve" --name bot` and
-   `pm2 start "cloudflared tunnel run trading-bot" --name tunnel`;
-   `pm2 startup && pm2 save` so both survive reboots and crashes.
-
-6. **Vercel alignment** — confirm `VITE_BOT_URL=https://bot.garlic-trading.net`
-   in Vercel env vars so `garlic-trading.vercel.app` points at the VPS bot.
-
-Once deployed, stop the local PC tunnel — the VPS is the permanent 24/7 home.
+See `progress.md` (2026-05-24) for full deployment log and gotchas.
 
 ---
 
-## ▶ Phase B — Multi-user support (one server, many traders)
+## ✅ Phase B — Multi-user support (DONE — 2026-05-24)
 
-Right now the bot is single-tenant — one Hyperliquid account, one `.env`, one
-dashboard. To let multiple people use it with their own accounts and private data:
+Live on VPS with `MULTI_USER=true`. Each user registers at `bot.garlic-trading.net`,
+enters their own HL credentials, and runs their own isolated bots. See CLAUDE.md
+for architecture details.
+
+---
+
+## ▶ Phase C — Next improvements
 
 ### What needs to change
 
