@@ -243,6 +243,32 @@ export default function BacktesterPage({
             onReload={() => setReloadKey((k) => k + 1)}
           />
         </div>
+
+        {result && (
+          <div className="card p-4">
+            <p className="mb-1 text-xs font-semibold text-text">Deploy as Signal Bot</p>
+            <p className="mb-3 text-[11px] text-dim leading-relaxed">
+              Run this strategy live on Hyperliquid with your current settings.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                sessionStorage.setItem('pending_signal_bot_config', JSON.stringify({
+                  asset: symbol.replace(/USDT$/, ''),
+                  strategy: strategyId,
+                  timeframe,
+                  params,
+                  direction,
+                }))
+                navigate('/signal')
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+            >
+              <Rocket className="h-4 w-4" />
+              Deploy
+            </button>
+          </div>
+        )}
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-4">
@@ -316,32 +342,6 @@ export default function BacktesterPage({
               direction={direction}
               symbol={symbol.replace(/USDT$/, '/USDT')}
             />
-            {/* ── Deploy to live trading ── */}
-            <div className="card flex items-center justify-between gap-4 p-4">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-text">Deploy as Signal Bot</p>
-                <p className="text-xs text-dim">
-                  Run this strategy live on Hyperliquid with your current settings.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  sessionStorage.setItem('pending_signal_bot_config', JSON.stringify({
-                    asset: symbol.replace(/USDT$/, ''),
-                    strategy: strategyId,
-                    timeframe,
-                    params,
-                    direction,
-                  }))
-                  navigate('/signal')
-                }}
-                className="flex shrink-0 items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
-              >
-                <Rocket className="h-4 w-4" />
-                Deploy
-              </button>
-            </div>
           </>
         ) : (
           !loading &&
