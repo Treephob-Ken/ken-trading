@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Download, ExternalLink, Zap, BarChart2 } from 'lucide-react'
+import { Download, ExternalLink, Zap, BarChart2, FileJson } from 'lucide-react'
 import type { Candle } from '@/types'
 import { fetchKlines, type SymbolInfo } from '@/lib/binance'
 import {
@@ -160,9 +160,10 @@ export default function GridPage({
     return { analysis: a, ...isGoodForGrid(a.currentLabel) }
   }, [bars])
 
-  // ── export ───────────────────────────────────────────────────────────────────
+  // ── active lines ─────────────────────────────────────────────────────────────
   const activeLines = pageMode === 'auto' ? autoDisplayLines : displayLines
 
+  // ── export: bot config ───────────────────────────────────────────────────────
   function exportConfig() {
     if (activeLines.length < 2) return
     const asset = symbol.replace(/USDT$/, '')
@@ -188,15 +189,50 @@ export default function GridPage({
     void activeFeePct
   }
 
-  const canExport = activeLines.length >= 2
+  // ── export: raw grid lines ───────────────────────────────────────────────────
+  function exportLines() {
+    if (activeLines.length < 2) return
+    const asset = symbol.replace(/USDT$/, '')
+    const spacingPct =
+      pageMode === 'static'
+        ? staticResult?.best.spacingPct ?? 0
+        : autoResult && autoResult.currentLines.length >= 2
+          ? ((autoResult.currentLines[1] - autoResult.currentLines[0]) / autoResult.currentLines[0]) * 100
+          : 0
+    const data = {
+      symbol,
+      asset,
+      timeframe,
+      generatedAt: new Date().toISOString(),
+      mode: pageMode === 'static' ? mode : 'arithmetic',
+      gridType: pageMode === 'static' ? gridType : 'neutral',
+      anchor: pageMode === 'static' ? staticResult?.anchor : autoResult?.currentAP,
+      gridCount: activeLines.length - 1,
+      spacingPct: +spacingPct.toFixed(4),
+      lower: +activeLines[0].price.toFixed(6),
+      upper: +activeLines[activeLines.length - 1].price.toFixed(6),
+      lines: activeLines.map((l, i) => ({
+        index: i,
+        price: +l.price.toFixed(6),
+        kind: l.kind,
+      })),
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `grid-lines.${asset.toLowerCase()}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
 
-      {/* ── Sidebar ── */}
-      <aside className="card relative z-[35] h-fit w-full shrink-0 p-4 lg:sticky lg:top-5 lg:w-[300px]">
+      {/* ── LEFT: Controls sidebar — mirrors Backtester aside exactly ───────── */}
+      <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:sticky lg:top-5 lg:max-h-[calc(100vh-40px)] lg:w-[300px] lg:overflow-y-auto lg:overflow-x-hidden lg:pr-1">
+
         {/* Mode toggle */}
-        <div className="mb-4">
+        <div className="card p-4">
           <p className="label mb-2">Grid Mode</p>
           <div className="flex rounded-xl border border-border bg-bg p-1 gap-1">
             <button
@@ -220,52 +256,55 @@ export default function GridPage({
           </div>
         </div>
 
-        {pageMode === 'static' ? (
-          <GridControls
-            symbol={symbol}
-            symbols={symbols}
-            timeframe={timeframe}
-            lookback={lookback}
-            mode={mode}
-            gridType={gridType}
-            minGrids={minGrids}
-            maxGrids={maxGrids}
-            feePct={feePct}
-            investment={investment}
-            reanchor={reanchor}
-            loading={loading}
-            canExport={canExport}
-            onSymbol={onSymbol}
-            onTimeframe={onTimeframe}
-            onLookback={setLookback}
-            onMode={setMode}
-            onGridType={setGridType}
-            onMinGrids={setMinGrids}
-            onMaxGrids={setMaxGrids}
-            onFee={setFeePct}
-            onInvestment={setInvestment}
-            onReanchor={setReanchor}
-            onReload={() => setReloadKey((k) => k + 1)}
-            onExport={exportConfig}
-          />
-        ) : (
-          <AutoControls
-            symbol={symbol}
-            symbols={symbols}
-            timeframe={timeframe}
-            params={autoParams}
-            onSymbol={onSymbol}
-            onTimeframe={onTimeframe}
-            onParam={(k, v) => setAutoParams((p) => ({ ...p, [k]: v }))}
-            onReload={() => setReloadKey((k) => k + 1)}
-          />
-        )}
+        {/* Controls */}
+        <div className="card p-4">
+          {pageMode === 'static' ? (
+            <GridControls
+              symbol={symbol}
+              symbols={symbols}
+              timeframe={timeframe}
+              lookback={lookback}
+              mode={mode}
+              gridType={gridType}
+              minGrids={minGrids}
+              maxGrids={maxGrids}
+              feePct={feePct}
+              investment={investment}
+              reanchor={reanchor}
+              loading={loading}
+              canExport={false}
+              onSymbol={onSymbol}
+              onTimeframe={onTimeframe}
+              onLookback={setLookback}
+              onMode={setMode}
+              onGridType={setGridType}
+              onMinGrids={setMinGrids}
+              onMaxGrids={setMaxGrids}
+              onFee={setFeePct}
+              onInvestment={setInvestment}
+              onReanchor={setReanchor}
+              onReload={() => setReloadKey((k) => k + 1)}
+              onExport={exportConfig}
+            />
+          ) : (
+            <AutoControls
+              symbol={symbol}
+              symbols={symbols}
+              timeframe={timeframe}
+              params={autoParams}
+              onSymbol={onSymbol}
+              onTimeframe={onTimeframe}
+              onParam={(k, v) => setAutoParams((p) => ({ ...p, [k]: v }))}
+              onReload={() => setReloadKey((k) => k + 1)}
+            />
+          )}
+        </div>
       </aside>
 
-      {/* ── Main content — Z-order: regime → chart → stats → sweep/auto → deploy ── */}
+      {/* ── RIGHT: Analysis + Deploy ─────────────────────────────────────────── */}
       <section className="flex min-w-0 flex-1 flex-col gap-4">
 
-        {/* 1. Regime banner — "Is grid trading safe right now?" */}
+        {/* 1. Regime banner */}
         {regimeFit && (
           <div
             className={`card flex items-center gap-3 border-l-4 p-3 ${
@@ -292,7 +331,7 @@ export default function GridPage({
           </div>
         )}
 
-        {/* 2. Chart — "What does my grid look like?" */}
+        {/* 2. Chart */}
         <div className="card p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-text">
@@ -320,17 +359,13 @@ export default function GridPage({
           )}
         </div>
 
-        {/* 3–5: Stats + secondary cards */}
+        {/* 3–4. Stats / sweep / auto info + Deploy card side-by-side */}
         {pageMode === 'static' && staticResult ? (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-            {/* Left: stats → sweep */}
             <div className="flex flex-col gap-4">
-              {/* 3. Stats — "How did it perform?" */}
               <GridStats result={staticResult} windowBars={bars.length} timeframe={timeframe} candles={bars} />
-              {/* 4. Sweep — "Which grid count is the sweet spot?" */}
               <SweepChart result={staticResult} />
             </div>
-            {/* Right: deploy */}
             <DeployCard
               lines={displayLines}
               symbol={symbol}
@@ -355,18 +390,15 @@ export default function GridPage({
               feePct={feePct}
               spacingPct={staticResult.best.spacingPct}
               onExport={exportConfig}
+              onExportLines={exportLines}
             />
           </div>
         ) : pageMode === 'auto' && autoResult ? (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-            {/* Left: auto grid info + recent signals */}
             <div className="flex flex-col gap-4">
-              {/* 3. Auto grid state — "Where is the grid anchored?" */}
               <AutoGridInfo result={autoResult} symbol={symbol} params={autoParams} />
-              {/* 4. Recent signals — "What signals has it generated?" */}
               <AutoSignalLog result={autoResult} candles={candles} />
             </div>
-            {/* Right: deploy */}
             <DeployCard
               lines={autoDisplayLines}
               symbol={symbol}
@@ -395,6 +427,7 @@ export default function GridPage({
                   : 0
               }
               onExport={exportConfig}
+              onExportLines={exportLines}
             />
           </div>
         ) : (
@@ -658,7 +691,7 @@ function DeployCard({
   botName, onBotName, investment, onInvestment, leverage, onLeverage,
   slPct, onSlPct, tpPct, onTpPct, useTrigger, onUseTrigger,
   useManualSize, onUseManualSize, manualSize, onManualSize,
-  feePct, spacingPct, onExport,
+  feePct, spacingPct, onExport, onExportLines,
 }: {
   lines: GridLine[]
   symbol: string
@@ -683,6 +716,7 @@ function DeployCard({
   feePct: number
   spacingPct: number
   onExport: () => void
+  onExportLines: () => void
 }) {
   if (lines.length < 2) return null
   const asset = symbol.replace(/USDT$/, '')
@@ -786,21 +820,39 @@ function DeployCard({
           </label>
         </div>
 
-        <button
-          onClick={onExport}
-          className="btn-primary w-full justify-center py-2.5"
-        >
-          <Download className="h-4 w-4" />
-          Download grid.config.json
-        </button>
+        {/* Two download buttons */}
+        <div className="flex flex-col gap-2">
+          {/* PRIMARY — the file the bot dashboard accepts */}
+          <div>
+            <button
+              onClick={onExport}
+              className="btn-primary w-full justify-center py-2.5"
+            >
+              <Download className="h-4 w-4" />
+              Download for Bot (grid.config.json)
+            </button>
+            <p className="mt-1 text-center text-[11px] text-dim">
+              Drop this in the{' '}
+              <a href="https://bot.garlic-trading.net" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
+                Bot Dashboard <ExternalLink className="h-3 w-3" />
+              </a>
+            </p>
+          </div>
 
-        <p className="text-center text-xs text-dim">
-          Then open the{' '}
-          <a href="http://localhost:3001" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
-            Bot Dashboard <ExternalLink className="h-3 w-3" />
-          </a>
-          {' '}and drop the file there.
-        </p>
+          {/* SECONDARY — reference only, not for the bot */}
+          <div>
+            <button
+              onClick={onExportLines}
+              className="btn-ghost w-full justify-center py-2 gap-2 text-xs"
+            >
+              <FileJson className="h-3.5 w-3.5" />
+              Export Line Prices (grid-lines.json)
+            </button>
+            <p className="text-center text-[11px] text-dim">
+              All grid prices — for TradingView / manual reference only
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )
