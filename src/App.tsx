@@ -5,9 +5,10 @@ import Sidebar from '@/components/Sidebar'
 import BacktesterPage from '@/pages/BacktesterPage'
 import GridPage from '@/pages/GridPage'
 import LoginPage from '@/pages/LoginPage'
-import ComingSoonPage from '@/pages/ComingSoonPage'
 import SignalBotsPage from '@/pages/SignalBotsPage'
 import GridBotsPage from '@/pages/GridBotsPage'
+import TradePage from '@/pages/TradePage'
+import LogsPage from '@/pages/LogsPage'
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -76,10 +77,10 @@ export default function App() {
           <Route path="bots" element={<GridBotsPage />} />
 
           {/* Phase 5 — Trade */}
-          <Route path="trade" element={<ComingSoonPage label="Trade" />} />
+          <Route path="trade" element={<TradePage />} />
 
           {/* Phase 5 — Logs */}
-          <Route path="logs" element={<ComingSoonPage label="Logs" />} />
+          <Route path="logs" element={<LogsPage />} />
 
           {/* Catch-all → backtest */}
           <Route path="*" element={<Navigate to="/backtest" replace />} />
