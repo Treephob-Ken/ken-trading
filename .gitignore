@@ -37,6 +37,7 @@ results/
 # Backtest plot output
 *.html
 !bot/dashboard/index.html
+!bot/public/index.html
 
 # Coverage
 .coverage
