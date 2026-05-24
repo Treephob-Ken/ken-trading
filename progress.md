@@ -787,3 +787,63 @@ function refreshChartFromForm() {
 - Close trades are recorded to the trade journal (reduce-only closes)
 - SL bracket (`slPct`) placed on every opening trade, never on closes
 - TypeScript strict build passes (`npm run build` clean)
+
+---
+
+### 2026-05-24 — Full-site consolidation (Phases 1–5) on branch `full-site`
+
+**Goal:** Merge `garlic-trading.vercel.app` (React analytics) and `bot.garlic-trading.net` (vanilla dashboard) into a single React SPA served by the Express bot server.
+
+#### Phase 1 — Foundation (committed earlier)
+- `vite.config.ts`: `build.outDir: 'bot/public'`, dev proxy `/api` + `/auth` → `localhost:3001`
+- `bot/src/server.ts`: serves `bot/public/` as static files; SPA catch-all fallback (`*` → `index.html`, skipping `/api` + `/auth`); `/legacy` route serves old vanilla dashboard
+- `src/contexts/AuthContext.tsx`: JWT at `localStorage('auth_jwt')` (same key as vanilla); `apiFetch()` helper attaches `Bearer` header, redirects to `/login` on 401; `AuthProvider` handles 404=single-tenant, 401=not logged in, 200=authed
+- `src/pages/LoginPage.tsx`: Sign In / Register tabs, posts to `/auth/login` + `/auth/register`, stores token, navigates to `/backtest`
+- `src/components/Sidebar.tsx`: rewrote with `useLocation`/`useNavigate`, 6 nav items, logout button
+- `src/App.tsx`: React Router v7 with `BrowserRouter` + `AuthProvider` + `AppShell` + 6 routes
+
+#### Phase 2 — Analytics integration (committed earlier)
+- `src/lib/hlAssets.ts`: `useHLAssets()` hook fetches HL asset list from `/api/assets` (with JWT); module-level cache
+- `BacktesterPage` + `GridPage`: symbol picker now uses HL assets via `useHLAssets()` instead of Binance `fetchSymbols()`
+- `BacktesterPage`: added "Deploy as Signal Bot" button → stores `pending_signal_bot_config` in `sessionStorage` → navigates to `/signal`
+- `GridPage`: replaced Export JSON buttons with "Deploy as Grid Bot" → `POST /api/bots` → navigate to `/bots?select=<id>`; removed `exportLines()` function
+
+#### Phase 3 — Signal Bots page
+- New `src/pages/SignalBotsPage.tsx` replaces `SignalTraderPage.tsx`
+- Multi-bot sidebar (list + New Bot), config form (asset from HL, strategy/timeframe/params/size/direction/TP/SL), save/start/stop/delete
+- `SignalChart` sub-component: LW Charts v5 candlestick + `createSeriesMarkers` for trade arrows
+- `ManualTradeCard`: buy/sell buttons posting to `/api/order`
+- Reads `sessionStorage('pending_signal_bot_config')` on mount for Backtester pre-fill
+- Polls `/api/signal/bots/:id` every 5s
+
+#### Phase 4 — Grid Bots page
+- New `src/pages/GridBotsPage.tsx` ports vanilla grid bot tab
+- Config: asset/lower/upper/gridCount/mode/timeframe, direct sizing (budget+leverage or order size), risk-mode auto-sizing (riskUsd + slPct → margin/leverage/SL-TP prices)
+- `GridBotChart` sub-component: LW Charts v5 with grid price lines + SL/TP levels, `fetchKlines` for candle data
+- Live stats panel (P&L/roundtrips/orders/fees), safety panel (SL/TP distances + liq price), activity log
+- `?select=<id>` URL param deep-link from Grid Optimizer deploy
+- Polls `/api/bots/:id/stats` every 5s
+
+#### Phase 5 — Trade + Logs pages
+- New `src/pages/TradePage.tsx`: account card (equity/withdrawable/margin), open positions list with close buttons, Place Order form (asset search, slippage, USDC amount, quick-size 25/50/75/Max, order preview), Position Calculator (risk$+SL%→qty/margin/SL prices), buy/sell via `/api/order`
+- New `src/pages/LogsPage.tsx`: SSE via `EventSource('/api/logs/stream?token=<jwt>')`, level filters (All/Fills/Issues/Info), bot filters (auto-populated), auto-scroll with jump button, 2000-line ring buffer
+
+#### Cleanup
+- Deleted `src/pages/SignalTraderPage.tsx` (replaced by `SignalBotsPage.tsx`)
+- Deleted `src/pages/ComingSoonPage.tsx` (all routes now live)
+- Deleted `src/lib/env.ts` (bot URL/token logic no longer needed — same-origin)
+
+**Gotchas:**
+- `outDir: 'bot/public'` is relative to project root (where `vite.config.ts` lives), NOT `'../bot/public'` which would place files in `c:\Users\ken25\bot\public\`
+- LW Charts v5: `chart.addSeries(CandlestickSeries)` not `chart.addCandlestickSeries()`; markers via `createSeriesMarkers()` plugin
+- SSE EventSource can't send headers — JWT goes in `?token=<jwt>` query param
+- `/api/assets` returns short names `['ETH', 'BTC', ...]` not `'ETHUSDT'` — `useHLAssets()` pads to full symbol for Binance candle fetching
+- `POST /api/bots` body: `investment` not `riskUsd`; `stopLossPrice`/`takeProfitPrice` as absolute prices not percentages
+- Build output CSS slightly smaller after `env.ts` removal (no unused `VITE_BOT_URL` reference)
+
+**Next: Phase 6 (decommission)**
+- Deploy `full-site` branch to VPS: `git pull && npm run build && pm2 restart trading-bot`
+- Smoke-test all 6 routes at `bot.garlic-trading.net`
+- `/legacy` stays until parity confirmed; then remove it
+- After Vercel project deleted: remove `ALLOWED_ORIGINS=garlic-trading.vercel.app` from VPS `.env`
+- Update `CLAUDE.md` architecture section
