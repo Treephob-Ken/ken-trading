@@ -376,6 +376,44 @@
     .preview-box b { color: var(--text); }
 
     /* ══════════════════════════════════════════════════════
+       POSITION SIZING RESULT CARD
+    ══════════════════════════════════════════════════════ */
+    .sizing-result {
+      border: 1px solid var(--border-med); border-radius: var(--r-md);
+      overflow: hidden; margin-top: var(--s3);
+    }
+    .sizing-result-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: var(--s2) var(--s3) var(--s2) var(--s3);
+      background: var(--brand-bg); border-bottom: 1px solid var(--brand-border);
+    }
+    .sizing-result-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
+      color: var(--brand-soft); font-weight: 700;
+    }
+    .sizing-result-value {
+      font-size: 22px; font-weight: 800; color: var(--text);
+      font-family: 'JetBrains Mono', monospace; letter-spacing: -.5px;
+    }
+    .sizing-result-rows {
+      padding: var(--s2) var(--s3); display: flex; flex-direction: column; gap: 6px;
+      background: var(--surface-3);
+    }
+    .sizing-result-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; font-family: 'JetBrains Mono', monospace;
+    }
+    .sizing-result-key { color: var(--text-dim); }
+    .sizing-result-val { color: var(--text); font-weight: 600; }
+    .sizing-result-val.sl { color: var(--loss-light); }
+    .sizing-empty {
+      background: var(--bg-raised); border: 1px dashed var(--border);
+      border-radius: var(--r-md); padding: var(--s3);
+      font-size: 11px; color: var(--text-dim); text-align: center; margin-top: var(--s3);
+    }
+    .sizing-empty b { color: var(--text); }
+
+    /* ══════════════════════════════════════════════════════
        BANNER (Signal Trader)
     ══════════════════════════════════════════════════════ */
     .bot-banner {
@@ -1320,14 +1358,53 @@
               <label>Risk per Trade ($)</label>
               <input id="st-risk-usd" type="number" min="1" step="any" placeholder="e.g. 50" oninput="scheduleSignalSizingPreview()" />
             </div>
-            <div class="field" style="display:flex;align-items:flex-end">
-              <div id="st-max-lev-info" style="font-size:11px;color:var(--text-dim);padding-bottom:9px">Max leverage: —</div>
+            <div class="field">
+              <label>Stop Loss % <span style="font-size:9px;color:var(--text-dim)">(sizing + SL order)</span></label>
+              <input id="st-sl-pct" type="number" min="0.1" max="100" step="0.1" placeholder="e.g. 2" oninput="scheduleSignalSizingPreview();updateSLPreview()" />
             </div>
           </div>
-          <div class="field"><label>Override Order Size (coins)</label><input id="st-size" type="number" step="any" placeholder="(optional manual override)" oninput="scheduleSignalSizingPreview()" /></div>
+
+          <!-- Result card — shown when Risk + SL are filled -->
+          <div id="st-sizing-card" class="sizing-result" style="display:none">
+            <div class="sizing-result-header">
+              <span class="sizing-result-label">Position Size</span>
+              <span class="sizing-result-value" id="st-res-pos-usd">—</span>
+            </div>
+            <div class="sizing-result-rows">
+              <div class="sizing-result-row">
+                <span class="sizing-result-key">Order Qty</span>
+                <span class="sizing-result-val" id="st-res-qty">—</span>
+              </div>
+              <div class="sizing-result-row">
+                <span class="sizing-result-key">Max Leverage</span>
+                <span class="sizing-result-val" id="st-res-maxlev">—</span>
+              </div>
+              <div class="sizing-result-row">
+                <span class="sizing-result-key">Margin at max lev</span>
+                <span class="sizing-result-val" id="st-res-margin">—</span>
+              </div>
+              <div class="sizing-result-row">
+                <span class="sizing-result-key">SL price (Long / Short)</span>
+                <span class="sizing-result-val sl" id="st-res-sl">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Empty state -->
+          <div id="st-sizing-empty" class="sizing-empty">
+            Enter <b>Risk $</b> + <b>Stop Loss %</b> above to see position size
+          </div>
+
+          <!-- Manual override (optional) -->
+          <div class="field" style="margin-top:var(--s3)">
+            <label>Override Order Size <span style="font-size:9px;color:var(--text-dim)">(optional, skips risk calc)</span></label>
+            <input id="st-size" type="number" step="any" placeholder="e.g. 0.01 ETH" oninput="scheduleSignalSizingPreview()" />
+          </div>
+
           <!-- Hidden legacy fields kept for backward-compat on bots created before risk mode -->
           <input id="st-investment" type="hidden" /><input id="st-leverage" type="hidden" />
-          <div id="st-sizing-preview" class="preview-box">Set risk per trade + stop loss % to preview position size…</div>
+          <!-- Hidden: old preview box replaced by card above; kept so any lingering refs don't crash -->
+          <div id="st-sizing-preview" style="display:none"></div>
 
           <div class="card-divider"></div>
 
@@ -1351,15 +1428,8 @@
               <input id="st-daily-loss" type="number" min="0.5" max="50" step="0.5" placeholder="off (no limit)" oninput="scheduleSave()" />
             </div>
           </div>
-          <div class="field-row">
-            <div class="field">
-              <label>Stop Loss %</label>
-              <input id="st-sl-pct" type="number" min="0.1" max="100" step="0.1" placeholder="off (no SL)" oninput="scheduleSignalSizingPreview();updateSLPreview()" />
-            </div>
-            <div class="field" id="st-sl-preview-wrap" style="display:flex;align-items:flex-end">
-              <div id="st-sl-preview" style="font-size:11px;color:var(--text-dim);padding-bottom:9px">Est. SL price shown after entry</div>
-            </div>
-          </div>
+          <!-- st-sl-pct moved to Position Sizing section above; st-sl-preview kept hidden for JS compat -->
+          <div id="st-sl-preview" style="display:none"></div>
           <div class="field-row" style="align-items:center;margin-top:var(--s1)">
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text)">
               <input type="checkbox" id="st-mtf-enabled" onchange="toggleMTF();scheduleSave()" style="width:14px;height:14px;margin:0;accent-color:var(--brand)">
@@ -2501,39 +2571,70 @@
 
   function scheduleSignalSizingPreview() { clearTimeout(stSizingTimer); stSizingTimer = setTimeout(updateSignalSizingPreview, 300); scheduleSave() }
 
+  function showSizingCard(show) {
+    const card = $('st-sizing-card'), empty = $('st-sizing-empty')
+    if (card)  card.style.display  = show ? '' : 'none'
+    if (empty) empty.style.display = show ? 'none' : ''
+  }
+
   async function updateSignalSizingPreview() {
-    const box = $('st-sizing-preview'); if (!box) return
     const riskUsd = parseFloat($('st-risk-usd')?.value)
     const slPct   = parseFloat($('st-sl-pct')?.value)
-    const sz       = parseFloat($('st-size')?.value)
-    const asset    = (stCurrencyCombo?.getValue() || $('st-asset')?.value || '').toUpperCase()
+    const sz      = parseFloat($('st-size')?.value)
+    const asset   = (stCurrencyCombo?.getValue() || $('st-asset')?.value || '').toUpperCase()
 
-    // Manual override takes priority over risk mode
+    // Manual override — show a simple card with notional
     if (sz > 0) {
-      const priceHint = stCurrentPrice ? ` ≈ <b>$${(sz * stCurrentPrice).toFixed(2)}</b> notional` : ''
-      box.innerHTML = `Manual size <b>${sz}</b> ${asset}${priceHint} <span style="color:var(--text-dim)">(override)</span>`
+      showSizingCard(true)
+      if ($('st-res-pos-usd')) $('st-res-pos-usd').textContent = stCurrentPrice ? `$${(sz * stCurrentPrice).toFixed(0)}` : '—'
+      if ($('st-res-qty'))     $('st-res-qty').textContent     = `${sz} ${asset} (manual)`
+      if ($('st-res-maxlev'))  $('st-res-maxlev').textContent  = stMaxLeverage ? `${stMaxLeverage}×` : '—'
+      if ($('st-res-margin'))  $('st-res-margin').textContent  = (stCurrentPrice && stMaxLeverage) ? `$${((sz * stCurrentPrice) / stMaxLeverage).toFixed(2)}` : '—'
+      if ($('st-res-sl'))      $('st-res-sl').textContent      = '—'
       return
     }
 
-    if (!(riskUsd > 0)) { box.innerHTML = 'Enter <b>Risk per Trade ($)</b> + <b>Stop Loss %</b> to preview position size…'; return }
+    // Need at least risk to show the card
+    if (!(riskUsd > 0) || !(slPct > 0)) { showSizingCard(false); return }
 
-    // Fetch current price if we don't have it
+    // Fetch price from Binance if we don't have it from asset-info
     if (asset && !stCurrentPrice) {
-      try { const r = await fetch(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${asset}USDT`); if (r.ok) { const d = await r.json(); stCurrentPrice = parseFloat(d.price) } } catch {}
-    }
-
-    if (!(slPct > 0)) {
-      box.innerHTML = `Risk <b>$${riskUsd}</b> — set <b>Stop Loss %</b> to calculate position size`
-      return
+      try {
+        const r = await fetch(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${asset}USDT`)
+        if (r.ok) { const d = await r.json(); stCurrentPrice = parseFloat(d.price) }
+      } catch {}
     }
 
     const positionUsd = riskUsd / (slPct / 100)
+    showSizingCard(true)
+
+    // Position $ — always computable
+    if ($('st-res-pos-usd')) $('st-res-pos-usd').textContent = `$${positionUsd.toLocaleString('en', {maximumFractionDigits: 0})}`
+
+    // Qty — needs price
     if (stCurrentPrice) {
-      const estSize = positionUsd / stCurrentPrice
-      const maxLev  = stMaxLeverage || '—'
-      box.innerHTML = `Position <b>$${positionUsd.toFixed(0)}</b> = <b>$${riskUsd}</b> risk / <b>${slPct}%</b> SL<br>Est. size ≈ <b>${estSize.toFixed(6)}</b> ${asset} <span style="color:var(--text-dim)">(at $${stCurrentPrice.toFixed(2)})</span> · Max lev: <b>${maxLev}x</b>`
+      const qty = positionUsd / stCurrentPrice
+      if ($('st-res-qty')) $('st-res-qty').textContent = `${qty.toFixed(6)} ${asset}`
     } else {
-      box.innerHTML = `Position <b>$${positionUsd.toFixed(0)}</b> = <b>$${riskUsd}</b> risk / <b>${slPct}%</b> SL<br><span style="color:var(--text-dim)">Select a currency to see estimated size</span>`
+      if ($('st-res-qty')) $('st-res-qty').textContent = `Select currency for qty`
+    }
+
+    // Max leverage & margin
+    if (stMaxLeverage) {
+      if ($('st-res-maxlev')) $('st-res-maxlev').textContent = `${stMaxLeverage}×`
+      if ($('st-res-margin')) $('st-res-margin').textContent = `$${(positionUsd / stMaxLeverage).toFixed(2)}`
+    } else {
+      if ($('st-res-maxlev')) $('st-res-maxlev').textContent = '—'
+      if ($('st-res-margin')) $('st-res-margin').textContent = '—'
+    }
+
+    // SL prices — needs price
+    if (stCurrentPrice) {
+      const slLong  = (stCurrentPrice * (1 - slPct / 100)).toLocaleString('en', {maximumFractionDigits: 4})
+      const slShort = (stCurrentPrice * (1 + slPct / 100)).toLocaleString('en', {maximumFractionDigits: 4})
+      if ($('st-res-sl')) $('st-res-sl').textContent = `$${slLong}  /  $${slShort}`
+    } else {
+      if ($('st-res-sl')) $('st-res-sl').textContent = `−${slPct}% / +${slPct}% from entry`
     }
   }
 
@@ -2943,12 +3044,17 @@
     ;['st-mode-single','st-mode-ensemble'].forEach(id => { const el = $(id); if (el) el.disabled = lock })
     if (!lock) toggleMTF()
     const hint = $('st-running-hint'); if (hint) hint.style.display = lock ? 'block' : 'none'
-    const preview = $('st-sizing-preview')
     if (lock && s.computedSize != null) {
-      const rInfo = s.config?.riskUsd && s.config?.slPct
-        ? ` · $${s.config.riskUsd} risk / ${s.config.slPct}% SL`
-        : ''
-      preview.innerHTML = `Effective size <b>${Number(s.computedSize).toFixed(6)}</b> ${s.config?.asset || ''} per trade${rInfo} <span style="color:var(--text-dim)">(computed at start)</span>`
+      // Bot is running — show the computed size in the card
+      const asset = s.config?.asset || ''
+      const price = stCurrentPrice
+      const posUsd = price ? s.computedSize * price : null
+      showSizingCard(true)
+      if ($('st-res-pos-usd')) $('st-res-pos-usd').textContent = posUsd ? `$${posUsd.toLocaleString('en',{maximumFractionDigits:0})}` : '—'
+      if ($('st-res-qty'))     $('st-res-qty').textContent     = `${Number(s.computedSize).toFixed(6)} ${asset} · locked`
+      if ($('st-res-maxlev'))  $('st-res-maxlev').textContent  = stMaxLeverage ? `${stMaxLeverage}×` : '—'
+      if ($('st-res-margin'))  $('st-res-margin').textContent  = (posUsd && stMaxLeverage) ? `$${(posUsd / stMaxLeverage).toFixed(2)}` : '—'
+      if ($('st-res-sl'))      $('st-res-sl').textContent      = s.config?.slPct ? `${s.config.slPct}% from fill price` : '—'
     }
     else if (!lock) { updateSignalSizingPreview() }
   }
