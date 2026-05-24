@@ -658,3 +658,36 @@ Internet → Cloudflare Edge → Cloudflare Tunnel (cloudflared, pm2) → localh
 - `updateSLPreview` now uses `stCurrentPrice` (set by asset-info fetch) instead of scraping a DOM element.
 
 **Gotcha:** Risk mode requires SL% to be set — `collectSignalConfig` enforces this and shows a clear error if the user tries to start without it.
+
+---
+
+## 2026-05-24 — Signal chart auto-refresh on currency/strategy/timeframe change
+
+**Problem:** When a signal bot was selected and the user changed the asset (currency picker), strategy, or timeframe in the form, the chart stayed on the old symbol/indicator. The chart only re-initialized when `selectSignalBot()` was called (i.e. when selecting a different bot from the list).
+
+**Root cause:** `onCurrencyPicked`, `onStrategyChanged`, and the timeframe change handler all triggered `scheduleSave()` but never called `initSignalChart()`.
+
+**Fix (`bot/dashboard/index.html`):**
+
+Added `stChartRefreshTimer` variable and a `scheduleChartRefresh()` function — a debounced wrapper (800 ms, longer than the 450 ms `scheduleSave` debounce) that re-invokes `initSignalChart` with a cfg built from the current form values:
+
+```javascript
+function scheduleChartRefresh() {
+  if (!stSelectedId) return
+  clearTimeout(stChartRefreshTimer)
+  stChartRefreshTimer = setTimeout(async () => {
+    const asset   = stCurrencyCombo?.getValue() || $('st-asset')?.value || 'ETH'
+    const tf      = $('st-timeframe')?.value || '1h'
+    const stratId = stSignalMode === 'ensemble' ? 'ensemble' : (stStrategyCombo?.getValue() || 'macd')
+    const cfg = { asset: asset.toUpperCase(), symbol: asset.toUpperCase() + 'USDT', timeframe: tf, strategyId: stratId }
+    await initSignalChart(cfg, _signalTrades, stSelectedId)
+  }, 800)
+}
+```
+
+Called from:
+- `onCurrencyPicked` — after `scheduleSave()`
+- `onStrategyChanged` — after `scheduleSave()`
+- `wireAutoSave` timeframe `change` handler — alongside `maybeUpdateAutoName()`
+
+**Timing rationale:** 800 ms delay ensures `scheduleSave`'s 450 ms has already fired, the server has saved the new config, and `/api/signal/bots/:id/chart-data` returns indicator data computed from the updated config.

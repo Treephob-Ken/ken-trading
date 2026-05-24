@@ -1092,7 +1092,15 @@
         <div style="display:flex;flex-direction:column;gap:var(--s2)">
           <div class="field-row" style="grid-template-columns:2fr 1fr">
             <div class="field"><label>Display Name</label><input id="f-name" type="text" placeholder="ETH Neutral Grid" /></div>
-            <div class="field"><label>Asset</label><input id="f-asset" type="text" placeholder="ETH" /></div>
+            <div class="field">
+              <label>Asset</label>
+              <div class="combo" id="gb-currency-combo">
+                <input class="combo-input" type="text" placeholder="Search assets…" autocomplete="off" />
+                <div class="combo-caret">▼</div>
+                <div class="combo-list"></div>
+              </div>
+              <input id="f-asset" type="hidden" />
+            </div>
           </div>
           <div class="field-row">
             <div class="field"><label>Lower</label><input id="f-lower" type="number" step="any" oninput="updateSizingPreview()" /></div>
@@ -2253,7 +2261,21 @@
   // ════════════════════════════════════════════════════════
   let selectedBotId = null, bots = [], gridAutoScroll = true, gridActiveFilter = 'all', gridLogCount = 0
   const gridLogBox = () => $('log-box'), gridJumpBtn = () => $('jump-btn')
+  let gbCurrencyCombo = null
+
+  function initGridPage() {
+    if (gbCurrencyCombo) return   // already done
+    gbCurrencyCombo = createCombo('gb-currency-combo', (asset) => {
+      $('f-asset').value = asset
+      updateSizingPreview()
+    })
+    fetch('/api/assets').then(r => r.json()).then(assets => {
+      gbCurrencyCombo.setItems((Array.isArray(assets) ? assets : []).map(a => ({ value: a, label: a })))
+    }).catch(() => {})
+  }
+
   async function loadBots() {
+    initGridPage()
     const r = await fetch('/api/bots'); bots = await r.json()
     renderBotList()
     if (selectedBotId && bots.find(b => b.id === selectedBotId)) updateSelectedRunningState()
@@ -2316,7 +2338,8 @@
   }
 
   function getFormConfig() {
-    const cfg = { id: selectedBotId, name: $('f-name').value.trim() || undefined, asset: $('f-asset').value.trim().toUpperCase(), lower: parseFloat($('f-lower').value), upper: parseFloat($('f-upper').value), gridCount: parseInt($('f-count').value), mode: $('f-mode').value }
+    const asset = (gbCurrencyCombo?.getValue() || $('f-asset').value.trim()).toUpperCase()
+    const cfg = { id: selectedBotId, name: $('f-name').value.trim() || undefined, asset, lower: parseFloat($('f-lower').value), upper: parseFloat($('f-upper').value), gridCount: parseInt($('f-count').value), mode: $('f-mode').value }
     const num = (id) => { const n = parseFloat($(id).value); return isNaN(n) ? undefined : n }
     const inv = num('f-investment'); if (inv > 0) cfg.investment = inv
     const lev = num('f-leverage');   if (lev >= 1) cfg.leverage = lev
@@ -2328,7 +2351,10 @@
   }
 
   function renderFormFromConfig(cfg) {
-    $('f-name').value = cfg.name || ''; $('f-asset').value = cfg.asset || ''
+    $('f-name').value = cfg.name || ''
+    const asset = (cfg.asset || '').toUpperCase()
+    $('f-asset').value = asset
+    if (gbCurrencyCombo) gbCurrencyCombo.setValue(asset)
     $('f-lower').value = cfg.lower ?? ''; $('f-upper').value = cfg.upper ?? ''
     $('f-count').value = cfg.gridCount ?? ''; $('f-mode').value = cfg.mode || 'arithmetic'
     $('f-investment').value = cfg.investment ?? ''; $('f-leverage').value = cfg.leverage ?? ''
@@ -2588,6 +2614,16 @@
   }
 
   let stCurrentPrice = null, stSizingTimer = null, stMaxLeverage = null, stBotNameIsAuto = false
+  // Build a cfg snapshot from the current form values and re-initialise the signal chart.
+  // Call AFTER the PUT save has confirmed so server chart-data returns the new symbol/indicators.
+  function refreshChartFromForm() {
+    if (!stSelectedId) return
+    const asset   = stCurrencyCombo?.getValue() || $('st-asset')?.value || 'ETH'
+    const tf      = $('st-timeframe')?.value || '1h'
+    const stratId = stSignalMode === 'ensemble' ? 'ensemble' : (stStrategyCombo?.getValue() || 'macd')
+    const cfg = { asset: asset.toUpperCase(), symbol: asset.toUpperCase() + 'USDT', timeframe: tf, strategyId: stratId }
+    initSignalChart(cfg, _signalTrades, stSelectedId)
+  }
 
   // Generate "MACD-ETH-1h" style name from current selections
   function generateBotName() {
@@ -2749,7 +2785,7 @@
     $('st-params-grid').addEventListener('change', scheduleSave)
     // Typing in the name field disables auto-naming
     const nameEl = $('st-bot-name'); if (nameEl) nameEl.addEventListener('input', () => { stBotNameIsAuto = false })
-    // Timeframe change re-generates the auto name if active
+    // Timeframe change re-generates the auto name (chart refresh happens via saveCurrentBot)
     const tfEl = $('st-timeframe'); if (tfEl) tfEl.addEventListener('change', maybeUpdateAutoName)
   }
 
@@ -2814,6 +2850,8 @@
       hint.textContent = '✓ Saved'; hint.style.color = 'var(--gain-light)'
       setTimeout(() => { hint.textContent = 'Changes save automatically'; hint.style.color = '' }, 1500)
       loadSignalBots()
+      // Server now has the new config — safe to re-initialise the chart
+      refreshChartFromForm()
     } catch (e) { showToast(e.message, true) }
   }
 
