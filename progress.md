@@ -847,3 +847,26 @@ function refreshChartFromForm() {
 - `/legacy` stays until parity confirmed; then remove it
 - After Vercel project deleted: remove `ALLOWED_ORIGINS=garlic-trading.vercel.app` from VPS `.env`
 - Update `CLAUDE.md` architecture section
+
+---
+
+## 2026-05-24 — Signal Bots page: chart indicators, position sizing, remove ManualTradeCard
+
+### What changed
+- **`src/pages/SignalBotsPage.tsx`** — rewrote `SignalChart` to consume `mainLines` and `subPane` from
+  the existing `/api/signal/bots/:id/chart-data` endpoint. Main pane now overlays strategy indicator
+  lines (EMA, Bollinger, etc.); a synced sub-pane appears below for oscillators (RSI, MACD, Stoch)
+  with dashed reference levels. Chart header shows active indicator IDs.
+- **Position Sizing Calculator** — added to the bot config sidebar. Has its own Risk $ + Stop Loss %
+  inputs (independent from `cfg.slPct`). Computes position notional, order qty, max leverage, margin,
+  and SL prices. "Apply" button writes the computed qty into the Order size field.
+- **ManualTradeCard removed** — moved user to TradePage which already has a full place-order panel
+  (asset picker, quick-size buttons, position calculator, Buy/Sell). The bot-specific card was
+  redundant and confusing.
+
+### Gotchas
+- Sub-pane uses a second LW Charts instance (not a native pane); timescale is synced via
+  `subscribeVisibleLogicalRangeChange`. Both charts are created in a single `useEffect([entry])`
+  that fires after `setEntry()` updates state — so `subRef.current` is in the DOM by then.
+- `sizingSlPct` is local UI state (not saved to bot config). `cfg.slPct` (the bracket-order SL)
+  remains separate.

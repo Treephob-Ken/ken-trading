@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
-  ArrowDownCircle,
-  ArrowUpCircle,
   Play,
   Plus,
   Save,
@@ -12,10 +10,11 @@ import {
 import {
   CandlestickSeries,
   ColorType,
+  LineSeries,
+  LineStyle,
   createChart,
   createSeriesMarkers,
   type IChartApi,
-  type ISeriesMarkersPluginApi,
   type SeriesMarker,
   type Time,
   type UTCTimestamp,
@@ -54,6 +53,10 @@ interface TradeRecord {
 interface ChartCandle {
   time: number; open: number; high: number; low: number; close: number
 }
+interface SeriesLine {
+  id: string; color: string; data: Array<{ time: number; value: number }>
+}
+type SubPane = { title: string; lines: SeriesLine[]; refLines?: number[] }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -78,79 +81,160 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ── Signal chart sub-component ────────────────────────────────────────────────
 
-function SignalChart({ botId }: { botId: string | null }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<IChartApi | null>(null)
-  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+type ChartEntry = {
+  candles: ChartCandle[]
+  mainLines: SeriesLine[]
+  subPane: SubPane | null
+  trades: TradeRecord[]
+}
 
+function SignalChart({ botId }: { botId: string | null }) {
+  const mainRef = useRef<HTMLDivElement>(null)
+  const subRef = useRef<HTMLDivElement>(null)
+  const [entry, setEntry] = useState<ChartEntry | null>(null)
+
+  // Fetch candles + indicator data whenever the selected bot changes
   useEffect(() => {
-    if (!botId) return
-    const el = ref.current
-    if (!el) return
+    if (!botId) { setEntry(null); return }
+    let cancelled = false
+    Promise.all([
+      apiFetch(`/api/signal/bots/${botId}/chart-data`).then(r => r.ok ? r.json() : null),
+      apiFetch(`/api/signal/bots/${botId}/trades`).then(r => r.ok ? r.json() : []),
+    ]).then(([cd, trades]: [
+      { candles: ChartCandle[]; mainLines?: SeriesLine[]; subPane?: SubPane } | null,
+      TradeRecord[],
+    ]) => {
+      if (cancelled) return
+      setEntry({
+        candles: cd?.candles ?? [],
+        mainLines: cd?.mainLines ?? [],
+        subPane: cd?.subPane ?? null,
+        trades: trades ?? [],
+      })
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [botId])
+
+  // Build / tear down LW Charts instances whenever fetched data changes
+  useEffect(() => {
+    const el = mainRef.current
+    if (!entry || !el || !entry.candles.length) return
+
+    const sharedLayout = {
+      background: { type: ColorType.Solid, color: 'transparent' },
+      textColor: '#8b93a7',
+      fontFamily: "'Inter', system-ui, sans-serif",
+    }
+    const sharedGrid = {
+      vertLines: { color: 'rgba(255,255,255,0.04)' },
+      horzLines: { color: 'rgba(255,255,255,0.04)' },
+    }
 
     const chart = createChart(el, {
       autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#8b93a7',
-        fontFamily: "'Inter', system-ui, sans-serif",
-      },
-      grid: {
-        vertLines: { color: 'rgba(255,255,255,0.04)' },
-        horzLines: { color: 'rgba(255,255,255,0.04)' },
-      },
+      layout: sharedLayout,
+      grid: sharedGrid,
       crosshair: { mode: 1 },
       timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2a3142' },
       rightPriceScale: { borderColor: '#2a3142' },
     })
-    chartRef.current = chart
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#26a69a', downColor: '#ef5350',
       borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
     })
+    candleSeries.setData(
+      entry.candles.map(c => ({ time: t(c.time / 1000), open: c.open, high: c.high, low: c.low, close: c.close }))
+    )
+
+    // Strategy indicator overlays (EMA, Bollinger, etc.)
+    for (const ln of entry.mainLines) {
+      const s = chart.addSeries(LineSeries, {
+        color: ln.color, lineWidth: 2,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      })
+      s.setData(ln.data.map(p => ({ time: t(p.time / 1000), value: p.value })))
+    }
 
     const markers = createSeriesMarkers(candleSeries, [])
-    markersRef.current = markers
+    markers.setMarkers(
+      entry.trades.filter(tr => tr.price).map(tr => ({
+        time: t(Math.floor(tr.time / 1000)) as Time,
+        position: tr.side === 'buy' ? 'belowBar' : 'aboveBar',
+        color: tr.side === 'buy' ? '#26a69a' : '#ef5350',
+        shape: tr.side === 'buy' ? 'arrowUp' : 'arrowDown',
+        text: tr.side === 'buy' ? 'B' : 'S',
+        size: 1,
+      } as SeriesMarker<Time>))
+    )
+    chart.timeScale().fitContent()
 
-    let cancelled = false
-    Promise.all([
-      apiFetch(`/api/signal/bots/${botId}/chart-data`).then(r => r.ok ? r.json() : null),
-      apiFetch(`/api/signal/bots/${botId}/trades`).then(r => r.ok ? r.json() : []),
-    ]).then(([cd, trades]: [{ candles: ChartCandle[] } | null, TradeRecord[]]) => {
-      if (cancelled || !cd?.candles?.length) return
-      candleSeries.setData(
-        cd.candles.map(c => ({ time: t(c.time / 1000), open: c.open, high: c.high, low: c.low, close: c.close }))
-      )
-      const markerList: SeriesMarker<Time>[] = (trades ?? [])
-        .filter(tr => tr.price)
-        .map(tr => ({
-          time: t(Math.floor(tr.time / 1000)) as Time,
-          position: tr.side === 'buy' ? 'belowBar' : 'aboveBar',
-          color: tr.side === 'buy' ? '#26a69a' : '#ef5350',
-          shape: tr.side === 'buy' ? 'arrowUp' : 'arrowDown',
-          text: tr.side === 'buy' ? 'B' : 'S',
-          size: 1,
-        }))
-      markers.setMarkers(markerList)
-      chart.timeScale().fitContent()
-    }).catch(() => {})
+    // Sub-pane chart for oscillators (RSI, MACD, Stoch …)
+    let subChart: IChartApi | null = null
+    const sp = entry.subPane
+    if (sp && subRef.current) {
+      subChart = createChart(subRef.current, {
+        autoSize: true,
+        layout: sharedLayout,
+        grid: sharedGrid,
+        crosshair: { mode: 1 },
+        timeScale: { visible: false, borderColor: '#2a3142' },
+        rightPriceScale: { borderColor: '#2a3142' },
+        handleScroll: false,
+        handleScale: false,
+      })
+      const sc = subChart
+      // Keep sub-pane in sync with main chart scroll/zoom
+      chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) sc.timeScale().setVisibleLogicalRange(range)
+      })
+      for (const ln of sp.lines) {
+        const s = sc.addSeries(LineSeries, {
+          color: ln.color, lineWidth: 2,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        })
+        s.setData(ln.data.map(p => ({ time: t(p.time / 1000), value: p.value })))
+        // Reference levels (e.g. RSI 30/70) on first line only
+        if (sp.refLines && ln === sp.lines[0]) {
+          for (const level of sp.refLines) {
+            s.createPriceLine({
+              price: level, color: '#5b6478', lineWidth: 1,
+              lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '',
+            })
+          }
+        }
+      }
+      sc.timeScale().fitContent()
+    }
 
     return () => {
-      cancelled = true
       markers.detach()
-      markersRef.current = null
       chart.remove()
-      chartRef.current = null
+      subChart?.remove()
     }
-  }, [botId])
+  }, [entry])
 
   if (!botId) return null
 
   return (
-    <div className="card p-4">
-      <h3 className="mb-3 text-sm font-semibold text-text">Chart</h3>
-      <div ref={ref} className="h-[300px] w-full" />
+    <div className="card overflow-hidden p-0">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <h3 className="text-sm font-semibold text-text">Chart</h3>
+        {entry?.mainLines && entry.mainLines.length > 0 && (
+          <span className="font-mono text-[10px] text-dim">
+            {entry.mainLines.map(l => l.id).join(' · ')}
+          </span>
+        )}
+      </div>
+      <div ref={mainRef} className="h-[300px] w-full" />
+      {entry?.subPane && (
+        <>
+          <div className="border-t border-border bg-panel px-3 py-1 font-mono text-[10px] text-dim">
+            {entry.subPane.title}
+          </div>
+          <div ref={subRef} className="h-[108px] w-full" />
+        </>
+      )}
     </div>
   )
 }
@@ -170,6 +254,10 @@ export default function SignalBotsPage() {
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null)
+  const [riskUsd, setRiskUsd] = useState<number | ''>('')
+  const [sizingSlPct, setSizingSlPct] = useState<number | ''>('')
+  const [assetPrice, setAssetPrice] = useState<number | null>(null)
+  const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
 
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
@@ -347,6 +435,43 @@ export default function SignalBotsPage() {
     return () => clearInterval(id)
   }, [selectedId, refresh])
 
+  // Fetch price + max leverage for the selected asset so the sizing card can render
+  useEffect(() => {
+    const asset = cfg?.asset
+    if (!asset) return
+    setAssetPrice(null); setMaxLeverage(null)
+    apiFetch(`/api/asset-info?asset=${encodeURIComponent(asset)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { midPx?: number; maxLeverage?: number } | null) => {
+        if (d?.midPx) setAssetPrice(d.midPx)
+        if (d?.maxLeverage) setMaxLeverage(d.maxLeverage)
+      })
+      .catch(() => {})
+  }, [cfg?.asset])
+
+  // Position sizing: risk $ / SL% → position notional → qty
+  const sizingResult = useMemo(() => {
+    const risk = typeof riskUsd === 'number' && riskUsd > 0 ? riskUsd : null
+    const sl = typeof sizingSlPct === 'number' && sizingSlPct > 0 ? sizingSlPct : null
+    if (!risk || !sl) return null
+    const positionUsd = risk / (sl / 100)
+    const rawQty = assetPrice ? positionUsd / assetPrice : null
+    return {
+      positionUsd: `$${positionUsd.toLocaleString('en', { maximumFractionDigits: 0 })}`,
+      qty: rawQty ? `${rawQty.toFixed(6)} ${cfg?.asset ?? ''}` : '— (loading price)',
+      rawQty,
+      maxLev: maxLeverage ? `${maxLeverage}×` : '—',
+      margin: positionUsd && maxLeverage ? `$${(positionUsd / maxLeverage).toFixed(2)}` : '—',
+      slPrices: assetPrice
+        ? `$${(assetPrice * (1 - sl / 100)).toLocaleString('en', { maximumFractionDigits: 4 })}  /  $${(assetPrice * (1 + sl / 100)).toLocaleString('en', { maximumFractionDigits: 4 })}`
+        : `−${sl}% / +${sl}% from entry`,
+    }
+  }, [riskUsd, sizingSlPct, cfg?.asset, assetPrice, maxLeverage])
+
+  const applySizing = () => {
+    if (sizingResult?.rawQty) patch({ size: parseFloat(sizingResult.rawQty.toFixed(6)) })
+  }
+
   // When switching to a bot, clear new-bot state
   const selectBot = (id: string) => {
     setSelectedId(id)
@@ -511,6 +636,67 @@ export default function SignalBotsPage() {
                 </Field>
               </div>
 
+              {/* ── Position Sizing Calculator ── */}
+              <div className="my-1 h-px bg-border" />
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-dim">Position Sizing</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Risk per Trade ($)">
+                    <input
+                      type="number" step="any" min="0" placeholder="e.g. 50"
+                      value={riskUsd}
+                      onChange={(e) => setRiskUsd(e.target.value === '' ? '' : Number(e.target.value))}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Stop Loss %">
+                    <input
+                      type="number" step="0.1" min="0" placeholder="e.g. 2"
+                      value={sizingSlPct}
+                      onChange={(e) => setSizingSlPct(e.target.value === '' ? '' : Number(e.target.value))}
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+                {sizingResult ? (
+                  <div className="rounded-xl border border-border bg-panel-2 p-3">
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className="text-[10px] text-dim">Position $</span>
+                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.positionUsd}</span>
+                    </div>
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className="text-[10px] text-dim">Order Qty</span>
+                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.qty}</span>
+                    </div>
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className="text-[10px] text-dim">Max Leverage</span>
+                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.maxLev}</span>
+                    </div>
+                    <div className="mb-2 flex items-baseline justify-between">
+                      <span className="text-[10px] text-dim">Margin at max lev</span>
+                      <span className="font-mono text-xs font-semibold text-text">{sizingResult.margin}</span>
+                    </div>
+                    <div className="mb-3 flex items-baseline justify-between">
+                      <span className="text-[10px] text-dim">SL price (L / S)</span>
+                      <span className="font-mono text-[10px] font-semibold text-loss">{sizingResult.slPrices}</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!sizingResult.rawQty || running}
+                      onClick={applySizing}
+                      className="w-full rounded-lg border border-brand/30 bg-brand/10 px-2.5 py-1 text-[10px] font-semibold text-brand transition-colors hover:bg-brand/15 disabled:opacity-40"
+                    >
+                      Apply → set Order size to {sizingResult.rawQty?.toFixed(6) ?? '—'} {cfg.asset}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-border bg-panel-2 px-3 py-2 text-[10px] text-dim">
+                    Enter Risk $ + Stop Loss % above to compute position size.
+                  </p>
+                )}
+              </div>
+              <div className="my-1 h-px bg-border" />
+
               <button
                 type="button"
                 disabled={running || busy || (!dirty && !isNew)}
@@ -614,11 +800,6 @@ export default function SignalBotsPage() {
         {/* Chart */}
         <SignalChart botId={selectedId && !isNew ? selectedId : null} />
 
-        {/* Manual trade card */}
-        {selectedId && !isNew && (
-          <ManualTradeCard botId={selectedId} busy={busy} onBusy={setBusy} onNotice={setNotice} />
-        )}
-
         {/* Activity log */}
         {logs.length > 0 && (
           <div className="card p-4">
@@ -664,82 +845,3 @@ export default function SignalBotsPage() {
   )
 }
 
-// ── Manual trade card ─────────────────────────────────────────────────────────
-
-function ManualTradeCard({
-  botId, busy, onBusy, onNotice,
-}: {
-  botId: string
-  busy: boolean
-  onBusy: (v: boolean) => void
-  onNotice: (n: { text: string; ok: boolean }) => void
-}) {
-  const [size, setSize] = useState<number | ''>('')
-  const [tpPct, setTpPct] = useState<number | ''>('')
-  const [slPct, setSlPct] = useState<number | ''>('')
-  const [asset, setAsset] = useState<string | null>(null)
-
-  useEffect(() => {
-    apiFetch(`/api/signal/bots/${botId}`)
-      .then(r => r.ok ? r.json() : null)
-      .then((st: SignalBotStatus | null) => { if (st) setAsset(st.config.asset) })
-      .catch(() => {})
-  }, [botId])
-
-  const trade = async (side: 'buy' | 'sell') => {
-    if (!asset) return
-    onBusy(true)
-    const body: Record<string, unknown> = {
-      asset, side,
-      size: typeof size === 'number' && size > 0 ? size : 0.01,
-      orderType: 'market', maxSlippagePct: 1,
-    }
-    if (typeof tpPct === 'number' && tpPct > 0) body.tpPct = tpPct
-    if (typeof slPct === 'number' && slPct > 0) body.slPct = slPct
-    try {
-      const res = await apiFetch('/api/order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = (await res.json()) as { message?: string; filled?: boolean; error?: string }
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      onNotice({ text: data.message || 'Order sent', ok: Boolean(data.filled) })
-    } catch (e) {
-      onNotice({ text: `Trade failed: ${(e as Error).message}`, ok: false })
-    } finally { onBusy(false) }
-  }
-
-  return (
-    <div className="card p-4">
-      <h3 className="mb-3 text-sm font-semibold text-text">Manual Trade</h3>
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <Field label="Size">
-          <input type="number" step="any" min="0" placeholder="0.01"
-            value={size} onChange={(e) => setSize(e.target.value === '' ? '' : Number(e.target.value))}
-            className={inputCls} />
-        </Field>
-        <Field label="TP %">
-          <input type="number" step="0.1" min="0" placeholder="off"
-            value={tpPct} onChange={(e) => setTpPct(e.target.value === '' ? '' : Number(e.target.value))}
-            className={inputCls} />
-        </Field>
-        <Field label="SL %">
-          <input type="number" step="0.1" min="0" placeholder="off"
-            value={slPct} onChange={(e) => setSlPct(e.target.value === '' ? '' : Number(e.target.value))}
-            className={inputCls} />
-        </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <button type="button" disabled={busy || !asset} onClick={() => trade('buy')}
-          className="flex items-center justify-center gap-1.5 rounded-xl bg-gain px-3 py-2 text-xs font-bold text-black hover:opacity-90 disabled:opacity-40 transition-opacity">
-          <ArrowUpCircle className="h-4 w-4" /> Buy {asset ?? ''}
-        </button>
-        <button type="button" disabled={busy || !asset} onClick={() => trade('sell')}
-          className="flex items-center justify-center gap-1.5 rounded-xl bg-loss px-3 py-2 text-xs font-bold text-white hover:opacity-90 disabled:opacity-40 transition-opacity">
-          <ArrowDownCircle className="h-4 w-4" /> Sell {asset ?? ''}
-        </button>
-      </div>
-    </div>
-  )
-}

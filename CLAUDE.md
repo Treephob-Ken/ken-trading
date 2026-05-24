@@ -275,3 +275,17 @@ Opt-in feature. When absent (default), the server behaves exactly as before (sin
 - The grid math is duplicated between `src/lib/grid.ts` (web) and `bot/src/config.ts → buildLines` (bot). This is intentional — the bot stays a separate package without a workspace setup.
 - The strategy signal logic is duplicated between `src/lib/strategies.ts` (web) and `bot/src/strategy/strategies.ts` (bot). They **must stay in sync** — the bot trades what the backtester shows.
 - **Log every fix and change to `progress.md`** at the repo root. After completing any non-trivial task (bug fix, feature, refactor), append an entry with the date, what was broken/missing, what was changed, and any gotchas. This file is the running history of decisions and is required reading before touching unfamiliar code.
+- **Always end every work session with a ready-to-paste VPS deploy block.** After any task that changes files the bot server depends on, print the exact commands the user must run on the VPS so they can copy-paste without thinking:
+
+```
+# ── Deploy to VPS ──────────────────────────────────────────
+git add . && git commit -m "<describe change>" && git push origin <branch>
+
+# then SSH → root@68.183.184.170 and run:
+cd ~/ken-trading && git pull
+cd bot && npm install          # only if package.json changed
+npm run build                  # only if bot TypeScript changed
+pm2 restart trading-bot
+```
+
+  Tailor the block to what actually changed (skip `npm install` / `npm run build` if not needed). Always include it — even for web-only changes that only need a Vercel redeploy.
