@@ -7,6 +7,7 @@ import GridPage from '@/pages/GridPage'
 import LoginPage from '@/pages/LoginPage'
 import ComingSoonPage from '@/pages/ComingSoonPage'
 import SignalBotsPage from '@/pages/SignalBotsPage'
+import GridBotsPage from '@/pages/GridBotsPage'
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -72,7 +73,7 @@ export default function App() {
           <Route path="signal" element={<SignalBotsPage />} />
 
           {/* Phase 4 — Grid Bots */}
-          <Route path="bots" element={<ComingSoonPage label="Grid Bots" />} />
+          <Route path="bots" element={<GridBotsPage />} />
 
           {/* Phase 5 — Trade */}
           <Route path="trade" element={<ComingSoonPage label="Trade" />} />
