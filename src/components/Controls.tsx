@@ -24,6 +24,8 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+export type SizingMode = 'fixed' | 'volatility'
+
 interface Props {
   symbol: string
   symbols: SymbolInfo[]
@@ -37,9 +39,8 @@ interface Props {
   feePct: number
   stopLossPct: number
   takeProfitPct: number
-  positionMode: 'fixed' | 'compounding' | 'volatility'
+  sizingMode: SizingMode
   targetRiskPct: number
-  atrMultiplier: number
   loading: boolean
   onSymbol: (v: string) => void
   onTimeframe: (v: string) => void
@@ -52,9 +53,8 @@ interface Props {
   onFee: (v: number) => void
   onStopLoss: (v: number) => void
   onTakeProfit: (v: number) => void
-  onPositionMode: (v: 'fixed' | 'compounding' | 'volatility') => void
+  onSizingMode: (v: SizingMode) => void
   onTargetRisk: (v: number) => void
-  onAtrMultiplier: (v: number) => void
   onReload: () => void
 }
 
@@ -80,10 +80,13 @@ export default function Controls(props: Props) {
     props.onEndDate(isoDate(end))
   }
 
+  const riskUsd = props.initialCapital * (props.targetRiskPct / 100)
+  const slMissing = props.sizingMode === 'volatility' && props.stopLossPct <= 0
+
   return (
     <div className="flex flex-col gap-5">
 
-      {/* ─── Data selection ─────────────────────────────────────── */}
+      {/* ─── Data ──────────────────────────────────────────── */}
 
       <div>
         <label className="label flex items-center gap-1">
@@ -187,7 +190,7 @@ export default function Controls(props: Props) {
 
       <div className="h-px bg-border" />
 
-      {/* ─── Strategy — all fields below map to the deployed bot ─── */}
+      {/* ─── Strategy ──────────────────────────────────────── */}
 
       <div className="flex items-center gap-2">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Strategy</p>
@@ -265,8 +268,65 @@ export default function Controls(props: Props) {
         </p>
       </div>
 
+      <div className="h-px bg-border" />
+
+      {/* ─── Risk & Sizing — all fields below deploy to bot ── */}
+
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Risk &amp; Sizing</p>
+        <span className="rounded-full border border-brand/30 bg-brand/5 px-1.5 py-0.5 text-[9px] text-brand">deploys to bot</span>
+      </div>
+
       <div>
-        <label className="label">Risk Controls</label>
+        <label className="label flex items-center gap-1">
+          Sizing Mode
+          <InfoTip term="Volatility Targeting" className="text-dim hover:text-muted" />
+        </label>
+        <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
+          <button
+            type="button"
+            className={`seg ${props.sizingMode === 'fixed' ? 'seg-active' : ''}`}
+            onClick={() => props.onSizingMode('fixed')}
+          >
+            Fixed
+          </button>
+          <button
+            type="button"
+            className={`seg ${props.sizingMode === 'volatility' ? 'seg-active' : ''}`}
+            onClick={() => props.onSizingMode('volatility')}
+          >
+            Risk-based
+          </button>
+        </div>
+        <p className="mt-1.5 text-[11px] text-dim">
+          {props.sizingMode === 'fixed'
+            ? 'Each trade uses the same $ amount (Capital below). Deploy card asks for an order size in qty.'
+            : 'Each trade risks the same $ amount. Deploy auto-fills the Signal Bot Risk-Mode calculator.'}
+        </p>
+      </div>
+
+      {props.sizingMode === 'volatility' && (
+        <div className="border-l-2 border-brand/50 pl-2.5 py-1">
+          <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
+            Risk per Trade (%)
+            <InfoTip term="Volatility Targeting" className="text-dim hover:text-muted" />
+          </label>
+          <NumberInput
+            className="field"
+            value={props.targetRiskPct}
+            min={0.1}
+            max={100}
+            step={0.1}
+            onChange={props.onTargetRisk}
+          />
+          <p className="mt-1.5 text-[11px] text-gain">
+            Risks <span className="font-mono">${riskUsd.toFixed(2)}</span> per trade
+            <span className="text-dim"> ({props.targetRiskPct}% of ${props.initialCapital.toLocaleString()} capital)</span>
+          </p>
+        </div>
+      )}
+
+      <div>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
@@ -297,14 +357,20 @@ export default function Controls(props: Props) {
             />
           </div>
         </div>
-        <p className="mt-1.5 text-[11px] text-dim">
-          Applied intrabar to every trade. 0 = disabled.
-        </p>
+        {slMissing ? (
+          <p className="mt-1.5 rounded-md border border-warn/30 bg-warn/5 px-2 py-1 text-[11px] text-warn">
+            Risk-based sizing needs a Stop Loss % to compute order size on the bot.
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[11px] text-dim">
+            Applied intrabar on every trade. 0 = disabled.
+          </p>
+        )}
       </div>
 
       <div className="h-px bg-border" />
 
-      {/* ─── Simulation — affects P&L numbers only, not deployed ─── */}
+      {/* ─── Simulation — backtest math only ────────────────── */}
 
       <div className="flex items-center gap-2">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Simulation</p>
@@ -339,64 +405,10 @@ export default function Controls(props: Props) {
           />
         </div>
       </div>
-
-      <div>
-        <label className="label flex items-center gap-1">
-          Position Sizing
-          <InfoTip term="Volatility Targeting" className="text-dim hover:text-muted" />
-        </label>
-        <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
-          {(['fixed', 'compounding', 'volatility'] as const).map((m) => (
-            <button
-              key={m}
-              className={`seg ${props.positionMode === m ? 'seg-active' : ''}`}
-              onClick={() => props.onPositionMode(m)}
-            >
-              {m === 'fixed' ? 'Fixed' : m === 'compounding' ? 'Compound' : 'Volatility'}
-            </button>
-          ))}
-        </div>
-        <p className="mt-1.5 text-[11px] text-dim">
-          {props.positionMode === 'fixed'
-            ? 'Same $ per trade. Deploy card shows an order size input.'
-            : props.positionMode === 'compounding'
-              ? 'Position grows with equity. Deploy card shows an order size input.'
-              : 'Sizes by ATR so each trade risks a fixed % of capital. Deploy pre-fills Risk USD → Signal Bot.'}
-        </p>
-      </div>
-
-      {props.positionMode === 'volatility' && (
-        <div className="grid grid-cols-2 gap-2 border-l-2 border-brand/50 pl-2.5 py-1">
-          <div>
-            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
-              Target Risk %
-              <InfoTip term="Volatility Targeting" className="text-dim hover:text-muted" />
-            </label>
-            <NumberInput
-              className="field"
-              value={props.targetRiskPct}
-              min={0.1}
-              max={100}
-              step={0.1}
-              onChange={props.onTargetRisk}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-dim flex items-center gap-1">
-              ATR Multiplier
-              <InfoTip term="ATR Multiplier" className="text-dim hover:text-muted" />
-            </label>
-            <NumberInput
-              className="field"
-              value={props.atrMultiplier}
-              min={0.5}
-              max={10}
-              step={0.1}
-              onChange={props.onAtrMultiplier}
-            />
-          </div>
-        </div>
-      )}
+      <p className="-mt-3 text-[11px] text-dim">
+        Capital sets the $ size of each backtest trade
+        {props.sizingMode === 'volatility' && ' — and the Risk USD above'}.
+      </p>
 
     </div>
   )

@@ -8,7 +8,7 @@ import { runBacktest } from '@/lib/backtest'
 import { fmtPrice } from '@/lib/format'
 import { useHLAssets } from '@/lib/hlAssets'
 import ChartPanel from '@/components/ChartPanel'
-import Controls from '@/components/Controls'
+import Controls, { type SizingMode } from '@/components/Controls'
 import NumberInput from '@/components/NumberInput'
 import Results from '@/components/Results'
 import SummaryPanel from '@/components/SummaryPanel'
@@ -22,6 +22,10 @@ interface Props {
 }
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
+
+// Internal default for volatility sizing — wraps stop in ~1.5× ATR.
+// No longer user-tunable since the bot doesn't use ATR.
+const ATR_MULTIPLIER = 1.5
 
 export default function BacktesterPage({
   symbol,
@@ -60,17 +64,17 @@ export default function BacktesterPage({
   const [takeProfitPct, setTakeProfitPct] = useState(
     () => +(localStorage.getItem('bt_takeProfitPct') || '0'),
   )
-  const [positionMode, setPositionMode] = useState<'fixed' | 'compounding' | 'volatility'>(
-    () => (localStorage.getItem('bt_positionMode') as 'fixed' | 'compounding' | 'volatility') || 'fixed',
-  )
+  // Sizing mode — only Fixed and Volatility (Compounding removed; no bot equivalent).
+  // Migrate any stored "compounding" value to "fixed" on load.
+  const [sizingMode, setSizingMode] = useState<SizingMode>(() => {
+    const saved = localStorage.getItem('bt_positionMode')
+    return saved === 'volatility' ? 'volatility' : 'fixed'
+  })
   const [targetRiskPct, setTargetRiskPct] = useState(
     () => +(localStorage.getItem('bt_targetRiskPct') || '2'),
   )
-  const [atrMultiplier, setAtrMultiplier] = useState(
-    () => +(localStorage.getItem('bt_atrMultiplier') || '1.5'),
-  )
 
-  // Deploy card state
+  // Deploy card — order size in qty (only used when sizingMode='fixed')
   const [deploySize, setDeploySize] = useState(
     () => +(localStorage.getItem('bt_deploySize') || '0.01'),
   )
@@ -93,14 +97,11 @@ export default function BacktesterPage({
     localStorage.setItem('bt_takeProfitPct', String(takeProfitPct))
   }, [takeProfitPct])
   useEffect(() => {
-    localStorage.setItem('bt_positionMode', positionMode)
-  }, [positionMode])
+    localStorage.setItem('bt_positionMode', sizingMode)
+  }, [sizingMode])
   useEffect(() => {
     localStorage.setItem('bt_targetRiskPct', String(targetRiskPct))
   }, [targetRiskPct])
-  useEffect(() => {
-    localStorage.setItem('bt_atrMultiplier', String(atrMultiplier))
-  }, [atrMultiplier])
   useEffect(() => {
     localStorage.setItem('bt_deploySize', String(deploySize))
   }, [deploySize])
@@ -120,8 +121,7 @@ export default function BacktesterPage({
     setSelectedTrade(null)
   }, [
     symbol, timeframe, startDate, endDate, strategyId, params, direction,
-    initialCapital, feePct, stopLossPct, takeProfitPct, positionMode,
-    targetRiskPct, atrMultiplier,
+    initialCapital, feePct, stopLossPct, takeProfitPct, sizingMode, targetRiskPct,
   ])
 
   useEffect(() => {
@@ -190,14 +190,14 @@ export default function BacktesterPage({
       direction,
       stopLossPct,
       takeProfitPct,
-      positionMode,
+      sizingMode,
       targetRiskPct,
-      atrMultiplier,
+      ATR_MULTIPLIER,
     )
     return { output: out, result: res }
   }, [
     candles, strategyId, params, initialCapital, feePct, direction,
-    stopLossPct, takeProfitPct, positionMode, targetRiskPct, atrMultiplier,
+    stopLossPct, takeProfitPct, sizingMode, targetRiskPct,
   ])
 
   const handleStrategy = (id: StrategyId) => {
@@ -210,8 +210,7 @@ export default function BacktesterPage({
     setParams(initialParams)
   }
 
-  // What gets passed to the Signal Bot on deploy.
-  // Volatility mode → translate to Risk USD + SL% so Signal Bot's sizing calculator is pre-filled.
+  // Deploy payload — translates sizing mode into what the Signal Bot expects.
   const deployPayload = useMemo(() => {
     const base = {
       asset: symbol.replace(/USDT$/, ''),
@@ -222,8 +221,7 @@ export default function BacktesterPage({
       slPct: stopLossPct > 0 ? stopLossPct : undefined,
       tpPct: takeProfitPct > 0 ? takeProfitPct : undefined,
     }
-    if (positionMode === 'volatility') {
-      // Risk USD = targetRiskPct% of capital; SL% already set in risk controls.
+    if (sizingMode === 'volatility') {
       return {
         ...base,
         riskUsd: parseFloat((initialCapital * targetRiskPct / 100).toFixed(2)),
@@ -233,9 +231,10 @@ export default function BacktesterPage({
     return { ...base, size: deploySize }
   }, [
     symbol, strategyId, timeframe, params, direction,
-    stopLossPct, takeProfitPct, positionMode, initialCapital, targetRiskPct, deploySize,
+    stopLossPct, takeProfitPct, sizingMode, initialCapital, targetRiskPct, deploySize,
   ])
 
+  const canDeploy = sizingMode === 'fixed' ? deploySize > 0 : stopLossPct > 0
   const pairLabel = symbol.replace(/USDT$/, '/USDT')
   const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
   const dataCapped = candles.length >= MAX_BARS
@@ -257,9 +256,8 @@ export default function BacktesterPage({
             feePct={feePct}
             stopLossPct={stopLossPct}
             takeProfitPct={takeProfitPct}
-            positionMode={positionMode}
+            sizingMode={sizingMode}
             targetRiskPct={targetRiskPct}
-            atrMultiplier={atrMultiplier}
             loading={loading}
             onSymbol={onSymbol}
             onTimeframe={onTimeframe}
@@ -272,14 +270,13 @@ export default function BacktesterPage({
             onFee={setFeePct}
             onStopLoss={setStopLossPct}
             onTakeProfit={setTakeProfitPct}
-            onPositionMode={setPositionMode}
+            onSizingMode={setSizingMode}
             onTargetRisk={setTargetRiskPct}
-            onAtrMultiplier={setAtrMultiplier}
             onReload={() => setReloadKey((k) => k + 1)}
           />
         </div>
 
-        {/* ── Deploy card — only shown once there are backtest results ── */}
+        {/* ── Deploy card — appears once a backtest has run ── */}
         {result && (
           <div className="card p-4">
             <div className="mb-3 flex items-center gap-1.5">
@@ -287,7 +284,7 @@ export default function BacktesterPage({
               <p className="text-xs font-semibold text-text">Deploy as Signal Bot</p>
             </div>
 
-            {/* What gets deployed */}
+            {/* What will be deployed */}
             <div className="mb-3 rounded-lg border border-border bg-panel-2 px-2.5 py-2 text-[10px] space-y-1">
               <div className="flex justify-between">
                 <span className="text-dim">Asset</span>
@@ -313,37 +310,32 @@ export default function BacktesterPage({
               </div>
             </div>
 
-            {/* Order sizing — translates from backtest positionMode */}
-            {positionMode === 'volatility' ? (
+            {/* Sizing — matches the Risk & Sizing section above */}
+            {sizingMode === 'volatility' ? (
               <div className="mb-3 rounded-lg border border-brand/20 bg-brand/5 px-2.5 py-2 text-[10px] space-y-1">
                 <div className="flex items-center gap-1 text-brand font-semibold mb-1">
                   <Info className="h-3 w-3" />
-                  Risk mode will be pre-filled
+                  Risk Mode will be pre-filled
                 </div>
                 <div className="flex justify-between">
                   <span className="text-dim">Risk USD</span>
                   <span className="font-mono text-text">
                     ${(initialCapital * targetRiskPct / 100).toFixed(2)}
-                    <span className="text-dim ml-1">({targetRiskPct}% of ${initialCapital.toLocaleString()})</span>
+                    <span className="text-dim ml-1">({targetRiskPct}% × ${initialCapital.toLocaleString()})</span>
                   </span>
                 </div>
-                {stopLossPct > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-dim">SL % (sizing)</span>
-                    <span className="font-mono text-text">{stopLossPct}%</span>
-                  </div>
-                )}
+                <div className="flex justify-between">
+                  <span className="text-dim">SL %</span>
+                  <span className={`font-mono ${stopLossPct > 0 ? 'text-text' : 'text-loss'}`}>
+                    {stopLossPct > 0 ? `${stopLossPct}%` : 'not set — required!'}
+                  </span>
+                </div>
                 <p className="text-[9px] text-dim mt-1 leading-relaxed">
-                  Signal Bot will auto-compute qty from these values.
+                  Signal Bot auto-computes qty from these two values.
                 </p>
               </div>
             ) : (
               <div className="mb-3">
-                {positionMode === 'compounding' && (
-                  <p className="mb-2 rounded-md border border-warn/30 bg-warn/5 px-2 py-1 text-[10px] text-warn">
-                    Compounding isn't supported by the bot — will run as fixed size.
-                  </p>
-                )}
                 <label className="mb-1 block text-[11px] text-dim">Order Size (qty per trade)</label>
                 <NumberInput
                   className="field"
@@ -360,6 +352,7 @@ export default function BacktesterPage({
 
             <button
               type="button"
+              disabled={!canDeploy}
               onClick={() => {
                 sessionStorage.setItem(
                   'pending_signal_bot_config',
@@ -367,7 +360,8 @@ export default function BacktesterPage({
                 )
                 navigate('/signal')
               }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              title={canDeploy ? undefined : 'Set Stop Loss % above before deploying'}
             >
               <Rocket className="h-4 w-4" />
               Deploy to Signal Bot
