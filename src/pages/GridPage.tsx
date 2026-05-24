@@ -20,6 +20,7 @@ import { computeGridBotAuto, DEFAULT_AUTO_PARAMS, type GridBotAutoParams } from 
 import GridChart from '@/components/GridChart'
 import GridControls from '@/components/GridControls'
 import GridStats from '@/components/GridStats'
+import GridVerdictStrip from '@/components/GridVerdictStrip'
 import NumberInput from '@/components/NumberInput'
 
 interface Props {
@@ -336,31 +337,14 @@ export default function GridPage({
       {/* ── RIGHT: Analysis + Deploy ─────────────────────────────────────────── */}
       <section className="flex min-w-0 flex-1 flex-col gap-4">
 
-        {/* 1. Regime banner */}
-        {regimeFit && (
-          <div
-            className={`card flex items-center gap-3 border-l-4 p-3 ${
-              regimeFit.suitable ? 'border-l-gain bg-gain/5' : 'border-l-warn bg-warn/5'
-            }`}
-          >
-            <div
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-mono text-sm font-bold ${
-                regimeFit.suitable ? 'bg-gain/20 text-gain' : 'bg-warn/20 text-warn'
-              }`}
-              title={`Markov regime: ${regimeFit.analysis.currentLabel}`}
-            >
-              {regimeFit.analysis.currentLabel?.[0] ?? '?'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-text">
-                {regimeFit.suitable ? 'Good conditions for grid trading' : 'Market may not suit grids right now'}{' '}
-                <span className="text-xs font-normal text-dim">
-                  ({regimeFit.analysis.currentLabel}, {(regimeFit.analysis.persistence * 100).toFixed(0)}% persistence)
-                </span>
-              </div>
-              <p className="text-[11px] text-dim leading-snug">{regimeFit.reason}</p>
-            </div>
-          </div>
+        {/* 1. Verdict + Confidence Strip (only when static optimizer has a result) */}
+        {pageMode === 'static' && staticResult && (
+          <GridVerdictStrip
+            result={staticResult}
+            regime={regimeFit?.analysis ?? null}
+            windowBars={bars.length}
+            timeframe={timeframe}
+          />
         )}
 
         {/* 2. Chart */}

@@ -25,6 +25,13 @@ import { fetchKlines } from '@/lib/binance'
 import { generateSignals } from '@/lib/strategies'
 import type { StrategyOutput } from '@/lib/strategies'
 import type { Candle, StrategyId } from '@/types'
+import LiveBotHeader from '@/components/LiveBotHeader'
+import ChartHoverPanel, {
+  findCandleIndexByTime,
+  type ChartHoverState,
+  type HoverTradeInfo,
+} from '@/components/ui/ChartHoverPanel'
+import { analyzeRegime } from '@/lib/markov'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,10 +67,6 @@ const TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h
 const POLL_MS = 5000
 const t = (n: number) => n as UTCTimestamp
 
-function fmtTime(ms: number | null) {
-  return ms ? new Date(ms).toLocaleTimeString() : '—'
-}
-
 const inputCls = 'w-full rounded-lg border border-border bg-panel-2 px-2.5 py-1.5 font-mono text-xs text-text outline-none focus:border-brand/60 focus:ring-1 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -83,6 +86,14 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
   const [candles, setCandles] = useState<Candle[]>([])
   const [loadingCandles, setLoadingCandles] = useState(false)
   const [trades, setTrades] = useState<TradeRecord[]>([])
+  const [hover, setHover] = useState<ChartHoverState | null>(null)
+
+  // Live Markov regime labels for the hover overlay. Cheap — same logic the
+  // Backtester runs; just needs ≥30 candles to start labelling.
+  const regimeLabels = useMemo(() => {
+    if (candles.length < 30) return undefined
+    return analyzeRegime(candles).labels
+  }, [candles])
 
   // Fetch Binance candles whenever asset or timeframe changes
   useEffect(() => {
@@ -187,6 +198,15 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
     const markersPlugin = createSeriesMarkers(candleSeries, allMarkers)
     chart.timeScale().fitContent()
 
+    // Crosshair → hovered bar — drives the overlay panel
+    const crosshairHandler = (p: Parameters<Parameters<typeof chart.subscribeCrosshairMove>[0]>[0]) => {
+      const tt = p.time
+      if (typeof tt !== 'number') { setHover(null); return }
+      const idx = findCandleIndexByTime(candles, tt)
+      setHover({ time: candles[idx].time, barIdx: idx })
+    }
+    chart.subscribeCrosshairMove(crosshairHandler)
+
     // Sub-pane for oscillators (RSI, MACD, Stoch …)
     let subChart: IChartApi | null = null
     const sp = strategyOutput.subPane
@@ -224,11 +244,22 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
     }
 
     return () => {
+      chart.unsubscribeCrosshairMove(crosshairHandler)
       markersPlugin.detach()
       chart.remove()
       subChart?.remove()
     }
   }, [candles, strategyOutput, trades])
+
+  // tradeAtBar resolver — actual executed trades have ms timestamps; convert + match against bar second.
+  const resolveTradeAtBar = (c: Candle): HoverTradeInfo | null => {
+    const tr = trades.find((t2) => Math.floor(t2.time / 1000) === c.time)
+    if (!tr) return null
+    return {
+      label: tr.side === 'buy' ? 'BUY' : 'SELL',
+      tone: tr.side === 'buy' ? 'gain' : 'loss',
+    }
+  }
 
   return (
     <div className="card overflow-hidden p-0">
@@ -255,7 +286,15 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
           Loading chart…
         </div>
       ) : (
-        <div ref={mainRef} className="h-[300px] w-full" />
+        <div className="relative">
+          <div ref={mainRef} className="h-[300px] w-full" />
+          <ChartHoverPanel
+            hover={hover}
+            candles={candles}
+            regimeLabels={regimeLabels}
+            tradeAtBar={resolveTradeAtBar}
+          />
+        </div>
       )}
       {strategyOutput?.subPane && (
         <>
@@ -745,61 +784,51 @@ export default function SignalBotsPage() {
       {/* ── Right main area ── */}
       <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
 
-        {/* Status / control banner */}
-        {(selectedId || isNew) && (
-          <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
-            <div className="flex items-center gap-3">
-              <Activity className={`h-5 w-5 shrink-0 ${running ? 'text-gain animate-pulse' : 'text-dim'}`} />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-text">
-                    {isNew ? 'New Bot' : (bots.find(b => b.id === selectedId)?.name ?? 'Signal Bot')}
-                  </span>
-                  {status && (
-                    <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                      running ? 'border-gain/40 bg-gain/10 text-gain'
-                        : 'border-border bg-panel-2 text-dim'
-                    }`}>
-                      {running ? 'Running' : 'Idle'}
-                    </span>
-                  )}
-                </div>
-                {status && (
-                  <div className="mt-0.5 text-[11px] text-dim">
-                    Last signal: {status.lastSignal
-                      ? <span className={status.lastSignal === 'buy' ? 'text-gain' : 'text-loss'}>
-                          {status.lastSignal.toUpperCase()} @ {fmtTime(status.lastSignalAt)}
-                        </span>
-                      : 'none yet'
-                    }
-                    {' · '}Trades: {status.tradesExecuted}
-                  </div>
-                )}
-              </div>
+        {/* Live status header — verdict-style pulse pill + chips + inline error */}
+        {selectedId && !isNew && status && (
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+            <div className="flex-1 min-w-0">
+              <LiveBotHeader
+                name={bots.find(b => b.id === selectedId)?.name ?? 'Signal Bot'}
+                state={status.lastError ? (running ? 'error' : 'error') : running ? 'running' : 'stopped'}
+                summary={`${status.config.asset} · ${status.config.timeframe} · ${status.config.strategyId.toUpperCase()}`}
+                startedAt={status.startedAt}
+                lastSignal={status.lastSignal}
+                lastSignalAt={status.lastSignalAt}
+                lastError={status.lastError}
+                tradesExecuted={status.tradesExecuted}
+              />
             </div>
+            <div className="flex items-stretch gap-2">
+              <button
+                type="button"
+                disabled={running || busy || dirty}
+                onClick={() => control('start')}
+                title={dirty ? 'Save config first' : undefined}
+                className="flex items-center gap-1.5 rounded-xl bg-gain px-4 py-2 text-xs font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                <Play className="h-3.5 w-3.5" /> Start
+              </button>
+              <button
+                type="button"
+                disabled={!running || busy}
+                onClick={() => control('stop')}
+                className="flex items-center gap-1.5 rounded-xl bg-loss px-4 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                <Square className="h-3.5 w-3.5" /> Stop
+              </button>
+            </div>
+          </div>
+        )}
 
-            {/* Start / Stop */}
-            {selectedId && !isNew && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={running || busy || dirty}
-                  onClick={() => control('start')}
-                  title={dirty ? 'Save config first' : undefined}
-                  className="flex items-center gap-1.5 rounded-xl bg-gain px-4 py-2 text-xs font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
-                >
-                  <Play className="h-3.5 w-3.5" /> Start
-                </button>
-                <button
-                  type="button"
-                  disabled={!running || busy}
-                  onClick={() => control('stop')}
-                  className="flex items-center gap-1.5 rounded-xl bg-loss px-4 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                >
-                  <Square className="h-3.5 w-3.5" /> Stop
-                </button>
-              </div>
-            )}
+        {/* New-bot title (no status to show yet) */}
+        {isNew && (
+          <div className="card flex items-center gap-3 p-4">
+            <Activity className="h-5 w-5 shrink-0 text-dim" />
+            <div>
+              <div className="font-semibold text-text">New Bot</div>
+              <div className="mt-0.5 text-[11px] text-dim">Configure and save to enable Start.</div>
+            </div>
           </div>
         )}
 
@@ -807,13 +836,6 @@ export default function SignalBotsPage() {
         {notice && (
           <div className={`card p-3 text-xs ${notice.ok ? 'border-gain/30 bg-gain/5 text-gain' : 'border-loss/30 bg-loss/5 text-loss'}`}>
             {notice.text}
-          </div>
-        )}
-
-        {/* Last error */}
-        {status?.lastError && (
-          <div className="card border-loss/30 bg-loss/5 p-3 text-xs text-loss">
-            Last error: {status.lastError}
           </div>
         )}
 

@@ -873,6 +873,418 @@ function refreshChartFromForm() {
 
 ---
 
+## 2026-05-25 — Chart hover overlay reused on Signal Bots
+
+### Motivation
+The chart hover overlay (regime + OHLC + trade chip) was only on the Backtester
+chart. The most valuable place to debug "why did my bot trade here?" is the live
+Signal Bots chart — that's where real money is on the line. Extracted the
+overlay once, applied it twice.
+
+### What changed
+- **New `src/components/ui/ChartHoverPanel.tsx`** — pure render component +
+  `findCandleIndexByTime()` shared helper. Accepts:
+  - `hover` (the `{ time, barIdx }` state owned by the parent)
+  - `candles` for OHLC lookup
+  - `regimeLabels` (optional, per-candle 0/1/2)
+  - `tradeAtBar` (optional resolver that returns `{ label, pnlPct?, tone }`)
+  - `position` ('top-left' | 'top-right') for placement choice
+  Pointer-events-none, top-3/left-3, max-w-260, backdrop-blurred.
+- **`src/components/ChartPanel.tsx`** — switched from the inline overlay to
+  `<ChartHoverPanel>`. Trade resolver maps Backtester `Trade.entryTime` /
+  `exitTime` to BUY/SELL/EXIT chips with pnl% on exits. Dropped the
+  now-duplicate `REGIME_NAMES`/`REGIME_COLOR` constants and the inline hoverInfo
+  IIFE. Net: cleaner ChartPanel, same UX.
+- **`src/pages/SignalBotsPage.tsx`** — `SignalChart` sub-component now:
+  - Computes `regimeLabels` from `analyzeRegime(candles).labels` in a useMemo
+    (lazy, ≥30 candles required).
+  - Adds `subscribeCrosshairMove` handler — pairs with `unsubscribeCrosshairMove`
+    in the cleanup.
+  - Wraps the chart div in a `relative` container and renders
+    `<ChartHoverPanel>` with a `resolveTradeAtBar` that matches the live bot's
+    `TradeRecord.time` (ms → seconds) to bar times.
+
+### Gotchas
+- Live `TradeRecord.time` is in milliseconds (from the bot's `Date.now()`
+  recording); chart bar times are seconds (unix). Match with
+  `Math.floor(tr.time / 1000) === c.time`. Don't forget the divide.
+- The SignalChart uses TWO chart instances (main + oscillator sub-pane). Only
+  the main chart's container gets the `relative` wrapper + overlay. The
+  sub-pane keeps its own crosshair sync (already wired) but no hover panel —
+  hover is anchored to the main pane only.
+- Regime is recomputed on every candle refresh inside SignalChart. That's
+  fine — `analyzeRegime` is cheap O(n) and the candles array updates rarely
+  (asset/timeframe change). If the timer-based candle refresh becomes
+  frequent, memoize harder or lift to a parent.
+- Build: `npm run build` ✓ clean. Bundle 606 kB (+0.6 kB net — extracted
+  component is now shared, plus the live Markov computation on SignalChart).
+
+### Site state
+| Page | Verdict UI | Live header | Stat tiles + tooltips | Chart hover overlay |
+|---|---|---|---|---|
+| Backtester | ✓ | – | ✓ | ✓ |
+| Grid Optimizer | ✓ | – | ✓ | – |
+| Signal Bots | – | ✓ | – | ✓ |
+| Grid Bots | – | ✓ | – | – |
+| Trade | – | – | ✓ | n/a |
+| Logs | – | – | – | – |
+
+---
+
+## 2026-05-25 — Phase 4 follow-ups: Trade page StatTile makeover + chart hover panel
+
+### What changed
+- **Trade page (`src/pages/TradePage.tsx`)**
+  - Account 3-tile grid swapped to `<StatTile>` with question titles:
+    *"How much is the account worth?"* (Account Value) ·
+    *"How much can I deploy right now?"* (Withdrawable) ·
+    *"How much is tied up as collateral?"* (Margin Used).
+    Withdrawable goes amber when < 20% of Account Value as a margin-stress hint.
+  - **New asset-context strip** — only renders when an asset is selected. 4
+    compact StatTiles mirroring the ConfidenceStrip pattern:
+    *"What's the live mid price?"* (Hyperliquid mark) ·
+    *"How much leverage is available?"* (max leverage ×) ·
+    *"Is this real money?"* (network — green Mainnet / amber Testnet) ·
+    *"What's my buying power here?"* (withdrawable × max leverage upper bound).
+  - **Open Positions header** — added `<InfoTip>` next to the title, plus an
+    inline *"total uPnL ±X.XX"* chip with its own InfoTip when positions exist.
+    Tone tracks sign (gain/loss/neutral).
+- **Backtester chart hover panel (`src/components/ChartPanel.tsx`)**
+  - New `regimeLabels?: number[]` optional prop, threaded from BacktesterPage
+    (`regime?.labels`).
+  - `subscribeCrosshairMove` resolves the hovered bar via binary search and
+    drives a new `hover` state.
+  - Floating overlay panel (top-left of chart, `pointer-events: none`) shows:
+    formatted bar timestamp · OHLC quad (colored) · regime chip (Bear/Sideways/Bull)
+    · BUY (entry) / SELL (entry) / EXIT chip with pnl% when a trade marker
+    sits on the hovered bar.
+- **`src/lib/glossary.ts`** — added Account Value, Withdrawable, Margin Used,
+  Mid Price, Max Leverage, Open Positions, Network. Removed the duplicate
+  "Unrealized PnL" entry I'd added (the original at line 272 already exists).
+
+### Gotchas
+- LW Charts v5 — `chart.subscribeCrosshairMove(handler)` returns `void`, not an
+  unsubscribe function. Pair with `chart.unsubscribeCrosshairMove(handler)` in
+  the cleanup, and keep a reference to the handler. v4 returned the unsubscribe
+  callback directly; v5 doesn't.
+- Hover panel is positioned inside a `relative` wrapper that surrounds the
+  chart `<div>`. Without that wrapper, the absolute positioning would escape to
+  the page root. The wrapper is new — make sure it isn't accidentally removed
+  when editing other chart effects.
+- The TradePage hover-position calc uses live `assetInfo.midPx`. If the
+  /api/asset-info endpoint is slow, the asset-context strip shows `—` until
+  the first response lands — by design.
+- Build: `npm run build` ✓ clean. Bundle 605 kB (+6 kB for the StatTile reuse,
+  glossary entries, and the crosshair overlay logic).
+
+---
+
+## 2026-05-25 — Redesign Phase 4: Grid parity + Live bot header + Polish pass
+
+Three parallel tracks landed in one pass. The Backtester verdict pattern now
+extends to the Grid Optimizer and the two live bot pages, and the heavy
+analytical cards no longer pay layout/paint cost while off-screen.
+
+### 4A — Grid Optimizer parity
+- **New `src/components/GridVerdictStrip.tsx`** — combined `<VerdictBadge>` +
+  4-tile confidence strip tuned for grid bots:
+  1. *Does the regime support grids?* — uses `isGoodForGrid(regime)`
+  2. *How much would the best grid have earned?* — `best.totalReturnPct` / `totalPnl`
+  3. *How often would it trade?* — roundtrips per day from window duration
+  4. *Are fees covered per cell?* — spacing ÷ breakeven safety multiple
+  Trade/Wait/Avoid verdict logic: TRADE when PnL > 0 + spacing ≥ 3× breakeven +
+  regime supports grids + ≥5 roundtrips. AVOID when PnL ≤ 0 or spacing < 1×
+  breakeven or (negative PnL in trending regime). WAIT otherwise.
+- **`src/pages/GridPage.tsx`** — replaced the old "Regime banner" border-l-4
+  card with `<GridVerdictStrip>` (only when static optimizer has a result).
+  Auto-mode flow is unchanged.
+
+### 4B — Live bot pages
+- **New `src/components/LiveBotHeader.tsx`** — single shared header for any live
+  bot pane. Pulsing colored status pill (RUNNING green / STOPPED dim / ERROR red),
+  bot name, summary line, and inline chips: uptime, trades-this-session, last
+  signal direction + relative time. Inline error strip rendered as a full-width
+  strip across the bottom of the card when `lastError` is present.
+- **`src/pages/SignalBotsPage.tsx`** — replaced the old "Status / control banner"
+  block with `<LiveBotHeader>` + a sibling Start/Stop column. Removed the
+  redundant *Last error* card (header now owns that). New-bot empty state gets
+  a slim placeholder card. Unused `fmtTime` helper dropped.
+- **`src/pages/GridBotsPage.tsx`** — same pattern. Grid bots have no
+  `lastSignal` (they react to fills), so the header receives `tradesExecuted =
+  stats.roundtrips` and uses the `stats.state` lifecycle to pick the colored
+  state: live/init/waiting-trigger all map to `running`, `stopped` to `stopped`.
+
+### 4C — Polish pass (perf + form UX)
+- **`src/index.css`** — added two utility-class enhancements:
+  - **`.defer-render`** — `content-visibility: auto` + `contain-intrinsic-size:
+    1px 320px`. Skips layout and paint cost on any card that isn't near the
+    viewport. The intrinsic size keeps scroll bars honest before render.
+  - **`.field:user-valid / :user-invalid`** — input validation styling now flips
+    *after* the user finishes editing (no flash mid-typing). Applies to every
+    `<input>` already using the `.field` class, including `NumberInput`.
+- **`src/components/RegimeBreakdownCard.tsx`** + **`ParamStabilityCard.tsx`** —
+  root card gets the `defer-render` class. These are the heaviest stat cards
+  on the Backtester page, so deferring them is the biggest win.
+
+### Gotchas
+- `:user-valid` / `:user-invalid` are Baseline 2023 — supported in all evergreen
+  browsers. They only fire after blur/submit, so the styling won't flash while
+  the user is still typing (which was the goal). NumberInput's local string
+  buffer + blur-clamp behaviour pairs cleanly.
+- `content-visibility: auto` will trigger a relayout when each card enters the
+  viewport. The `contain-intrinsic-size: 320px` is a guess — undersized cards
+  will jump up when their real height is measured. 320px matches the typical
+  height of the two cards using it; if a deeper drilldown gets added, raise
+  the value or compute it from the rendered height.
+- LiveBotHeader's `state` derivation in SignalBotsPage: the redundant ternary
+  `state.lastError ? (running ? 'error' : 'error') : ...` is intentional —
+  visual: an errored stopped bot should look loud red (error), not greyed
+  (stopped). If the user wants stopped-with-error to look stopped, simplify to
+  `state.lastError ? 'error' : running ? 'running' : 'stopped'`.
+- Build: `npm run build` ✓ clean. Bundle 599 kB (+6 kB for the new components
+  and CSS utilities).
+
+### Page status after Phase 4
+| Page | Verdict pattern | Live header | defer-render | :user-valid |
+|---|---|---|---|---|
+| Backtester | ✓ Phase 1 | n/a | ✓ Phase 4C | ✓ Phase 4C |
+| Grid Optimizer | ✓ Phase 4A | n/a | ✓ via Tailwind cards | ✓ Phase 4C |
+| Signal Bots | n/a (live bot) | ✓ Phase 4B | n/a | ✓ Phase 4C |
+| Grid Bots | n/a (live bot) | ✓ Phase 4B | n/a | ✓ Phase 4C |
+| Trade | not yet | n/a | n/a | ✓ Phase 4C |
+| Logs | n/a | n/a | n/a | n/a |
+
+---
+
+## 2026-05-24 — Redesign Phase 3: Regime breakdown + Kelly nudge + Parameter stability
+
+Three quant additions landed in one pass — all on the Backtester page.
+
+### 3a — Regime-conditional breakdown
+- **New `src/lib/regimeStats.ts`** — `tradesByRegime(trades, candles, regimeLabels)`
+  binary-searches each trade's entry time against the candle timeline, picks up the
+  regime label at that bar, and aggregates per-regime stats: count, wins/losses,
+  win rate, avg pnl %, total pnl %, best/worst, profit factor. Returns 3 buckets in
+  fixed Bear/Sideways/Bull order plus an `untaggedCount` (trades that fell before
+  the Markov window filled).
+- **New `src/components/RegimeBreakdownCard.tsx`** — 3-row table (Bull on top, Bear
+  on bottom) with colored dot + label + NOW badge for the live regime row. Auto-
+  generates an "Insight:" line ("Edge concentrated in Bull — bleeds in Bear,
+  consider trading only when regime = Bull"). Hidden entirely when no trades yet
+  or no Markov result.
+
+### 3b — Kelly fraction nudge
+- **`src/pages/BacktesterPage.tsx`** — added a `kellyHint` `useMemo` deriving full
+  Kelly + half Kelly from the latest backtest's win rate, avg win, avg loss.
+  Pass-through to Controls. Null when `numTrades < 5` or avg win/loss are zero.
+- **`src/components/Controls.tsx`** — new `kellyHint` optional prop. When in
+  Risk-based sizing mode, renders an accent-tinted nudge box under the *Risk per
+  Trade (%)* input: full Kelly + ½ Kelly numbers + one-click *Apply ½ Kelly* button
+  that writes the half-Kelly value into `targetRiskPct`. Shows a *"Negative edge"*
+  warning instead of the button when Kelly says don't bet.
+
+### 3c — Parameter-stability heatmap
+- **`src/lib/walkforward.ts`** — added `stabilityCheck()` and `StabilityResult` /
+  `StabilityPoint` types. Cheap version of walk-forward (5 runs at -20/-10/0/+10/
+  +20% param wiggles, full dataset, no fold loop). Returns Sharpe / total return %
+  / numTrades per wiggle + a stability score (100 = perfectly flat Sharpe across
+  the band, 0 = wild swings).
+- **New `src/components/ParamStabilityCard.tsx`** — colored 5-tile strip. Each tile
+  shows the wiggle %, Sharpe (big), return %, with bg color from a diverging
+  green/amber/red palette mapped to the Sharpe value. The 0% tile is ringed in
+  brand color with a "BASE" badge. Headline shows the stability score (0–100) +
+  an auto-generated verdict line ("Robust — Sharpe stays in 0.82–1.10 band" / "
+  Fragile — Sharpe collapses from 1.05 to -0.30").
+- Wired into BacktesterPage below the regime breakdown.
+
+### Page order on Backtester (right pane)
+1. ConfidenceStrip
+2. Chart
+3. **Trade Summary** (verdict-first headline card)
+4. **Regime Breakdown** ← new
+5. **Parameter Stability** ← new
+6. Results (detail grids, Risk Manager, equity + projection, Trade History collapsed)
+
+### Gotchas
+- `tradesByRegime` falls back to the nearest preceding candle when entryTime
+  doesn't exactly match a bar — fine for closed-bar strategies, but for sub-bar
+  entry times this could mis-tag by one bar at regime boundaries. Acceptable
+  given the rolling regime window already smooths it.
+- `stabilityCheck()` runs 5 backtests synchronously inside a `useMemo`. On a
+  1,000-bar history with all 14 strategies this is ~25–50 ms — fine. If a
+  particularly slow strategy lands later (e.g. complex Elliott), profile and
+  move to a Worker.
+- Kelly formula assumes win/loss returns are stationary. If the strategy's
+  edge has drifted (use the regime breakdown to check), Kelly will over-bet.
+  ½ Kelly is the practical compromise (Thorp / Aronson).
+- Build: `npm run build` ✓ clean. Bundle 594 kB (+12 kB for the 3 features).
+
+### Next (Phase 4 candidates)
+- Apply the same `<StatTile>` + `<VerdictBadge>` + `<RegimeBreakdownCard>` pattern
+  to the Grid Optimizer page (currently text-heavy, no verdict).
+- Or jump to the Signal Bots / Grid Bots pages: collapse the config form when a
+  bot is live, add a "Why this signal?" anchor-positioned popover at each chart
+  marker.
+
+---
+
+## 2026-05-24 — Redesign Phase 2: Monte Carlo forward projection
+
+### Motivation
+Phase 1 landed the Trade/Wait/Avoid verdict + ConfidenceStrip with a placeholder
+"forward equity band" tile. Phase 2 fills that placeholder with real Monte Carlo
+output, then visualises the same band as a dashed fan extending past the historical
+equity curve. Goal: answer *"if the next 30 trades land in a different random order,
+where could my account be?"* — directly addresses the user's capital-preservation
+brief.
+
+### What changed
+- **New `src/lib/montecarlo.ts`** — pure simulation library.
+  - `simulateMonteCarlo(trades, opts)` bootstraps `pnlPct` with replacement,
+    compounds 30 trades forward across 1,000 paths (defaults). Returns
+    per-step p5/p50/p95 equity multipliers, final-equity percentiles, max-drawdown
+    percentiles, P(profit at horizon), and P(ruin) where ruin = ≥50% drawdown.
+  - Deterministic seeded RNG (Mulberry32) so the same trades + same seed = same
+    output (cache-friendly, test-friendly).
+  - `avgSecondsPerTrade(trades)` helper computes the avg gap between exit times,
+    used to time-stamp the forward projection on the equity chart.
+  - `mcPct(multiplier)` converts the equity multiplier to a signed % for display.
+- **`src/components/ConfidenceStrip.tsx`** — placeholder MC tile replaced with
+  real values: shows `+P5% → +P95%` as the headline range, median + ruin% in the
+  sub-line. Tone: gain if pessimistic case still positive, loss if median loses,
+  warn otherwise.
+- **`src/components/Results.tsx`** — equity chart card retitled to
+  *"Performance & Forward Projection"*, header now has a Monte Carlo InfoTip and
+  3 new legend chips (MC median amber, MC p95 green, MC p5 red).
+- **`EquityChart` rewrite** — accepts `trades` as a new prop, computes MC + avg
+  trade interval in a `useMemo`, and adds 3 dashed LineSeries (p5, p50, p95)
+  starting at the last historical equity point and projecting forward. p50 is the
+  thickest of the three (most-likely outcome); p5/p95 form the cone edges.
+- **`src/lib/glossary.ts`** — added Monte Carlo, Equity Band, Ruin Probability,
+  Probability of Profit definitions for the new InfoTips.
+
+### Key design decisions
+- **Bootstrap with replacement** (not without): each path is a random re-shuffle
+  of the historical trade-return distribution. Tests path-dependency; does *not*
+  predict future market behaviour. Pair with walk-forward (already in repo) for
+  out-of-sample confidence.
+- **Equity floor at 0.001×** in the simulator — prevents math blowup if a long
+  string of losers compounds toward zero. Real-world equivalent is broker
+  liquidation; the floor stops paths from going negative without distorting the
+  percentile bands.
+- **Single 30-trade horizon for now** — keeps the UI legible. If users want
+  longer projections later, expose `horizon` as a slider in Phase 5.
+- **Projection time-stamps** use historical avg gap between exit times — gives a
+  meaningful x-axis position without pretending we know future market timing.
+
+### Gotchas
+- The MC computation runs in two places (ConfidenceStrip and EquityChart). Both
+  are `useMemo`-cached on `trades` identity, so the cost is ~5ms per recompute.
+  If profile shows this hurting, lift it to BacktesterPage and pass down as a
+  prop — for now duplication keeps each component independent.
+- The chart projection extends past `chart.timeScale().fitContent()` because the
+  projected points have timestamps after the last historical bar. LW Charts
+  auto-fits to include them — desired behaviour.
+- Build: `npm run build` passes clean. Bundle 582 kB (+4 kB for the MC lib +
+  projection rendering).
+
+### Next (Phase 3 candidates)
+- Regime-conditional metrics (Sharpe / win-rate / DD broken out by Bull/Bear/Sideways
+  from existing markov.ts labels).
+- Kelly fraction + half-Kelly cap shown next to the Risk per trade input
+  (foundation already in `RiskManager` — surface it as a primary input nudge).
+- Parameter-stability heatmap built on top of existing `walkforward.ts`.
+
+---
+
+## 2026-05-24 — Phase 1 refinement: SummaryPanel promoted, Trade History collapsed, Sortino dropped
+
+### What changed
+- **`src/pages/BacktesterPage.tsx`** — swapped order: `<SummaryPanel>` now renders
+  *before* `<Results>` instead of after. Verdict + StatTile grid are the first thing
+  the user sees once a backtest completes; the detailed metric grids + equity chart +
+  trade history come after.
+- **`src/components/SummaryPanel.tsx`** — added highlight treatment so it reads as
+  the headline card: `ring-1 ring-brand/30` + `shadow-[0_0_0_4px_hsl(var(--brand)/0.05)]`
+  outer halo, a gradient brand stripe across the top (`from-brand via-accent to-brand`),
+  and a glowing brand dot next to the new "Trade Summary" title (was "Strategy Report").
+- **`src/components/Results.tsx`** — dropped the **Sortino Ratio** tile from the
+  Advanced Quant Metrics row (too redundant with Sharpe; both measure return/volatility).
+  Row went from `sm:grid-cols-5` to `sm:grid-cols-4`: Sharpe · Calmar · Expectancy ·
+  Avg Hold Bars. Calmar stays because it's drawdown-adjusted (matches the capital-
+  preservation persona); Expectancy stays because it's $/trade (concrete).
+- **Trade History collapsed by default** — wrapped in a click-to-expand `<button>`
+  header with `ChevronDown`/`ChevronRight` icon and `aria-expanded`. State lives in
+  `historyOpen` (default `false`). Auto-opens when the user picks a trade from the
+  chart (so the row is visible). Still positioned at the bottom of the Results card
+  — no move needed.
+
+### Gotchas
+- The `selectedTrade` → auto-expand effect runs unconditionally on `selectedTrade`
+  change; only when the value is truthy does it flip `historyOpen` to true. Clicking
+  to deselect doesn't collapse the table (intentional — user may still be reading).
+- `SummaryPanel` is now visually heavier than other cards by design. If we add a
+  second "headline" card anywhere on the page, give that one the same treatment so
+  the visual hierarchy stays consistent.
+- Build: `npm run build` passes clean. Bundle 578 kB (was 577 kB — `+1 kB` from the
+  Chevron icons + collapsible logic).
+
+---
+
+## 2026-05-24 — Redesign Phase 1: Verdict-first UI + Confidence Strip
+
+### Motivation
+Plan call (ui-ux-pro-max + modern-web-guidance): site needs a clear "Trade / Wait /
+Avoid" verdict at the top, info tooltips on every stat (question-style titles), and
+a shared "ConfidenceStrip" that gates the Deploy CTA. Foundation for upcoming
+Monte Carlo and regime-conditional metric work.
+
+### What changed
+- **New `src/components/ui/VerdictBadge.tsx`** — Trade ✓ / Wait ⏸ / Avoid ✗ pill
+  with reasons list. Exports `decideVerdict(result, regime)` pure function so the
+  threshold logic is the single source of truth. Trade requires: >5% return, <25% DD,
+  PF ≥ 1.5, Sharpe ≥ 0.5, beats Buy & Hold, ≥10 trades. Avoid triggers on
+  <-5% return, PF < 0.9, or DD > 40%. Everything else = Wait.
+- **New `src/components/ui/StatTile.tsx`** — shared stat card with question title,
+  InfoTip ⓘ, tabular-nums value, optional colored bar, sub-line. Has `compact` prop
+  for ConfidenceStrip use. Replaces the inline `MetricCard` previously living inside
+  SummaryPanel.
+- **New `src/components/ConfidenceStrip.tsx`** — 4-tile horizontal strip placed at
+  the top of the Backtester right pane. Tiles:
+  1. *Does the regime support this trade?* — derives alignment of regime + direction
+  2. *What's the forward equity band?* — placeholder until Phase 2 Monte Carlo
+  3. *How bad can it get?* — historical max drawdown
+  4. *What's the edge per trade?* — μ ± σ of per-trade pnlPct with edge-vs-noise sub
+- **`src/components/SummaryPanel.tsx`** rewritten — leads with `<VerdictBadge>`
+  (clear Trade/Wait/Avoid call), then 5 StatTile cards (return / drawdown / win-rate /
+  profit factor / Sharpe) and a regime tile. Removed the old prose verdict at the
+  bottom — the badge + reasons list now does that job more directly.
+- **`src/components/Results.tsx`** — every `<Metric>` now has a `tooltipTerm`
+  (Strategy Return, Net P&L, Buy & Hold, Final Equity, Trades, Avg Win, Avg Loss,
+  Best Trade, Worst Trade). No more bare stats.
+- **`src/lib/glossary.ts`** — added 10 new entries (Strategy Return, Net P&L,
+  Buy & Hold, Final Equity, Trades, Avg Win, Avg Loss, Best Trade, Worst Trade,
+  Avg Holding Bars, Verdict).
+- **`src/pages/BacktesterPage.tsx`** — wires ConfidenceStrip above the chart card,
+  inside the right section.
+
+### Gotchas
+- `decideVerdict` is exported separately so the same Trade/Wait/Avoid logic can be
+  reused in ConfidenceStrip if we later swap the "MC equity band" tile for a verdict
+  echo. Don't duplicate the thresholds — import the function.
+- `StatTile`'s `info` prop is a glossary key first, raw string second (same contract
+  as `InfoTip term`). When in doubt add a glossary entry rather than passing a long
+  inline string.
+- Build: `npm run build` passes clean (TS noEmit + Vite). 577 kB bundle, no new
+  warnings.
+
+### Next (Phase 2)
+Monte Carlo lib (`src/lib/montecarlo.ts`) — bootstrap trade returns to project a
+30-trade forward equity band (p5/p50/p95), then wire it into the placeholder
+ConfidenceStrip tile and overlay the band on the equity chart in Results.
+
+---
+
 ## 2026-05-24 — Backtester left pane redesign + deploy bug fix
 
 ### What changed

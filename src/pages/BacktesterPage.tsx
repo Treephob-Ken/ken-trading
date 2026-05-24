@@ -12,6 +12,9 @@ import Controls, { type SizingMode } from '@/components/Controls'
 import NumberInput from '@/components/NumberInput'
 import Results from '@/components/Results'
 import SummaryPanel from '@/components/SummaryPanel'
+import ConfidenceStrip from '@/components/ConfidenceStrip'
+import RegimeBreakdownCard from '@/components/RegimeBreakdownCard'
+import ParamStabilityCard from '@/components/ParamStabilityCard'
 import { analyzeRegime } from '@/lib/markov'
 
 interface Props {
@@ -204,6 +207,28 @@ export default function BacktesterPage({
     setParams(initialParams)
   }
 
+  // Kelly fraction nudge — derived from the backtest result. Surfaced under the
+  // "Risk per Trade %" input so the user has a math-backed sizing recommendation
+  // instead of guessing. Half-Kelly is the safer default (Thorp, Aronson).
+  const kellyHint = useMemo(() => {
+    if (!result || result.metrics.numTrades < 5) return null
+    const m = result.metrics
+    const wr = m.winRate / 100
+    const avgWin = m.avgWinPct
+    const avgLoss = Math.abs(m.avgLossPct)
+    if (avgLoss <= 0 || avgWin <= 0) return null
+    const rr = avgWin / avgLoss
+    // Standard Kelly fraction (of capital to risk). f* = (p*b - q) / b
+    const fullPct = (wr - (1 - wr) / rr) * 100
+    const halfPct = Math.max(0, fullPct / 2)
+    return {
+      fullPct,
+      halfPct,
+      // Apply button only useful when Kelly says "risk something" (positive edge).
+      edgeOk: fullPct > 0,
+    }
+  }, [result])
+
   // Deploy payload — translates sizing mode into what the Signal Bot expects.
   const deployPayload = useMemo(() => {
     const base = {
@@ -264,6 +289,7 @@ export default function BacktesterPage({
             onSizingMode={setSizingMode}
             onTargetRisk={setTargetRiskPct}
             onReload={() => setReloadKey((k) => k + 1)}
+            kellyHint={kellyHint}
           />
         </div>
 
@@ -366,6 +392,10 @@ export default function BacktesterPage({
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-4">
+        {result && (
+          <ConfidenceStrip result={result} regime={regime} direction={direction} />
+        )}
+
         <div className="card p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-text font-display">
@@ -415,12 +445,34 @@ export default function BacktesterPage({
               trades={result?.trades ?? []}
               liveCandle={isLiveRange ? liveCandle : null}
               selectedTrade={selectedTrade}
+              regimeLabels={regime?.labels}
             />
           )}
         </div>
 
         {result ? (
           <>
+            <SummaryPanel
+              result={result}
+              regime={regime}
+              strategyName={strategyMeta(strategyId).name}
+              direction={direction}
+              symbol={symbol.replace(/USDT$/, '/USDT')}
+            />
+            <RegimeBreakdownCard
+              result={result}
+              regime={regime}
+              candles={candles}
+            />
+            <ParamStabilityCard
+              candles={candles}
+              strategyId={strategyId}
+              params={params}
+              initialCapital={initialCapital}
+              feePct={feePct}
+              direction={direction}
+              sizingMode={sizingMode}
+            />
             <Results
               result={result}
               candles={candles}
@@ -428,13 +480,6 @@ export default function BacktesterPage({
               takeProfitPct={0}
               selectedTrade={selectedTrade}
               onSelectTrade={setSelectedTrade}
-            />
-            <SummaryPanel
-              result={result}
-              regime={regime}
-              strategyName={strategyMeta(strategyId).name}
-              direction={direction}
-              symbol={symbol.replace(/USDT$/, '/USDT')}
             />
           </>
         ) : (

@@ -2,6 +2,74 @@ import type { Candle, StrategyId } from '@/types'
 import { generateSignals, strategyMeta } from './strategies'
 import { runBacktest } from './backtest'
 
+export interface StabilityPoint {
+  /** Wiggle applied to all params (-20, -10, 0, +10, +20). */
+  percent: number
+  /** Sharpe ratio of the backtest with wiggled params. */
+  sharpe: number
+  /** Total return % — useful for color-coding when Sharpe is undefined. */
+  totalReturnPct: number
+  /** Number of trades the wiggled strategy produced. */
+  numTrades: number
+}
+
+export interface StabilityResult {
+  points: StabilityPoint[]
+  /** 0–100: how flat the Sharpe is across wiggles. 100 = perfectly stable. */
+  stabilityScore: number
+}
+
+/**
+ * Cheap version of walk-forward focused only on parameter stability.
+ * Runs 5 backtests (params wiggled by -20/-10/0/+10/+20%) on the full
+ * candle set — no fold loop, no per-fold optimization. Roughly 5× the
+ * cost of the main backtest, fast enough to run synchronously in a
+ * useMemo. Use this when you only want the stability strip; use
+ * walkForward() when you need IS/OOS Sharpe + overfit score.
+ */
+export function stabilityCheck(
+  candles: Candle[],
+  strategyId: StrategyId,
+  params: Record<string, number>,
+  initialCapital = 10000,
+  feeRate = 0.001,
+  direction: 'long' | 'short' | 'both' = 'long',
+  positionMode: 'fixed' | 'compounding' | 'volatility' = 'fixed',
+): StabilityResult | null {
+  if (candles.length < 50) return null
+  const meta = strategyMeta(strategyId)
+  const wiggles = [-20, -10, 0, 10, 20]
+  const points: StabilityPoint[] = wiggles.map((pct) => {
+    const wiggled: Record<string, number> = {}
+    for (const def of meta.params) {
+      const baseVal = params[def.key] ?? def.default
+      const wVal = baseVal * (1 + pct / 100)
+      const stepped = Math.round(wVal / def.step) * def.step
+      wiggled[def.key] = Math.max(def.min, Math.min(def.max, Number(stepped.toFixed(4))))
+    }
+    const out = generateSignals(strategyId, candles, wiggled)
+    const res = runBacktest(candles, out.signals, initialCapital, feeRate, direction, 0, 0, positionMode)
+    return {
+      percent: pct,
+      sharpe: Number.isNaN(res.metrics.sharpeRatio) ? 0 : res.metrics.sharpeRatio,
+      totalReturnPct: res.metrics.totalReturnPct,
+      numTrades: res.metrics.numTrades,
+    }
+  })
+
+  // Stability score: 100 - the percentage spread of Sharpe values, clamped 0-100.
+  // Flat = high score, spiky = low score.
+  const sharpes = points.map((p) => p.sharpe)
+  const max = Math.max(...sharpes)
+  const min = Math.min(...sharpes)
+  const center = points.find((p) => p.percent === 0)?.sharpe ?? 0
+  const reference = Math.max(Math.abs(center), 0.5) // avoid divide-by-zero for low-Sharpe strategies
+  const spread = max - min
+  const stabilityScore = Math.max(0, Math.min(100, 100 - (spread / reference) * 50))
+
+  return { points, stabilityScore }
+}
+
 export interface WalkForwardFold {
   foldIndex: number
   trainParams: Record<string, number>

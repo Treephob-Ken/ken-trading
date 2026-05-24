@@ -21,6 +21,50 @@ export const GLOSSARY: Record<string, string> = {
     'The average amount you expect to make per trade. (Win Rate × Avg Win) − (Loss Rate × Avg Loss).',
   'Avg Holding':
     'Average number of bars a trade is held. Short = scalping, long = swing trading.',
+  'Avg Holding Bars':
+    'Average number of bars a trade is held. Short = scalping, long = swing trading.',
+  'Strategy Return':
+    'Total % change in equity from running the strategy over the selected window. Includes fees. Compare to Buy & Hold to see if the strategy added value.',
+  'Net P&L':
+    'Total profit or loss in dollars across all closed trades, after fees. Positive = strategy made money.',
+  'Buy & Hold':
+    'What you would have earned by simply buying at the start and holding to the end. The benchmark the strategy must beat.',
+  'Final Equity':
+    'Your account balance after the last trade closed, starting from the initial capital. Includes both realized gains and any open position value at the end.',
+  'Trades':
+    'Number of completed round-trip trades during the window. Too few (<10) means the result is statistically noisy; very many means high fee burn.',
+  'Avg Win':
+    'Average percentage gain on winning trades. Bigger wins are good — but only matter if they outweigh losses.',
+  'Avg Loss':
+    'Average percentage loss on losing trades. Smaller losses are good. Compare to Avg Win — Avg Win ÷ Avg Loss = your reward-to-risk ratio.',
+  'Best Trade':
+    'The single best round-trip in this window, in % gain. One huge winner can mask many small losses, so check Profit Factor too.',
+  'Worst Trade':
+    'The single worst round-trip in this window, in % loss. If this is much larger than Avg Loss, your stops may be too loose.',
+  'Verdict':
+    'A plain-English Trade / Wait / Avoid call, based on strategy return, drawdown, profit factor, Sharpe and the current market regime. A starting point — always do your own checks.',
+  'Monte Carlo':
+    'Simulates thousands of possible futures by re-shuffling your historical trade returns. Tests whether your strategy worked because of skill or just a lucky order of trades.',
+  'Equity Band':
+    'The range of possible account values after a number of forward trades. p5 = pessimistic, p50 = median, p95 = optimistic. Wide band = high uncertainty.',
+  'Ruin Probability':
+    'The % of Monte Carlo paths that lose 50%+ of capital at some point. Lower is better — anything above 5% means the strategy can wipe you out.',
+  'Probability of Profit':
+    'The % of Monte Carlo paths that finish above starting equity at the horizon. Above 60% = consistent edge.',
+  'Account Value':
+    'Total USDC value of your Hyperliquid account, including unrealized PnL on open positions. The number that goes up or down with the market.',
+  'Withdrawable':
+    'Free USDC you can withdraw or use to open new positions. = Account Value − Margin Used. Don\'t let this hit zero on a leveraged account.',
+  'Margin Used':
+    'USDC locked as collateral for your current open positions. Higher leverage = less margin needed for the same position size, but liquidation comes faster.',
+  'Mid Price':
+    'The Hyperliquid mid-market price for this asset — average of best bid and best ask. The reference price for order sizing and slippage limits.',
+  'Max Leverage':
+    'The highest leverage Hyperliquid lets you use on this asset. Higher leverage = bigger position from the same margin, and bigger liquidation risk.',
+  'Open Positions':
+    'Trades you currently have on. Each row shows the asset, direction, size, entry price, and live unrealized PnL. Click Close to flatten one.',
+  'Network':
+    'Whether your bot is signing against Hyperliquid mainnet (real money) or testnet (paper trading). Testnet always shows an amber warning.',
 
   // ── Risk management ────────────────────────────────────────────────────
   'Kelly Criterion':

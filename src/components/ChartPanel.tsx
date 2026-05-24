@@ -18,6 +18,11 @@ import {
 } from 'lightweight-charts'
 import type { Candle, Trade } from '@/types'
 import type { StrategyOutput } from '@/lib/strategies'
+import ChartHoverPanel, {
+  findCandleIndexByTime,
+  type ChartHoverState,
+  type HoverTradeInfo,
+} from '@/components/ui/ChartHoverPanel'
 
 interface Props {
   candles: Candle[]
@@ -25,11 +30,13 @@ interface Props {
   trades: Trade[]
   liveCandle: Candle | null
   selectedTrade?: Trade | null
+  /** Optional Markov regime label per candle. -1 = window not yet filled, 0 Bear, 1 Sideways, 2 Bull. */
+  regimeLabels?: number[]
 }
 
 const t = (n: number) => n as UTCTimestamp
 
-export default function ChartPanel({ candles, output, trades, liveCandle, selectedTrade }: Props) {
+export default function ChartPanel({ candles, output, trades, liveCandle, selectedTrade, regimeLabels }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -42,6 +49,8 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
   const tradeMarkersRef = useRef<SeriesMarker<Time>[]>([])
 
   const [showSignals, setShowSignals] = useState(true)
+  // Hovered bar info, surfaced as a floating overlay on the chart.
+  const [hover, setHover] = useState<ChartHoverState | null>(null)
 
   // Chart structural build — rebuilds on backtest input changes (infrequent).
   useEffect(() => {
@@ -179,7 +188,22 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
 
     chart.timeScale().fitContent()
 
+    // Crosshair → hovered-bar tracking. Binary search candles by time to
+    // resolve the bar index; powers the floating overlay panel.
+    // Note: v5 subscribe* returns void — pair with unsubscribe* + keep a ref to the handler.
+    const crosshairHandler = (p: Parameters<Parameters<typeof chart.subscribeCrosshairMove>[0]>[0]) => {
+      const t = p.time
+      if (typeof t !== 'number') {
+        setHover(null)
+        return
+      }
+      const idx = findCandleIndexByTime(candles, t)
+      setHover({ time: candles[idx].time, barIdx: idx })
+    }
+    chart.subscribeCrosshairMove(crosshairHandler)
+
     return () => {
+      chart.unsubscribeCrosshairMove(crosshairHandler)
       chart.remove()
       chartRef.current = null
       candleSeriesRef.current = null
@@ -260,6 +284,24 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
     chartRef.current?.timeScale().scrollToRealTime()
   }
 
+  // tradeAtBar resolver for the hover overlay — entry vs exit + pnl on exits.
+  const resolveTradeAtBar = (c: Candle): HoverTradeInfo | null => {
+    const tr = trades.find((t2) => t2.entryTime === c.time || t2.exitTime === c.time)
+    if (!tr) return null
+    if (tr.entryTime === c.time) {
+      const isLong = tr.side === 'long'
+      return {
+        label: isLong ? 'BUY (entry)' : 'SELL (entry)',
+        tone: isLong ? 'gain' : 'loss',
+      }
+    }
+    return {
+      label: 'EXIT',
+      pnlPct: tr.pnlPct,
+      tone: tr.pnlPct >= 0 ? 'gain' : 'loss',
+    }
+  }
+
   return (
     <div className="flex flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
@@ -284,7 +326,15 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
           Latest Price
         </button>
       </div>
-      <div ref={containerRef} className="h-[480px] w-full" />
+      <div className="relative">
+        <div ref={containerRef} className="h-[480px] w-full" />
+        <ChartHoverPanel
+          hover={hover}
+          candles={candles}
+          regimeLabels={regimeLabels}
+          tradeAtBar={resolveTradeAtBar}
+        />
+      </div>
     </div>
   )
 }

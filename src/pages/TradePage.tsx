@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { ArrowDownCircle, ArrowUpCircle, RefreshCw } from 'lucide-react'
 import { apiFetch } from '@/contexts/AuthContext'
 import { useHLAssets } from '@/lib/hlAssets'
+import StatTile, { type Tone } from '@/components/ui/StatTile'
+import InfoTip from '@/components/InfoTip'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -217,30 +219,106 @@ export default function TradePage() {
           </div>
 
           <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: 'Account Value', value: fmtUsd(account?.accountValue), sub: 'USDC total' },
-              { label: 'Withdrawable', value: fmtUsd(account?.withdrawable), sub: 'USDC free' },
-              { label: 'Margin Used', value: account
-                ? fmtUsd((account.accountValue - account.withdrawable))
-                : '—', sub: 'USDC' },
-            ].map(({ label, value, sub }) => (
-              <div key={label} className="rounded-xl border border-border bg-panel-2 p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">{label}</p>
-                <p className="mt-1 font-mono text-lg font-semibold text-text tabular-nums">{value}</p>
-                <p className="text-[10px] text-dim">{sub}</p>
-              </div>
-            ))}
+            <StatTile
+              question="How much is the account worth?"
+              info="Account Value"
+              value={fmtUsd(account?.accountValue)}
+              sub="USDC including unrealized PnL"
+            />
+            <StatTile
+              question="How much can I deploy right now?"
+              info="Withdrawable"
+              value={fmtUsd(account?.withdrawable)}
+              tone={
+                account && account.withdrawable < account.accountValue * 0.2
+                  ? 'warn'
+                  : 'gain'
+              }
+              sub="USDC free of margin"
+            />
+            <StatTile
+              question="How much is tied up as collateral?"
+              info="Margin Used"
+              value={account ? fmtUsd(account.accountValue - account.withdrawable) : '—'}
+              sub="USDC posted for open positions"
+            />
           </div>
         </div>
+
+        {/* Asset context strip — visible once an asset is picked. Mirrors the
+            ConfidenceStrip pattern from the Backtester / Grid pages so the
+            "what am I about to trade" picture is one glance. */}
+        {selectedAsset && (
+          <div className="card p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-dim font-display">
+                Context — {selectedAsset}/USDT
+              </h3>
+              <span className="text-[10px] text-dim">
+                {account?.network ? account.network.toUpperCase() : '—'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <StatTile
+                compact
+                question="What's the live mid price?"
+                info="Mid Price"
+                value={assetInfo?.midPx ? `$${assetInfo.midPx.toLocaleString()}` : '—'}
+                tone="brand"
+                sub="Hyperliquid mark"
+              />
+              <StatTile
+                compact
+                question="How much leverage is available?"
+                info="Max Leverage"
+                value={assetInfo?.maxLeverage ? `${assetInfo.maxLeverage}×` : '—'}
+                tone="neutral"
+                sub="Higher = bigger position, faster liquidation"
+              />
+              <StatTile
+                compact
+                question="Is this real money?"
+                info="Network"
+                value={account?.network === 'mainnet' ? 'Mainnet' : account?.network === 'testnet' ? 'Testnet' : '—'}
+                tone={account?.network === 'mainnet' ? 'gain' : account?.network === 'testnet' ? 'warn' : 'neutral'}
+                sub={account?.network === 'mainnet' ? 'Live funds' : 'Paper trading'}
+              />
+              <StatTile
+                compact
+                question="What's my buying power here?"
+                info="At max leverage, the largest USDC notional you could open with your current Withdrawable balance. Just an upper bound — don't actually size to it."
+                value={
+                  account && assetInfo?.maxLeverage
+                    ? fmtUsd(account.withdrawable * assetInfo.maxLeverage)
+                    : '—'
+                }
+                tone="neutral"
+                sub="Withdrawable × max leverage"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Open positions */}
         <div className="card p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-text">
+            <h2 className="flex items-center gap-1 text-sm font-semibold text-text">
               Open Positions
+              <InfoTip term="Open Positions" />
               {positions.length > 0 && (
                 <span className="ml-2 rounded-md bg-panel-2 px-1.5 py-0.5 text-xs text-dim">{positions.length}</span>
               )}
+              {positions.length > 0 && (() => {
+                const totalUpnl = positions.reduce((acc, p) => acc + p.unrealizedPnl, 0)
+                const tone: Tone = totalUpnl > 0 ? 'gain' : totalUpnl < 0 ? 'loss' : 'neutral'
+                const toneCls = tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : 'text-dim'
+                return (
+                  <span className={`ml-2 inline-flex items-center gap-1 text-xs font-mono tabular-nums ${toneCls}`}>
+                    total uPnL {totalUpnl >= 0 ? '+' : ''}{totalUpnl.toFixed(2)}
+                    <InfoTip term="Unrealized PnL" />
+                  </span>
+                )
+              })()}
             </h2>
             <label className="flex items-center gap-2 text-[10px] text-dim">
               Close slippage %

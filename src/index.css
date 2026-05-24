@@ -104,4 +104,23 @@
   .seg-active {
     @apply bg-panel-2 text-text shadow-sm;
   }
+
+  /* Skip rendering until the card is near the viewport. Saves layout +
+     paint cost on long scroll pages (Backtester report stack). The
+     intrinsic-size keeps the scrollbar honest before the card is rendered. */
+  .defer-render {
+    content-visibility: auto;
+    contain-intrinsic-size: 1px 320px;
+  }
+
+  /* Inputs use :user-valid / :user-invalid so styling only flips AFTER the
+     user finishes editing — no error flash mid-typing. Pair with the .field
+     base class. */
+  .field:user-invalid {
+    border-color: hsl(var(--loss) / 0.55);
+    box-shadow: 0 0 0 1px hsl(var(--loss) / 0.25);
+  }
+  .field:user-valid {
+    border-color: hsl(var(--border));
+  }
 }

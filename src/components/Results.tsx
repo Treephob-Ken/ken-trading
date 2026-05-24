@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
   BaselineSeries,
   ColorType,
@@ -9,6 +10,7 @@ import {
 import type { BacktestResult, Candle, Trade } from '@/types'
 import { fmtNum, fmtPct, fmtPrice, fmtTime, fmtUsd } from '@/lib/format'
 import InfoTip from '@/components/InfoTip'
+import { avgSecondsPerTrade, simulateMonteCarlo } from '@/lib/montecarlo'
 
 interface Props {
   result: BacktestResult
@@ -29,6 +31,14 @@ export default function Results({
 }: Props) {
   const { metrics, trades, equity, openPosition } = result
   const beatBuyHold = metrics.totalReturnPct > metrics.buyHoldReturnPct
+  // Collapsed by default — the verdict + equity chart cover the headline story.
+  // Power users expand for trade-level inspection.
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  // When the user picks a trade in the chart, auto-open the history so the row is visible.
+  useEffect(() => {
+    if (selectedTrade) setHistoryOpen(true)
+  }, [selectedTrade])
 
   return (
     <div className="flex flex-col gap-4">
@@ -38,23 +48,27 @@ export default function Results({
           value={fmtPct(metrics.totalReturnPct)}
           tone={metrics.totalReturnPct >= 0 ? 'gain' : 'loss'}
           big
+          tooltipTerm="Strategy Return"
         />
         <Metric
           label="Net P&L"
           value={fmtUsd(metrics.totalPnl)}
           tone={metrics.totalPnl >= 0 ? 'gain' : 'loss'}
           big
+          tooltipTerm="Net P&L"
         />
         <Metric
           label="Buy & Hold"
           value={fmtPct(metrics.buyHoldReturnPct)}
           tone={metrics.buyHoldReturnPct >= 0 ? 'gain' : 'loss'}
           sub={beatBuyHold ? 'Strategy ahead' : 'Strategy behind'}
+          tooltipTerm="Buy & Hold"
         />
         <Metric
           label="Final Equity"
           value={fmtUsd(metrics.finalEquity)}
           sub={`from ${fmtUsd(metrics.initialCapital)}`}
+          tooltipTerm="Final Equity"
         />
         <Metric
           label="Win Rate"
@@ -66,6 +80,7 @@ export default function Results({
           label="Trades"
           value={String(metrics.numTrades)}
           sub={`${metrics.longTrades} long / ${metrics.shortTrades} short`}
+          tooltipTerm="Trades"
         />
         <Metric
           label="Profit Factor"
@@ -81,19 +96,13 @@ export default function Results({
         />
       </div>
 
-      {/* Advanced Quant Metrics Row */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      {/* Advanced Quant Metrics Row — 4 across (Sortino dropped, redundant with Sharpe) */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Metric
           label="Sharpe Ratio"
           value={fmtNum(metrics.sharpeRatio)}
           tone={metrics.sharpeRatio >= 2 ? 'gain' : metrics.sharpeRatio >= 1 ? 'gain' : metrics.sharpeRatio > 0 ? 'warn' : 'loss'}
           tooltipTerm="Sharpe Ratio"
-        />
-        <Metric
-          label="Sortino Ratio"
-          value={fmtNum(metrics.sortinoRatio)}
-          tone={metrics.sortinoRatio >= 2 ? 'gain' : metrics.sortinoRatio >= 1 ? 'gain' : metrics.sortinoRatio > 0 ? 'warn' : 'loss'}
-          tooltipTerm="Sortino Ratio"
         />
         <Metric
           label="Calmar Ratio"
@@ -115,50 +124,76 @@ export default function Results({
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Metric label="Avg Win" value={fmtPct(metrics.avgWinPct)} tone="gain" />
-        <Metric label="Avg Loss" value={fmtPct(metrics.avgLossPct)} tone="loss" />
-        <Metric label="Best Trade" value={fmtPct(metrics.bestTradePct)} tone="gain" />
-        <Metric label="Worst Trade" value={fmtPct(metrics.worstTradePct)} tone="loss" />
+        <Metric label="Avg Win" value={fmtPct(metrics.avgWinPct)} tone="gain" tooltipTerm="Avg Win" />
+        <Metric label="Avg Loss" value={fmtPct(metrics.avgLossPct)} tone="loss" tooltipTerm="Avg Loss" />
+        <Metric label="Best Trade" value={fmtPct(metrics.bestTradePct)} tone="gain" tooltipTerm="Best Trade" />
+        <Metric label="Worst Trade" value={fmtPct(metrics.worstTradePct)} tone="loss" tooltipTerm="Worst Trade" />
       </div>
 
       <RiskManager metrics={metrics} stopLossPct={stopLossPct} takeProfitPct={takeProfitPct} />
 
       <div className="card p-4">
-        <div className="mb-1 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-text">Performance</h3>
-          <div className="flex gap-4 text-xs text-muted">
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <h3 className="flex items-center gap-1 text-sm font-medium text-text">
+            Performance &amp; Forward Projection
+            <InfoTip term="Monte Carlo" />
+          </h3>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
             <span className="flex items-center gap-1.5">
               <span className="h-0.5 w-4 rounded bg-brand" /> Strategy
             </span>
             <span className="flex items-center gap-1.5">
               <span className="h-0.5 w-4 rounded bg-dim" /> Buy &amp; Hold
             </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-0.5 w-4 rounded bg-warn opacity-80" style={{ borderTop: '1px dashed' }} /> MC median
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-0.5 w-4 rounded bg-gain opacity-60" style={{ borderTop: '1px dashed' }} /> MC p95
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-0.5 w-4 rounded bg-loss opacity-60" style={{ borderTop: '1px dashed' }} /> MC p5
+            </span>
           </div>
         </div>
         <p className="mb-3 text-xs text-dim">
-          Cumulative return %, both starting at 0 — same scale, easy to compare.
+          Solid lines = historical. Dashed lines = where equity could land after 30 more trades, based on 1,000 Monte Carlo paths bootstrapped from your trades.
         </p>
         <EquityChart
           equity={equity}
           candles={candles}
+          trades={trades}
           initialCapital={metrics.initialCapital}
         />
       </div>
 
       <div className="card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h3 className="text-sm font-medium text-text">
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((v) => !v)}
+          aria-expanded={historyOpen}
+          className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-panel-2/50 ${
+            historyOpen ? 'border-b border-border' : ''
+          }`}
+        >
+          <span className="flex items-center gap-2 text-sm font-medium text-text">
+            {historyOpen ? (
+              <ChevronDown className="h-4 w-4 text-dim" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-dim" />
+            )}
             Trade History
-            <span className="ml-2 text-xs text-dim">{trades.length} closed</span>
-          </h3>
+            <span className="text-xs text-dim">{trades.length} closed</span>
+            {!historyOpen && <span className="text-[10px] text-dim italic">— click to expand</span>}
+          </span>
           {openPosition && (
             <span className="rounded-md bg-brand/15 px-2 py-1 text-xs text-brand">
               Open {openPosition.side} since {fmtTime(openPosition.entryTime)} @{' '}
               {fmtPrice(openPosition.entryPrice)}
             </span>
           )}
-        </div>
-        {trades.length === 0 ? (
+        </button>
+        {!historyOpen ? null : trades.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-dim">
             No completed trades for this strategy, direction and date range.
           </p>
@@ -450,13 +485,36 @@ function RiskRow({
 function EquityChart({
   equity,
   candles,
+  trades,
   initialCapital,
 }: {
   equity: BacktestResult['equity']
   candles: Candle[]
+  trades: Trade[]
   initialCapital: number
 }) {
   const ref = useRef<HTMLDivElement>(null)
+
+  // Forward Monte Carlo projection — bootstraps from realised trades.
+  // Returns three series of % return values stitched onto the end of the historical curve.
+  const projection = useMemo(() => {
+    if (equity.length === 0) return null
+    const mc = simulateMonteCarlo(trades, { paths: 1000, horizon: 30 })
+    const dt = avgSecondsPerTrade(trades)
+    if (!mc || !dt) return null
+    const lastEq = equity[equity.length - 1]
+    const lastT = lastEq.time
+    const lastMultiplier = lastEq.value / initialCapital // 1.0 = no change since start
+
+    const build = (key: 'p5' | 'p50' | 'p95') =>
+      mc.steps.map((s) => ({
+        time: (lastT + s.step * dt) as UTCTimestamp,
+        // Project current equity forward by the MC multiplier, then express as % since backtest start.
+        value: (lastMultiplier * s[key] - 1) * 100,
+      }))
+
+    return { p5: build('p5'), p50: build('p50'), p95: build('p95'), splitTime: lastT }
+  }, [equity, trades, initialCapital])
 
   useEffect(() => {
     const el = ref.current
@@ -519,9 +577,42 @@ function EquityChart({
       )
     }
 
+    // Monte Carlo fan: p5 (worst), p50 (median), p95 (best). All dashed so they read as projection.
+    if (projection) {
+      const p95 = chart.addSeries(LineSeries, {
+        color: 'rgba(34,197,94,0.7)', // gain
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      })
+      p95.setData(projection.p95)
+
+      const p50 = chart.addSeries(LineSeries, {
+        color: 'rgba(245,158,11,0.9)', // warn (amber) — most visible: it's the central estimate
+        lineWidth: 2,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      })
+      p50.setData(projection.p50)
+
+      const p5 = chart.addSeries(LineSeries, {
+        color: 'rgba(239,68,68,0.7)', // loss
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      })
+      p5.setData(projection.p5)
+    }
+
     chart.timeScale().fitContent()
     return () => chart.remove()
-  }, [equity, candles, initialCapital])
+  }, [equity, candles, projection, initialCapital])
 
   return <div ref={ref} className="h-[240px] w-full" />
 }

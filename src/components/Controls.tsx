@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
 import type { Direction, StrategyId } from '@/types'
 import type { SymbolInfo } from '@/lib/binance'
 import { STRATEGIES, strategyMeta } from '@/lib/strategies'
@@ -54,6 +54,11 @@ interface Props {
   onSizingMode: (v: SizingMode) => void
   onTargetRisk: (v: number) => void
   onReload: () => void
+  /**
+   * Optional Kelly-fraction nudge surfaced under the Risk per Trade input.
+   * Populated by BacktesterPage from the latest backtest result.
+   */
+  kellyHint?: { fullPct: number; halfPct: number; edgeOk: boolean } | null
 }
 
 export default function Controls(props: Props) {
@@ -321,6 +326,40 @@ export default function Controls(props: Props) {
             Risks <span className="font-mono">${riskUsd.toFixed(2)}</span> per trade
             <span className="text-dim"> ({props.targetRiskPct}% of ${props.initialCapital.toLocaleString()} capital)</span>
           </p>
+
+          {/* Kelly nudge — math-backed sizing suggestion from this strategy's edge */}
+          {props.kellyHint && (
+            <div className="mt-2.5 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-2">
+              <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-accent">
+                <Sparkles className="h-3 w-3" />
+                Kelly Suggests
+                <InfoTip term="Kelly Criterion" className="text-accent/70 hover:text-accent" />
+              </div>
+              {props.kellyHint.edgeOk ? (
+                <>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-dim">Full Kelly</span>
+                    <span className="font-mono text-text">{props.kellyHint.fullPct.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-dim">½ Kelly (safer)</span>
+                    <span className="font-mono font-medium text-accent">{props.kellyHint.halfPct.toFixed(1)}%</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => props.onTargetRisk(Number(props.kellyHint!.halfPct.toFixed(1)))}
+                    className="mt-1.5 w-full rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] font-semibold text-accent transition-colors hover:bg-accent/20 active:scale-[0.97]"
+                  >
+                    Apply ½ Kelly ({props.kellyHint.halfPct.toFixed(1)}%)
+                  </button>
+                </>
+              ) : (
+                <p className="text-[11px] text-loss leading-relaxed">
+                  Negative edge — Kelly says don't bet. Improve the strategy before sizing up.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

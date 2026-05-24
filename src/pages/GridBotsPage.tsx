@@ -19,6 +19,7 @@ import {
 import { apiFetch } from '@/contexts/AuthContext'
 import { useHLAssets } from '@/lib/hlAssets'
 import { fetchKlines } from '@/lib/binance'
+import LiveBotHeader from '@/components/LiveBotHeader'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -675,56 +676,54 @@ export default function GridBotsPage() {
       {/* ── Right main area ── */}
       <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
 
-        {/* Status / control banner */}
-        {(selectedId || isNew) && (
-          <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
-            <div className="flex items-center gap-3">
-              <Activity className={`h-5 w-5 shrink-0 ${running ? 'text-gain animate-pulse' : 'text-dim'}`} />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-text">
-                    {isNew ? 'New Bot' : (bots.find(b => b.id === selectedId)?.name ?? 'Grid Bot')}
-                  </span>
-                  <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                    running ? 'border-gain/40 bg-gain/10 text-gain'
-                      : stats?.state === 'stopped' ? 'border-loss/40 bg-loss/10 text-loss'
-                        : 'border-border bg-panel-2 text-dim'
-                  }`}>
-                    {stats?.state === 'live' ? 'Running'
-                      : stats?.state === 'init' ? 'Initializing'
-                        : stats?.state === 'waiting-trigger' ? 'Waiting'
-                          : running ? 'Starting' : 'Idle'}
-                  </span>
-                </div>
-                {cfg && (
-                  <div className="mt-0.5 text-[11px] text-dim">
-                    {cfg.asset} · {cfg.gridCount} grids · {cfg.lower}–{cfg.upper} · {cfg.mode}
-                  </div>
-                )}
-              </div>
+        {/* Live status header */}
+        {selectedId && !isNew && (
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+            <div className="flex-1 min-w-0">
+              <LiveBotHeader
+                name={bots.find(b => b.id === selectedId)?.name ?? 'Grid Bot'}
+                state={
+                  stats?.state === 'stopped'
+                    ? 'stopped'
+                    : running || stats?.state === 'live' || stats?.state === 'init' || stats?.state === 'waiting-trigger'
+                    ? 'running'
+                    : 'stopped'
+                }
+                summary={cfg ? `${cfg.asset} · ${cfg.gridCount} grids · ${cfg.lower}–${cfg.upper} · ${cfg.mode}` : undefined}
+                startedAt={stats?.startedAt && stats.startedAt > 0 ? stats.startedAt : null}
+                tradesExecuted={stats?.roundtrips}
+              />
             </div>
+            <div className="flex items-stretch gap-2">
+              <button
+                type="button"
+                disabled={running || busy || dirty}
+                onClick={() => control('start')}
+                title={dirty ? 'Save config first' : undefined}
+                className="flex items-center gap-1.5 rounded-xl bg-gain px-4 py-2 text-xs font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                <Play className="h-3.5 w-3.5" /> Start
+              </button>
+              <button
+                type="button"
+                disabled={!running || busy}
+                onClick={() => control('stop')}
+                className="flex items-center gap-1.5 rounded-xl bg-loss px-4 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                <Square className="h-3.5 w-3.5" /> Stop
+              </button>
+            </div>
+          </div>
+        )}
 
-            {selectedId && !isNew && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={running || busy || dirty}
-                  onClick={() => control('start')}
-                  title={dirty ? 'Save config first' : undefined}
-                  className="flex items-center gap-1.5 rounded-xl bg-gain px-4 py-2 text-xs font-bold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
-                >
-                  <Play className="h-3.5 w-3.5" /> Start
-                </button>
-                <button
-                  type="button"
-                  disabled={!running || busy}
-                  onClick={() => control('stop')}
-                  className="flex items-center gap-1.5 rounded-xl bg-loss px-4 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                >
-                  <Square className="h-3.5 w-3.5" /> Stop
-                </button>
-              </div>
-            )}
+        {/* New-bot title */}
+        {isNew && (
+          <div className="card flex items-center gap-3 p-4">
+            <Activity className="h-5 w-5 shrink-0 text-dim" />
+            <div>
+              <div className="font-semibold text-text">New Grid Bot</div>
+              <div className="mt-0.5 text-[11px] text-dim">Fill in asset, range, and grid count, then save to enable Start.</div>
+            </div>
           </div>
         )}
 
