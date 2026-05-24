@@ -1646,6 +1646,42 @@
 
         <div id="tr-order-preview" class="preview-box" style="min-height:52px">Select an asset to see minimum order info…</div>
 
+        <!-- Position Calculator (collapsible) -->
+        <div style="border-top:1px solid var(--border);padding-top:var(--s3);margin-top:var(--s1)">
+          <button onclick="trToggleCalc()" style="width:100%;display:flex;justify-content:space-between;align-items:center;background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:11px;font-family:inherit;padding:0;text-transform:uppercase;letter-spacing:.06em">
+            <span>📐 Position Calculator</span>
+            <span id="tr-calc-arrow" style="font-size:10px">▼</span>
+          </button>
+          <div id="tr-calc-section" style="display:none;margin-top:var(--s2)">
+            <div class="field-row">
+              <div class="field">
+                <label>Risk per Trade ($)</label>
+                <input id="tr-risk-usd" type="number" min="1" step="any" placeholder="e.g. 50" oninput="trUpdateSizingCalc()" />
+              </div>
+              <div class="field">
+                <label>Stop Loss %</label>
+                <input id="tr-sl-pct" type="number" min="0.1" step="0.1" placeholder="e.g. 2" oninput="trUpdateSizingCalc()" />
+              </div>
+            </div>
+            <div id="tr-sizing-card" class="sizing-result" style="display:none">
+              <div class="sizing-result-header">
+                <span class="sizing-result-label">Position Size</span>
+                <span class="sizing-result-value" id="tr-res-pos-usd">—</span>
+              </div>
+              <div class="sizing-result-rows">
+                <div class="sizing-result-row"><span class="sizing-result-key">Order Qty</span><span class="sizing-result-val" id="tr-res-qty">—</span></div>
+                <div class="sizing-result-row"><span class="sizing-result-key">Max Leverage</span><span class="sizing-result-val" id="tr-res-maxlev">—</span></div>
+                <div class="sizing-result-row"><span class="sizing-result-key">Margin at max lev</span><span class="sizing-result-val" id="tr-res-margin">—</span></div>
+                <div class="sizing-result-row"><span class="sizing-result-key">SL price (Long / Short)</span><span class="sizing-result-val sl" id="tr-res-sl">—</span></div>
+              </div>
+            </div>
+            <div id="tr-sizing-empty" class="sizing-empty" style="display:none">Enter <b>Risk $</b> + <b>Stop Loss %</b> to calculate</div>
+            <button id="tr-use-size-btn" onclick="trUseSizingResult()" class="btn" style="width:100%;margin-top:var(--s2);display:none">
+              ↑ Use $<span id="tr-use-size-val">—</span> as Amount
+            </button>
+          </div>
+        </div>
+
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin-top:var(--s1)">
           <button class="btn-trade-buy" id="tr-buy-btn" onclick="trManualTrade('buy')">▲ Buy / Long</button>
           <button class="btn-trade-sell" id="tr-sell-btn" onclick="trManualTrade('sell')">▼ Sell / Short</button>
@@ -3434,6 +3470,7 @@
       trAssetInfo = null
     }
     trUpdateOrderPreview()
+    trUpdateSizingCalc()   // refresh calc whenever price/info updates
   }
 
   function trAssetChanged(asset) {
@@ -3475,6 +3512,51 @@
     }
     const usdc = wd * pct / 100
     const inp = $('tr-usdc'); if (inp) { inp.value = usdc.toFixed(2); trUpdateOrderPreview() }
+  }
+
+  let trCalcOpen = false
+  function trToggleCalc() {
+    trCalcOpen = !trCalcOpen
+    $('tr-calc-section').style.display = trCalcOpen ? '' : 'none'
+    $('tr-calc-arrow').textContent = trCalcOpen ? '▲' : '▼'
+    if (trCalcOpen) trUpdateSizingCalc()
+  }
+
+  function trUpdateSizingCalc() {
+    if (!trCalcOpen) return
+    const riskUsd = parseFloat($('tr-risk-usd')?.value)
+    const slPct   = parseFloat($('tr-sl-pct')?.value)
+    const card = $('tr-sizing-card'), empty = $('tr-sizing-empty'), useBtn = $('tr-use-size-btn')
+    if (!card || !empty || !useBtn) return
+    if (!(riskUsd > 0) || !(slPct > 0)) {
+      card.style.display = 'none'; empty.style.display = ''; useBtn.style.display = 'none'; return
+    }
+    const positionUsd = riskUsd / (slPct / 100)
+    card.style.display = ''; empty.style.display = 'none'
+    const info = trAssetInfo
+    const price = info?.midPx, maxLev = info?.maxLeverage
+    const asset = (trAssetCombo?.getValue() || '').toUpperCase()
+    if ($('tr-res-pos-usd')) $('tr-res-pos-usd').textContent = `$${positionUsd.toLocaleString('en',{maximumFractionDigits:0})}`
+    if ($('tr-res-qty'))     $('tr-res-qty').textContent     = price ? `${(positionUsd / price).toFixed(6)} ${asset}` : '— (select asset)'
+    if ($('tr-res-maxlev'))  $('tr-res-maxlev').textContent  = maxLev ? `${maxLev}×` : '—'
+    if ($('tr-res-margin'))  $('tr-res-margin').textContent  = maxLev ? `$${(positionUsd / maxLev).toFixed(2)}` : '—'
+    if (price && $('tr-res-sl')) {
+      const slL = (price * (1 - slPct / 100)).toLocaleString('en', {maximumFractionDigits:4})
+      const slS = (price * (1 + slPct / 100)).toLocaleString('en', {maximumFractionDigits:4})
+      $('tr-res-sl').textContent = `$${slL}  /  $${slS}`
+    } else if ($('tr-res-sl')) {
+      $('tr-res-sl').textContent = `−${slPct}% / +${slPct}% from entry`
+    }
+    const usv = $('tr-use-size-val'); if (usv) usv.textContent = positionUsd.toFixed(0)
+    useBtn.style.display = ''
+  }
+
+  function trUseSizingResult() {
+    const riskUsd = parseFloat($('tr-risk-usd')?.value)
+    const slPct   = parseFloat($('tr-sl-pct')?.value)
+    if (!(riskUsd > 0) || !(slPct > 0)) return
+    const positionUsd = riskUsd / (slPct / 100)
+    const inp = $('tr-usdc'); if (inp) { inp.value = positionUsd.toFixed(2); trUpdateOrderPreview() }
   }
 
   function trUpdateOrderPreview() {
