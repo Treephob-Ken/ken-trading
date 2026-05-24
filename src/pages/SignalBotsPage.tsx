@@ -468,9 +468,14 @@ export default function SignalBotsPage() {
     }
   }, [riskUsd, sizingSlPct, cfg?.asset, assetPrice, maxLeverage])
 
-  const applySizing = () => {
-    if (sizingResult?.rawQty) patch({ size: parseFloat(sizingResult.rawQty.toFixed(6)) })
-  }
+  // Auto-apply computed qty to Order size whenever sizing result updates
+  useEffect(() => {
+    if (sizingResult?.rawQty && !running) {
+      patch({ size: parseFloat(sizingResult.rawQty.toFixed(6)) })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sizingResult?.rawQty])
+
 
   // When switching to a bot, clear new-bot state
   const selectBot = (id: string) => {
@@ -680,14 +685,9 @@ export default function SignalBotsPage() {
                       <span className="text-[10px] text-dim">SL price (L / S)</span>
                       <span className="font-mono text-[10px] font-semibold text-loss">{sizingResult.slPrices}</span>
                     </div>
-                    <button
-                      type="button"
-                      disabled={!sizingResult.rawQty || running}
-                      onClick={applySizing}
-                      className="w-full rounded-lg border border-brand/30 bg-brand/10 px-2.5 py-1 text-[10px] font-semibold text-brand transition-colors hover:bg-brand/15 disabled:opacity-40"
-                    >
-                      Apply → set Order size to {sizingResult.rawQty?.toFixed(6) ?? '—'} {cfg.asset}
-                    </button>
+                    <p className="mt-1 text-center text-[10px] text-gain">
+                      ✓ Order size auto-set to {sizingResult.rawQty?.toFixed(6) ?? '—'} {cfg.asset}
+                    </p>
                   </div>
                 ) : (
                   <p className="rounded-xl border border-border bg-panel-2 px-3 py-2 text-[10px] text-dim">
