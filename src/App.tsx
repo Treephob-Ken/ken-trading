@@ -1,21 +1,11 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
-import { fetchSymbols, type SymbolInfo } from '@/lib/binance'
 import { AuthProvider } from '@/contexts/AuthContext'
 import Sidebar from '@/components/Sidebar'
 import BacktesterPage from '@/pages/BacktesterPage'
 import GridPage from '@/pages/GridPage'
 import LoginPage from '@/pages/LoginPage'
 import ComingSoonPage from '@/pages/ComingSoonPage'
-
-// ─── Fallback symbol list used before the HL asset list loads ─────────────────
-const FALLBACK_SYMBOLS: SymbolInfo[] = [
-  { symbol: 'ETHUSDT',  base: 'ETH',  quote: 'USDT' },
-  { symbol: 'BTCUSDT',  base: 'BTC',  quote: 'USDT' },
-  { symbol: 'SOLUSDT',  base: 'SOL',  quote: 'USDT' },
-  { symbol: 'BNBUSDT',  base: 'BNB',  quote: 'USDT' },
-  { symbol: 'XRPUSDT',  base: 'XRP',  quote: 'USDT' },
-]
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -34,21 +24,13 @@ function AppShell() {
 }
 
 export default function App() {
+  // Selected symbol and timeframe are shared across analytics pages.
+  // The symbol list itself is fetched per-page via useHLAssets().
   const [symbol, setSymbol] = useState(() => localStorage.getItem('lab_symbol') || 'ETHUSDT')
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('lab_timeframe') || '1h')
-  const [symbols, setSymbols] = useState<SymbolInfo[]>(FALLBACK_SYMBOLS)
 
   useEffect(() => { localStorage.setItem('lab_symbol', symbol) }, [symbol])
   useEffect(() => { localStorage.setItem('lab_timeframe', timeframe) }, [timeframe])
-
-  // Phase 1: still using Binance symbols (Phase 2 switches to HL assets via /api/assets)
-  useEffect(() => {
-    let cancelled = false
-    fetchSymbols()
-      .then((list) => { if (!cancelled && list.length) setSymbols(list) })
-      .catch(() => { /* keep fallback list */ })
-    return () => { cancelled = true }
-  }, [])
 
   return (
     <BrowserRouter>
@@ -71,7 +53,6 @@ export default function App() {
             <BacktesterPage
               symbol={symbol}
               timeframe={timeframe}
-              symbols={symbols}
               onSymbol={setSymbol}
               onTimeframe={setTimeframe}
             />
@@ -81,22 +62,21 @@ export default function App() {
             <GridPage
               symbol={symbol}
               timeframe={timeframe}
-              symbols={symbols}
               onSymbol={setSymbol}
               onTimeframe={setTimeframe}
             />
           } />
 
-          {/* Phase 3 — Signal Bots (coming soon) */}
+          {/* Phase 3 — Signal Bots */}
           <Route path="signal" element={<ComingSoonPage label="Signal Bots" />} />
 
-          {/* Phase 4 — Grid Bots (coming soon) */}
+          {/* Phase 4 — Grid Bots */}
           <Route path="bots" element={<ComingSoonPage label="Grid Bots" />} />
 
-          {/* Phase 5 — Trade (coming soon) */}
+          {/* Phase 5 — Trade */}
           <Route path="trade" element={<ComingSoonPage label="Trade" />} />
 
-          {/* Phase 5 — Logs (coming soon) */}
+          {/* Phase 5 — Logs */}
           <Route path="logs" element={<ComingSoonPage label="Logs" />} />
 
           {/* Catch-all → backtest */}

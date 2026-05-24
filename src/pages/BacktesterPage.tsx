@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity } from 'lucide-react'
+import { Activity, Rocket } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import type { Candle, Direction, StrategyId, Trade } from '@/types'
-import { fetchKlines, MAX_BARS, subscribeKline, type SymbolInfo } from '@/lib/binance'
+import { fetchKlines, MAX_BARS, subscribeKline } from '@/lib/binance'
 import { defaultParams, generateSignals, strategyMeta } from '@/lib/strategies'
 import { runBacktest } from '@/lib/backtest'
 import { fmtPrice } from '@/lib/format'
+import { useHLAssets } from '@/lib/hlAssets'
 import ChartPanel from '@/components/ChartPanel'
 import Controls from '@/components/Controls'
 import Results from '@/components/Results'
@@ -14,7 +16,6 @@ import { analyzeRegime } from '@/lib/markov'
 interface Props {
   symbol: string
   timeframe: string
-  symbols: SymbolInfo[]
   onSymbol: (v: string) => void
   onTimeframe: (v: string) => void
 }
@@ -24,10 +25,11 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 export default function BacktesterPage({
   symbol,
   timeframe,
-  symbols,
   onSymbol,
   onTimeframe,
 }: Props) {
+  const { symbols } = useHLAssets()
+  const navigate = useNavigate()
   const [startDate, setStartDate] = useState(() => localStorage.getItem('bt_startDate') || '')
   const [endDate, setEndDate] = useState(() => localStorage.getItem('bt_endDate') || '')
   const [strategyId, setStrategyId] = useState<StrategyId>(
@@ -314,6 +316,32 @@ export default function BacktesterPage({
               direction={direction}
               symbol={symbol.replace(/USDT$/, '/USDT')}
             />
+            {/* ── Deploy to live trading ── */}
+            <div className="card flex items-center justify-between gap-4 p-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text">Deploy as Signal Bot</p>
+                <p className="text-xs text-dim">
+                  Run this strategy live on Hyperliquid with your current settings.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  sessionStorage.setItem('pending_signal_bot_config', JSON.stringify({
+                    asset: symbol.replace(/USDT$/, ''),
+                    strategy: strategyId,
+                    timeframe,
+                    params,
+                    direction,
+                  }))
+                  navigate('/signal')
+                }}
+                className="flex shrink-0 items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              >
+                <Rocket className="h-4 w-4" />
+                Deploy
+              </button>
+            </div>
           </>
         ) : (
           !loading &&

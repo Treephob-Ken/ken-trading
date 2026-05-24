@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Download, ExternalLink, Zap, BarChart2, FileJson } from 'lucide-react'
+import { Rocket, Zap, BarChart2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import type { Candle } from '@/types'
 import { fetchKlines, type SymbolInfo } from '@/lib/binance'
+import { useHLAssets } from '@/lib/hlAssets'
+import { apiFetch } from '@/contexts/AuthContext'
 import {
   buildCenteredGrid,
   classifyLines,
@@ -22,7 +25,6 @@ import NumberInput from '@/components/NumberInput'
 interface Props {
   symbol: string
   timeframe: string
-  symbols: SymbolInfo[]
   onSymbol: (v: string) => void
   onTimeframe: (v: string) => void
 }
@@ -32,10 +34,10 @@ type GridPageMode = 'static' | 'auto'
 export default function GridPage({
   symbol,
   timeframe,
-  symbols,
   onSymbol,
   onTimeframe,
 }: Props) {
+  const { symbols } = useHLAssets()
   // ── mode ────────────────────────────────────────────────────────────────────
   const [pageMode, setPageMode] = useState<GridPageMode>(
     () => (localStorage.getItem('gd_pageMode') as GridPageMode) || 'static',
@@ -173,7 +175,7 @@ export default function GridPage({
     const activeFeePct = pageMode === 'static' ? feePct : 0.05
     const activeMode = pageMode === 'static' ? mode : 'arithmetic'
     const cfg: Record<string, unknown> = {
-      name: botName || `${asset} ${pageMode === 'auto' ? 'auto' : gridType} grid`,
+      name: botName || `${asset}-GRID-${gridCount}`,
       asset, lower, upper, gridCount, mode: activeMode, investment, leverage,
       stopLossPrice:   +(lower * (1 - slPct / 100)).toFixed(2),
       takeProfitPrice: +(upper * (1 + tpPct / 100)).toFixed(2),
@@ -187,42 +189,6 @@ export default function GridPage({
     a.click()
     URL.revokeObjectURL(a.href)
     void activeFeePct
-  }
-
-  // ── export: raw grid lines ───────────────────────────────────────────────────
-  function exportLines() {
-    if (activeLines.length < 2) return
-    const asset = symbol.replace(/USDT$/, '')
-    const spacingPct =
-      pageMode === 'static'
-        ? staticResult?.best.spacingPct ?? 0
-        : autoResult && autoResult.currentLines.length >= 2
-          ? ((autoResult.currentLines[1] - autoResult.currentLines[0]) / autoResult.currentLines[0]) * 100
-          : 0
-    const data = {
-      symbol,
-      asset,
-      timeframe,
-      generatedAt: new Date().toISOString(),
-      mode: pageMode === 'static' ? mode : 'arithmetic',
-      gridType: pageMode === 'static' ? gridType : 'neutral',
-      anchor: pageMode === 'static' ? staticResult?.anchor : autoResult?.currentAP,
-      gridCount: activeLines.length - 1,
-      spacingPct: +spacingPct.toFixed(4),
-      lower: +activeLines[0].price.toFixed(6),
-      upper: +activeLines[activeLines.length - 1].price.toFixed(6),
-      lines: activeLines.map((l, i) => ({
-        index: i,
-        price: +l.price.toFixed(6),
-        kind: l.kind,
-      })),
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `grid-lines.${asset.toLowerCase()}.json`
-    a.click()
-    URL.revokeObjectURL(a.href)
   }
 
   return (
@@ -389,8 +355,6 @@ export default function GridPage({
               onManualSize={setManualSize}
               feePct={feePct}
               spacingPct={staticResult.best.spacingPct}
-              onExport={exportConfig}
-              onExportLines={exportLines}
             />
           </div>
         ) : pageMode === 'auto' && autoResult ? (
@@ -426,8 +390,6 @@ export default function GridPage({
                   ? ((autoResult.currentLines[1] - autoResult.currentLines[0]) / autoResult.currentLines[0]) * 100
                   : 0
               }
-              onExport={exportConfig}
-              onExportLines={exportLines}
             />
           </div>
         ) : (
@@ -691,7 +653,7 @@ function DeployCard({
   botName, onBotName, investment, onInvestment, leverage, onLeverage,
   slPct, onSlPct, tpPct, onTpPct, useTrigger, onUseTrigger,
   useManualSize, onUseManualSize, manualSize, onManualSize,
-  feePct, spacingPct, onExport, onExportLines,
+  feePct, spacingPct,
 }: {
   lines: GridLine[]
   symbol: string
@@ -715,9 +677,10 @@ function DeployCard({
   onManualSize: (v: number) => void
   feePct: number
   spacingPct: number
-  onExport: () => void
-  onExportLines: () => void
 }) {
+  const navigate = useNavigate()
+  const [deploying, setDeploying] = useState(false)
+  const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null)
   if (lines.length < 2) return null
   const asset = symbol.replace(/USDT$/, '')
   const lower = lines[0].price
@@ -736,9 +699,9 @@ function DeployCard({
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border bg-brand/5 px-4 py-3">
-        <Download className="h-4 w-4 text-brand" />
+        <Rocket className="h-4 w-4 text-brand" />
         <h3 className="text-sm font-semibold text-text">Deploy to Bot</h3>
-        <span className="ml-auto text-xs text-dim">export config → run bot</span>
+        <span className="ml-auto text-xs text-dim">create bot → start trading</span>
       </div>
 
       <div className="p-4 space-y-4">
@@ -820,39 +783,58 @@ function DeployCard({
           </label>
         </div>
 
-        {/* Two download buttons */}
-        <div className="flex flex-col gap-2">
-          {/* PRIMARY — the file the bot dashboard accepts */}
-          <div>
-            <button
-              onClick={onExport}
-              className="btn-primary w-full justify-center py-2.5"
-            >
-              <Download className="h-4 w-4" />
-              Download for Bot (grid.config.json)
-            </button>
-            <p className="mt-1 text-center text-[11px] text-dim">
-              Drop this in the{' '}
-              <a href="https://bot.garlic-trading.net" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
-                Bot Dashboard <ExternalLink className="h-3 w-3" />
-              </a>
-            </p>
+        {/* Deploy to bot */}
+        {toast && (
+          <div className={`rounded-xl px-3 py-2 text-xs font-medium ${
+            toast.ok ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'
+          }`}>
+            {toast.msg}
           </div>
-
-          {/* SECONDARY — reference only, not for the bot */}
-          <div>
-            <button
-              onClick={onExportLines}
-              className="btn-ghost w-full justify-center py-2 gap-2 text-xs"
-            >
-              <FileJson className="h-3.5 w-3.5" />
-              Export Line Prices (grid-lines.json)
-            </button>
-            <p className="text-center text-[11px] text-dim">
-              All grid prices — for TradingView / manual reference only
-            </p>
-          </div>
-        </div>
+        )}
+        <button
+          type="button"
+          disabled={deploying}
+          onClick={async () => {
+            const lower = lines[0].price
+            const upper = lines[lines.length - 1].price
+            const gridCount = lines.length - 1
+            const payload: Record<string, unknown> = {
+              name: botName || `${asset}-GRID-${gridCount}`,
+              asset,
+              lower: +lower.toFixed(8),
+              upper: +upper.toFixed(8),
+              gridCount,
+              mode,
+              leverage,
+              stopLossPrice:   +(lower * (1 - slPct / 100)).toFixed(8),
+              takeProfitPrice: +(upper * (1 + tpPct / 100)).toFixed(8),
+            }
+            if (useManualSize) payload.orderSize = manualSize
+            else payload.investment = investment
+            if (useTrigger) payload.triggerPrice = lower
+            setDeploying(true)
+            setToast(null)
+            try {
+              const res = await apiFetch('/api/bots', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              })
+              const data = (await res.json()) as { id?: string; name?: string; error?: string }
+              if (!res.ok) { setToast({ ok: false, msg: data.error ?? 'Deploy failed' }); return }
+              setToast({ ok: true, msg: `Grid bot '${data.name ?? data.id}' created ✓` })
+              setTimeout(() => navigate(`/bots?select=${data.id}`), 1200)
+            } catch (e) {
+              setToast({ ok: false, msg: (e as Error).message })
+            } finally {
+              setDeploying(false)
+            }
+          }}
+          className="btn-primary w-full justify-center py-2.5 disabled:opacity-50"
+        >
+          <Rocket className="h-4 w-4" />
+          {deploying ? 'Deploying…' : 'Deploy as Grid Bot'}
+        </button>
       </div>
     </div>
   )
