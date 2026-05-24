@@ -265,6 +265,64 @@ export default function GridPage({
             />
           )}
         </div>
+
+        {/* Deploy card — in sidebar alongside controls */}
+        {pageMode === 'static' && staticResult && (
+          <DeployCard
+            lines={displayLines}
+            symbol={symbol}
+            mode={mode}
+            gridType={gridType}
+            botName={botName}
+            onBotName={setBotName}
+            investment={investment}
+            onInvestment={setInvestment}
+            leverage={leverage}
+            onLeverage={setLeverage}
+            slPct={slPct}
+            onSlPct={setSlPct}
+            tpPct={tpPct}
+            onTpPct={setTpPct}
+            useTrigger={useTrigger}
+            onUseTrigger={setUseTrigger}
+            useManualSize={useManualSize}
+            onUseManualSize={setUseManualSize}
+            manualSize={manualSize}
+            onManualSize={setManualSize}
+            feePct={feePct}
+            spacingPct={staticResult.best.spacingPct}
+          />
+        )}
+        {pageMode === 'auto' && autoResult && (
+          <DeployCard
+            lines={autoDisplayLines}
+            symbol={symbol}
+            mode="arithmetic"
+            gridType="neutral"
+            botName={botName}
+            onBotName={setBotName}
+            investment={investment}
+            onInvestment={setInvestment}
+            leverage={leverage}
+            onLeverage={setLeverage}
+            slPct={slPct}
+            onSlPct={setSlPct}
+            tpPct={tpPct}
+            onTpPct={setTpPct}
+            useTrigger={useTrigger}
+            onUseTrigger={setUseTrigger}
+            useManualSize={useManualSize}
+            onUseManualSize={setUseManualSize}
+            manualSize={manualSize}
+            onManualSize={setManualSize}
+            feePct={0.05}
+            spacingPct={
+              autoResult.currentLines.length >= 2
+                ? ((autoResult.currentLines[1] - autoResult.currentLines[0]) / autoResult.currentLines[0]) * 100
+                : 0
+            }
+          />
+        )}
       </aside>
 
       {/* ── RIGHT: Analysis + Deploy ─────────────────────────────────────────── */}
@@ -325,72 +383,16 @@ export default function GridPage({
           )}
         </div>
 
-        {/* 3–4. Stats / sweep / auto info + Deploy card side-by-side */}
+        {/* 3–4. Stats / sweep / auto info */}
         {pageMode === 'static' && staticResult ? (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="flex flex-col gap-4">
-              <GridStats result={staticResult} windowBars={bars.length} timeframe={timeframe} candles={bars} />
-              <SweepChart result={staticResult} />
-            </div>
-            <DeployCard
-              lines={displayLines}
-              symbol={symbol}
-              mode={mode}
-              gridType={gridType}
-              botName={botName}
-              onBotName={setBotName}
-              investment={investment}
-              onInvestment={setInvestment}
-              leverage={leverage}
-              onLeverage={setLeverage}
-              slPct={slPct}
-              onSlPct={setSlPct}
-              tpPct={tpPct}
-              onTpPct={setTpPct}
-              useTrigger={useTrigger}
-              onUseTrigger={setUseTrigger}
-              useManualSize={useManualSize}
-              onUseManualSize={setUseManualSize}
-              manualSize={manualSize}
-              onManualSize={setManualSize}
-              feePct={feePct}
-              spacingPct={staticResult.best.spacingPct}
-            />
+          <div className="flex flex-col gap-4">
+            <GridStats result={staticResult} windowBars={bars.length} timeframe={timeframe} candles={bars} />
+            <SweepChart result={staticResult} />
           </div>
         ) : pageMode === 'auto' && autoResult ? (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="flex flex-col gap-4">
-              <AutoGridInfo result={autoResult} symbol={symbol} params={autoParams} />
-              <AutoSignalLog result={autoResult} candles={candles} />
-            </div>
-            <DeployCard
-              lines={autoDisplayLines}
-              symbol={symbol}
-              mode="arithmetic"
-              gridType="neutral"
-              botName={botName}
-              onBotName={setBotName}
-              investment={investment}
-              onInvestment={setInvestment}
-              leverage={leverage}
-              onLeverage={setLeverage}
-              slPct={slPct}
-              onSlPct={setSlPct}
-              tpPct={tpPct}
-              onTpPct={setTpPct}
-              useTrigger={useTrigger}
-              onUseTrigger={setUseTrigger}
-              useManualSize={useManualSize}
-              onUseManualSize={setUseManualSize}
-              manualSize={manualSize}
-              onManualSize={setManualSize}
-              feePct={0.05}
-              spacingPct={
-                autoResult.currentLines.length >= 2
-                  ? ((autoResult.currentLines[1] - autoResult.currentLines[0]) / autoResult.currentLines[0]) * 100
-                  : 0
-              }
-            />
+          <div className="flex flex-col gap-4">
+            <AutoGridInfo result={autoResult} symbol={symbol} params={autoParams} />
+            <AutoSignalLog result={autoResult} candles={candles} />
           </div>
         ) : (
           !loading && !error && (
