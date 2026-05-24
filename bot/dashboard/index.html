@@ -2886,7 +2886,8 @@
       const item = document.createElement('div')
       item.className = 'bot-item' + (b.id === stSelectedId ? ' active' : '') + (b.running ? ' running' : '')
       item.onclick = () => selectSignalBot(b.id)
-      item.innerHTML = `<div class="bot-dot"></div><div class="bot-info"><div class="bot-name">${escHtml(b.name)}</div><div class="bot-meta">${b.ensembleMode ? `ENSEMBLE(${b.ensembleCount || '?'})` : escHtml(String(b.strategyId).toUpperCase())} · ${escHtml(b.symbol)} · ${escHtml(b.timeframe)}</div></div>`
+      const autoFallback = `${b.ensembleMode ? 'ENS' : String(b.strategyId).replace(/_/g,'-').toUpperCase()}-${(b.symbol||'').replace(/USDT$/,'')}-${b.timeframe}`
+      item.innerHTML = `<div class="bot-dot"></div><div class="bot-info"><div class="bot-name">${escHtml(b.name || autoFallback)}</div><div class="bot-meta">${b.ensembleMode ? `Ensemble(${b.ensembleCount || '?'})` : escHtml(String(b.strategyId).toUpperCase())} · ${escHtml(b.symbol)} · ${escHtml(b.timeframe)}</div></div>`
       list.appendChild(item)
     }
   }
@@ -2924,12 +2925,16 @@
   }
 
   async function newSignalBot() {
+    const defaultStratId = 'macd', defaultAsset = 'ETH', defaultTf = '1h'
+    // Generate the name client-side and send it to the server so the bot list
+    // shows it immediately — don't rely on populateForm saving it later.
+    const autoName = `${defaultStratId.toUpperCase()}-${defaultAsset}-${defaultTf}`
     try {
       const status = await apiCall('/api/signal/bots', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        // name is '' so populateForm detects auto-naming mode and generates from config
-        body: JSON.stringify({ name: '', config: { strategyId: 'macd', symbol: 'ETHUSDT', timeframe: '1h', params: {}, asset: 'ETH', riskUsd: 50, slPct: 2, size: 0, slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
+        body: JSON.stringify({ name: autoName, config: { strategyId: defaultStratId, symbol: defaultAsset + 'USDT', timeframe: defaultTf, params: {}, asset: defaultAsset, riskUsd: 50, slPct: 2, size: 0, slippagePct: 2, cooldownSec: 60, tradeSide: 'both' } }),
       })
+      stBotNameIsAuto = true  // new bots start in auto-naming mode
       showToast('Signal bot created'); stSelectedId = status.id
       await loadSignalBots(); selectSignalBot(status.id)
     } catch (e) { showToast(e.message, true) }
@@ -2966,11 +2971,13 @@
     const cur = (cfg.asset || (cfg.symbol || 'ETHUSDT').replace(/USDT$|USDC$/, '')).toUpperCase()
     stCurrencyCombo.setValue(cur); $('st-symbol').value = cfg.symbol || (cur + 'USDT'); $('st-asset').value = cfg.asset || cur
     $('st-timeframe').value = cfg.timeframe || '1h'
-    // Name: set after combos so generateBotName() has the right values.
-    // Empty name → auto-naming mode; non-empty → user has named it manually.
+    // Name: set after combos so generateBotName() has current strategy/asset/tf.
+    // Auto-naming is active when: name is empty OR name equals what generateBotName()
+    // would produce (i.e. bot was never manually renamed by the user).
     if (name !== undefined && $('st-bot-name')) {
-      stBotNameIsAuto = !name
-      $('st-bot-name').value = name || generateBotName()
+      const generatedName = generateBotName()
+      stBotNameIsAuto = !name || name === generatedName
+      $('st-bot-name').value = name || generatedName
     }
     $('st-risk-usd').value = cfg.riskUsd ?? ''
     $('st-size').value = cfg.size > 0 ? cfg.size : ''
