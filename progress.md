@@ -58,6 +58,7 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Network badge (testnet/mainnet) | ✅ in sidebar |
 | Strategy Backtester (Binance candles, MTF, regime, walk-forward) | ✅ |
 | Grid Optimizer (sweep + deploy-to-bot) | ✅ |
+| Currency Scanner (Indicator + Grid tabs, batch-rank top 30 HL coins, persisted results + colored verdicts) | ✅ |
 | Live SSE log tail across all bots | ✅ Logs page |
 | Login page redesign (dot-grid, framer-motion) | ✅ |
 
@@ -153,6 +154,13 @@ pm2 restart cloudflare-tunnel    # if tunnel drops
   `git push` ships the SPA along with the bot.
 - **PowerShell `&&` doesn't work** on Windows 11 (PS 5.1). Use `;` or
   `; if ($?) { ... }`.
+- **Scanner persistence uses `sessionStorage`** (not `localStorage`) so results
+  survive page navigation but reset on tab close — by design, so stale scans
+  don't carry across sessions. Filters use `localStorage`.
+- **Scanner symbol universe** = intersection of HL `/api/assets` × Binance
+  top-30 24h `quoteVolume`. If `/api/assets` 401s in multi-user mode,
+  `hlAssets.ts` falls back to a hardcoded BTC/ETH/SOL/BNB/XRP list so the
+  page still renders something.
 
 ---
 
@@ -168,35 +176,3 @@ pm2 restart cloudflare-tunnel    # if tunnel drops
 | Per-user configs | `bot/data/<userId>/configs/`, `bot/data/<userId>/signal-bots/` |
 | Audit log | `bot/trade-audit.log` (NDJSON, append-only) |
 | Lessons file | `docs/lessons.md` (if/when created) |
-
----
-
-## 2026-05-25 — Currency Scanner page (Indicator + Grid)
-
-**Why:** Backtester and Grid Optimizer pages are single-combo analyzers — user had to manually iterate through every symbol/strategy/timeframe to find the best one. The Scanner page batch-runs the same engines across many combos and ranks them, then click-throughs back into the analyzer pages with the winning combo pre-selected.
-
-**Built:**
-- `src/lib/scanner/universe.ts` — `getScannerUniverse()` intersects HL `/api/assets` (so symbols are HL-tradeable, since HL uses USDC perps) with Binance 24h `/ticker/24hr` volume, returns top 30 by `quoteVolume`. Module-level cache + `clearUniverseCache()` for refresh.
-- `src/lib/scanner/indicatorScan.ts` — `runIndicatorScan(universe, options, onProgress, signal)`. Loops 30 symbols × 2 TFs (1h + 4h) × 14 strategies = 840 backtests. Uses `defaultParams()`, `generateSignals()`, `runBacktest()` — identical to BacktesterPage so reported return % matches the row when user opens that combo. Concurrency cap of 6 in-flight Binance fetches via inline `pool()` helper. Lookback 90 days.
-- `src/lib/scanner/gridScan.ts` — `runGridScan(universe, options, onProgress, signal)`. For each of 30 symbols on 4h × 30 days, calls `optimizeGrid()` (reuses built-in `MarketFit.score` 0–100) + `analyzeRegime()` for Bull/Sideways/Bear classification + derived `tradesPerDay`, `spacingMultiple = spacing/breakeven`.
-- `src/components/scanner/IndicatorScanTab.tsx` — controls (direction, TF chips, min trades, strategy chips), progress bar, Top-3 highlight cards, sortable results table (return / trades / win / DD / Sharpe). ▶ button calls `onPickSymbol` + `onPickTimeframe` then `navigate('/backtest', { state: { presetStrategy } })`.
-- `src/components/scanner/GridScanTab.tsx` — sideways-only / spacing-multiple / trades-per-day filters, Top-3 cards, table with Score / Verdict / Regime / Trades-per-day / Range% / ATR% / Spacing× / Sim Return. ▶ button routes to `/grid` with the symbol preset.
-- `src/pages/ScannerPage.tsx` — page shell with tab switcher (Indicator | Grid), symbol-count chip + refresh button in header.
-
-**Wired:**
-- `src/App.tsx` — added `<Route path="scanner" />` with `setSymbol` / `setTimeframe` lifted props (same pattern Backtester + Grid use).
-- `src/components/Sidebar.tsx` — added Radar icon nav item between Backtester and Grid Optimizer.
-- `src/pages/BacktesterPage.tsx` — reads `location.state.presetStrategy` on mount, applies it via the existing `defaultParams()` + `bt_params_<id>` localStorage lookup, then `navigate(..., { replace: true, state: null })` so refresh doesn't re-trigger.
-
-**Reused as-is:** `binance.fetchKlines`, `hlAssets.fetchHLAssets`, `strategies.{generateSignals,defaultParams,STRATEGIES}`, `backtest.runBacktest`, `grid.optimizeGrid`, `markov.analyzeRegime`. No backend changes — fully client-side.
-
-**Gotchas:**
-- HL `/api/assets` requires JWT in multi-user mode; if the auth call 401s, `fetchHLAssets()` falls back to the hardcoded BTC/ETH/SOL/BNB/XRP list so the page still renders.
-- One bad symbol's Binance fetch failing must not sink the entire scan — both scanners swallow per-symbol errors and continue.
-- Binance Vision public API tolerates ~1200 req/min; we throttle to 6 in-flight fetches via inline pool to stay polite.
-- `pool()` helper is duplicated in `indicatorScan.ts` and `gridScan.ts` — small enough to inline; keep them in sync if either changes.
-
-**Verify (local):**
-1. `cd bot && npm run serve` (one terminal), `npm run dev` (another). Open http://localhost:5173/scanner.
-2. Indicator tab → Scan → wait ~10s for 840/840. Top-3 chips should populate. Click ▶ on row #1 → lands on `/backtest` with same symbol/TF/strategy; the equity card's totalReturnPct should match the scanner row within rounding.
-3. Grid tab → Scan → ~2s. Default filters (Sideways only, ≥3× spacing, ≥1 trade/day) may show 0–5 rows depending on market regime; toggle "All regimes" to see more. ▶ on row #1 → `/grid` with that symbol; optimizer re-runs.
