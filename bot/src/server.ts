@@ -10,6 +10,7 @@ import {
   loadConfig,
   loadEnv,
   saveConfig,
+  type EnvConfig,
   type GridConfig,
 } from './config.js'
 import { GridBot } from './grid-bot.js'
@@ -63,6 +64,7 @@ import {
   rangeToBounds,
   summarize,
 } from './journal.js'
+import { listRunningGridBotIds, writeGridRuntime } from './grid-runtime.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -86,6 +88,42 @@ function gridBotsForUser(uid?: string): Map<string, BotEntry> {
   let m = gridBots.get(key)
   if (!m) { m = new Map(); gridBots.set(key, m) }
   return m
+}
+
+// Restart any grid bots that were running before the process died. Reads the
+// runtime sidecar files written by /api/bots/:id/start + /stop, then for each
+// bot marked running:true, instantiates a GridBot and calls start({reconcile:
+// true}) — which ADOPTS the existing resting orders on Hyperliquid instead of
+// canceling them. Safe no-op when no runtime files exist (e.g., very first
+// boot or fresh user).
+function maybeAutostartGridBots(uid?: string, credsProvider?: () => EnvConfig | null): void {
+  const ids = listRunningGridBotIds(uid)
+  if (ids.length === 0) return
+  const creds = credsProvider ? credsProvider() : (MULTI_USER && uid ? null : loadEnv())
+  if (!creds) {
+    log.warn(`Cannot autostart grid bots for user ${uid ?? 'single'}: no Hyperliquid credentials.`)
+    return
+  }
+  for (const id of ids) {
+    try {
+      const cfg = loadConfig(id, uid)
+      const map = gridBotsForUser(uid)
+      if (map.get(id)?.running) continue   // already resumed via another path
+      const clients = createClients(creds)
+      const logger = createLogger(id)
+      const bot = new GridBot(clients, cfg, logger)
+      map.set(id, { id, bot, running: true })
+      logger.info('Resuming from saved running state (reconcile mode)')
+      bot.start({ reconcile: true }).catch((e: unknown) => {
+        logger.err(`Autostart failed: ${(e as Error).message}`)
+        const entry = map.get(id)
+        if (entry) entry.running = false
+        writeGridRuntime(uid, id, false)
+      })
+    } catch (e) {
+      log.err(`Could not autostart grid bot ${id}: ${(e as Error).message}`)
+    }
+  }
 }
 
 // ─── Express setup ────────────────────────────────────────────────────────────
@@ -258,9 +296,9 @@ app.post('/auth/register', authLimiter, (req: Request, res: Response) => {
     // First admin: migrate legacy single-tenant data and resume any persisted bots.
     if (isFirstUser && isAdmin) {
       runMigrationIfNeeded(user.id)
-      void maybeAutostartSignalBots(user.id, () => {
-        try { return loadUserCreds(user.id) } catch { return null }
-      })
+      const credsFn = () => { try { return loadUserCreds(user.id) } catch { return null } }
+      void maybeAutostartSignalBots(user.id, credsFn)
+      maybeAutostartGridBots(user.id, credsFn)
     }
     const token = signToken(user)
     res.json({ token, user: { id: user.id, email: user.email, isAdmin: user.isAdmin } })
@@ -452,14 +490,18 @@ app.post('/api/bots/:id/start', requireAuth, async (req: Request, res: Response)
     const logger = createLogger(id)
     const bot = new GridBot(clients, cfg, logger)
     map.set(id, { id, bot, running: true })
+    writeGridRuntime(uid, id, true)
     res.json({ ok: true })
     bot.start().catch((e: unknown) => {
       logger.err(`Bot crashed: ${(e as Error).message}`)
       const entry = map.get(id)
       if (entry) entry.running = false
+      // Crash: don't auto-resume on next boot — user needs to investigate.
+      writeGridRuntime(uid, id, false)
     })
   } catch (e) {
     gridBotsForUser(uid).delete(id)
+    writeGridRuntime(uid, id, false)
     res.status(500).json({ error: (e as Error).message })
   }
 })
@@ -477,6 +519,7 @@ app.post('/api/bots/:id/stop', requireAuth, async (req: Request, res: Response) 
   } finally {
     entry.running = false
     map.delete(id)
+    writeGridRuntime(uid, id, false)
   }
   res.json({ ok: true })
 })
@@ -892,14 +935,15 @@ createServer(app).listen(PORT, HOST, () => {
     if (owner) {
       runMigrationIfNeeded(owner.id)
       for (const u of users) {
-        maybeAutostartSignalBots(u.id, () => {
-          try { return loadUserCreds(u.id) } catch { return null }
-        })
+        const credsFn = () => { try { return loadUserCreds(u.id) } catch { return null } }
+        maybeAutostartSignalBots(u.id, credsFn)
+        maybeAutostartGridBots(u.id, credsFn)
       }
     } else {
       log.info('No users yet — register at /auth/register to get started')
     }
   } else {
     maybeAutostartSignalBots()
+    maybeAutostartGridBots()
   }
 })

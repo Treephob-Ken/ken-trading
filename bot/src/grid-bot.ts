@@ -123,7 +123,13 @@ export class GridBot {
     this.log = logger ?? defaultLog
   }
 
-  async start(): Promise<void> {
+  // opts.reconcile = true means "the bot was running before a restart; adopt
+  // whatever orders already exist on Hyperliquid that match the grid plan,
+  // cancel the ones that don't, and place the missing ones." Used by
+  // maybeAutostartGridBots on server boot. Default (false) is the existing
+  // clean-slate behavior — every existing order for this asset is cancelled
+  // and a fresh grid goes up.
+  async start(opts: { reconcile?: boolean } = {}): Promise<void> {
     this.startedAt = Date.now()
     this.meta = await getAssetMeta(this.clients.info, this.cfg.asset)
     this.currentPrice = this.meta.midPx
@@ -154,7 +160,9 @@ export class GridBot {
     this.tpPct = this.cfg.takeProfitPrice ? (this.cfg.takeProfitPrice - origUpper) / origUpper : null
 
     await this.setLeverage()
-    await this.cancelExistingOrders()
+    if (!opts.reconcile) {
+      await this.cancelExistingOrders()
+    }
 
     this.log.info(`Grid lines (${this.lines.length}):`)
     for (let i = 0; i < this.lines.length; i++) {
@@ -169,6 +177,11 @@ export class GridBot {
       this.log.info(
         `Waiting for trigger price ${this.cfg.triggerPrice} (current ${this.currentPrice})...`,
       )
+    } else if (opts.reconcile) {
+      await this.reconcileExistingOrders()
+      await this.placeSafetyTriggers()
+      this.state = 'live'
+      this.log.ok(`Bot resumed. ${this.orders.size} resting orders on ${this.cfg.asset}.`)
     } else {
       await this.placeInitialOrders()
       await this.placeSafetyTriggers()
@@ -281,6 +294,78 @@ export class GridBot {
       cancels: mine.map((o) => ({ a: this.meta.index, o: o.oid })),
     })
     this.log.ok(`Cancelled ${mine.length} pre-existing ${this.cfg.asset} orders.`)
+  }
+
+  // Reconcile mode: the bot was running before a process restart. Existing
+  // resting orders for this asset are orphans from the previous run that we
+  // want to ADOPT into our tracking instead of canceling + re-placing.
+  //
+  // For each currently-resting HL order:
+  //   - If its price matches one of our planned grid lines (within 1 tick),
+  //     adopt it: populate this.orders / this.ordersByLine so future fills
+  //     are tracked correctly.
+  //   - If no line matches (stale order from an earlier grid bounds), cancel it.
+  //
+  // After adoption, walk the grid lines and place fresh orders for any that
+  // weren't matched — same buy-below / sell-above rule as placeInitialOrders.
+  private async reconcileExistingOrders(): Promise<void> {
+    const open = await this.clients.info.openOrders({ user: this.clients.user })
+    const mine = open.filter((o) => o.coin === this.cfg.asset)
+    this.log.info(`Reconciling: found ${mine.length} resting ${this.cfg.asset} order(s) on Hyperliquid.`)
+
+    // Pre-compute the rounded grid prices so matching is exact against HL's
+    // own string-formatted prices.
+    const linePrices = this.lines.map((px) => roundPrice(px, this.meta))
+
+    const orphanCancels: { a: number; o: number }[] = []
+    let adopted = 0
+
+    for (const o of mine) {
+      const px = String(o.limitPx)
+      const sideRaw = (o as { side?: 'B' | 'A' }).side
+      const side: 'buy' | 'sell' = sideRaw === 'B' ? 'buy' : 'sell'
+      const sz = Number(o.sz)
+
+      // Match by exact rounded-price string. Hyperliquid returns the same
+      // string it stored when we placed the order, so equality is reliable.
+      let lineIdx = linePrices.indexOf(px)
+      if (lineIdx < 0) {
+        // Tiny numeric fallback for edge cases where formatting changed.
+        const numericPx = Number(px)
+        for (let i = 0; i < this.lines.length; i++) {
+          if (Math.abs(this.lines[i] - numericPx) / numericPx < 1e-5) { lineIdx = i; break }
+        }
+      }
+
+      if (lineIdx < 0 || this.ordersByLine.has(lineIdx)) {
+        // Orphan: doesn't match any line, or two HL orders mapped to the same line.
+        orphanCancels.push({ a: this.meta.index, o: o.oid })
+        continue
+      }
+
+      this.orders.set(o.oid, { oid: o.oid, side, price: Number(px), size: sz, lineIdx })
+      this.ordersByLine.set(lineIdx, o.oid)
+      adopted++
+    }
+
+    if (orphanCancels.length > 0) {
+      await this.clients.exchange.cancel({ cancels: orphanCancels })
+      this.log.warn(`Cancelled ${orphanCancels.length} orphan order(s) that didn't match any grid line.`)
+    }
+    this.log.ok(`Adopted ${adopted} existing order(s); ${this.lines.length - adopted} grid line(s) still need orders.`)
+
+    // Place orders for the lines that didn't have one adopted, using the same
+    // buy-below / sell-above rule as a fresh start.
+    const px = this.currentPrice
+    for (let i = 0; i < this.lines.length; i++) {
+      if (this.ordersByLine.has(i)) continue
+      const line = this.lines[i]
+      if (line < px) {
+        await this.placeOrder(i, 'buy', line)
+      } else if (line > px) {
+        await this.placeOrder(i, 'sell', line)
+      }
+    }
   }
 
   private async placeInitialOrders(): Promise<void> {
