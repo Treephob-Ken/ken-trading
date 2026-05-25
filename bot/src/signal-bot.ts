@@ -110,6 +110,15 @@ export interface SignalBotStatus {
   mtfTrend: Signal
   dailyPnlPct: number | null
   dailyPaused: boolean
+  // Signal funnel — counts since last start. Lets the UI explain
+  // "why didn't it trade?" without scraping the log.
+  signalsSeen: number          // actionable signals on a freshly closed bar (post ensemble consensus)
+  signalsExecuted: number      // signals that reached placeOrder (pre-fill)
+  blockedByMtf: number
+  blockedByCooldown: number
+  blockedByDailyPause: number
+  blockedByEnsemble: number    // ensemble had votes but didn't reach threshold
+  lastTradeAt: number          // 0 if never traded this session
 }
 
 export interface SignalBotSummary {
@@ -266,6 +275,13 @@ class SignalBot {
   // True once the first poll has recorded the current bar — only bars that
   // close after that are genuine signals we should act on.
   private primed = false
+  // Signal funnel counters — reset on start()
+  private signalsSeen = 0
+  private signalsExecuted = 0
+  private blockedByMtf = 0
+  private blockedByCooldown = 0
+  private blockedByDailyPause = 0
+  private blockedByEnsemble = 0
 
   constructor(
     id: string,
@@ -321,6 +337,13 @@ class SignalBot {
       mtfTrend: this.mtfTrend,
       dailyPnlPct: this.dailyPnlPct,
       dailyPaused: this.dailyPaused,
+      signalsSeen: this.signalsSeen,
+      signalsExecuted: this.signalsExecuted,
+      blockedByMtf: this.blockedByMtf,
+      blockedByCooldown: this.blockedByCooldown,
+      blockedByDailyPause: this.blockedByDailyPause,
+      blockedByEnsemble: this.blockedByEnsemble,
+      lastTradeAt: this.lastTradeAt,
     }
   }
 
@@ -359,6 +382,12 @@ class SignalBot {
     this.dailyPaused = false
     this.dailyPnlPct = null
     this.trades = []
+    this.signalsSeen = 0
+    this.signalsExecuted = 0
+    this.blockedByMtf = 0
+    this.blockedByCooldown = 0
+    this.blockedByDailyPause = 0
+    this.blockedByEnsemble = 0
     this.persist()
     const cfg = this.config
     if (cfg.ensembleMode && cfg.ensembleStrategyIds?.length) {
@@ -466,7 +495,15 @@ class SignalBot {
         sig = signals[closedIdx]
       }
 
-      if (!sig) return
+      if (!sig) {
+        // Ensemble had votes but didn't reach consensus → count as an
+        // ensemble block so the funnel can show why nothing was traded.
+        if (cfg.ensembleMode && this.lastVotes && (this.lastVotes.buy + this.lastVotes.sell) > 0) {
+          this.blockedByEnsemble++
+        }
+        return
+      }
+      this.signalsSeen++
 
       // ── MTF filter ─────────────────────────────────────────────────────────
       if (cfg.mtfEnabled && cfg.mtfTimeframe) {
@@ -480,6 +517,7 @@ class SignalBot {
             }
             this.mtfTrend = htfLast
             if (htfLast !== null && htfLast !== sig) {
+              this.blockedByMtf++
               this.log.info(
                 `MTF filter (${cfg.mtfTimeframe}): ${sig.toUpperCase()} blocked` +
                   ` — HTF last signal: ${htfLast.toUpperCase()}`,
@@ -520,6 +558,7 @@ class SignalBot {
                     ` (limit: ${cfg.dailyLossLimitPct}%) — no new entries until tomorrow UTC`,
                 )
               }
+              this.blockedByDailyPause++
               return
             }
             this.dailyPaused = false
@@ -581,6 +620,7 @@ class SignalBot {
         const cooldownMs = cfg.cooldownSec * 1000
         const sinceLast = Date.now() - this.lastTradeAt
         if (cooldownMs > 0 && sinceLast < cooldownMs) {
+          this.blockedByCooldown++
           this.log.warn(
             `${sig.toUpperCase()} signal skipped — cooldown ` +
               `(${Math.ceil((cooldownMs - sinceLast) / 1000)}s left)`,
@@ -589,6 +629,7 @@ class SignalBot {
         }
       }
 
+      this.signalsExecuted++
       this.log.info(`${sig.toUpperCase()} signal on ${cfg.symbol} ${cfg.timeframe} close — executing`)
       try {
         // Cancel stale TP/SL bracket orders first so they don't double-close.

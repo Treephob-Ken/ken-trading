@@ -26,6 +26,9 @@ import { generateSignals } from '@/lib/strategies'
 import type { StrategyOutput } from '@/lib/strategies'
 import type { Candle, StrategyId } from '@/types'
 import LiveBotHeader from '@/components/LiveBotHeader'
+import LiveStatusCard from '@/components/signalbot/LiveStatusCard'
+import SignalFunnelCard from '@/components/signalbot/SignalFunnelCard'
+import EnsembleVotesCard from '@/components/signalbot/EnsembleVotesCard'
 import ChartHoverPanel, {
   findCandleIndexByTime,
   type ChartHoverState,
@@ -50,6 +53,13 @@ interface SignalBotConfig {
   // MTF filter — block trades that conflict with the higher TF's last signal
   mtfEnabled?: boolean
   mtfTimeframe?: string
+  // Ensemble mode — run multiple strategies and only trade when the
+  // configured threshold of strategies agree on a direction.
+  ensembleMode?: boolean
+  ensembleStrategyIds?: string[]
+  ensembleThreshold?: number
+  // Daily-loss circuit-breaker — pause new entries once today's loss exceeds this %.
+  dailyLossLimitPct?: number
 }
 interface BotSummary {
   id: string; name: string; running: boolean; strategyId: string
@@ -59,10 +69,28 @@ interface SignalBotStatus {
   id: string; name: string; running: boolean; startedAt: number | null
   config: SignalBotConfig; lastSignal: 'buy' | 'sell' | null
   lastSignalAt: number | null; lastEvaluatedAt: number | null
+  lastClosedBarTime?: number | null
+  computedSize?: number | null
   lastError: string | null; tradesExecuted: number
   // Last seen direction on the configured higher timeframe. The bot blocks
   // trades whose direction disagrees with this.
   mtfTrend?: 'buy' | 'sell' | null
+  // Last ensemble vote breakdown (only present when ensembleMode = true and
+  // at least one bar has been evaluated).
+  lastVotes?: { buy: number; sell: number; abstain: number; threshold: number } | null
+  // Daily loss circuit-breaker state. dailyPnlPct is the signed % move since
+  // the UTC midnight equity snapshot; dailyPaused = true means new entries
+  // are suspended until tomorrow UTC.
+  dailyPnlPct?: number | null
+  dailyPaused?: boolean
+  // Signal funnel counters (since last start)
+  signalsSeen?: number
+  signalsExecuted?: number
+  blockedByMtf?: number
+  blockedByCooldown?: number
+  blockedByDailyPause?: number
+  blockedByEnsemble?: number
+  lastTradeAt?: number
 }
 interface TradeRecord {
   time: number; side: 'buy' | 'sell'; asset: string; size: number; price: number | null
@@ -906,11 +934,30 @@ export default function SignalBotsPage() {
         {/* Chart — renders for both new and saved bots as soon as cfg is set */}
         {cfg && <SignalChart botId={selectedId && !isNew ? selectedId : null} cfg={cfg} />}
 
-        {/* Activity log */}
+        {/* Operational analytics — only for an existing, saved bot with a status */}
+        {selectedId && !isNew && status && (
+          <>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <LiveStatusCard status={status} lastPrice={null} />
+              <SignalFunnelCard status={status} />
+            </div>
+            {status.config.ensembleMode && (
+              <EnsembleVotesCard status={status} strategies={strategies} />
+            )}
+          </>
+        )}
+
+        {/* Activity log — collapsed by default. Useful for debugging but not at-a-glance. */}
         {logs.length > 0 && (
-          <div className="card p-4">
-            <h3 className="mb-3 text-sm font-semibold text-text">Activity Log</h3>
-            <div className="h-52 overflow-y-auto rounded-xl border border-border bg-bg p-3 font-mono text-[10px] leading-relaxed">
+          <details className="card p-4 group">
+            <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-text">
+              <span className="flex items-center gap-2">
+                <span className="text-dim transition-transform group-open:rotate-90">▶</span>
+                Activity log
+              </span>
+              <span className="font-mono text-[11px] font-normal text-dim tabular-nums">{logs.length} lines</span>
+            </summary>
+            <div className="mt-3 h-52 overflow-y-auto rounded-xl border border-border bg-bg p-3 font-mono text-[10px] leading-relaxed">
               {[...logs].reverse().slice(0, 100).map((l, i) => (
                 <div key={i} className="mb-1 last:mb-0 break-words">
                   <span className="text-dim">[{l.ts.slice(11)}]</span>{' '}
@@ -923,7 +970,7 @@ export default function SignalBotsPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </details>
         )}
 
         {/* Empty state */}
