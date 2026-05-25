@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import bcrypt from 'bcryptjs'
 import { randomUUID } from 'node:crypto'
+import { privateKeyToAccount } from 'viem/accounts'
+import { HttpTransport, InfoClient } from '@nktkas/hyperliquid'
 import type { EnvConfig } from './config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -180,6 +182,95 @@ export function userCount(): number {
 
 // ─── HL credentials ───────────────────────────────────────────────────────────
 
+const HEX_KEY_RE = /^0x[0-9a-fA-F]{64}$/
+const HEX_ADDR_RE = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * Strict format check on a pasted agent private key. Trims whitespace,
+ * verifies the 0x + 64-hex shape, and returns the derived agent address —
+ * which is what Hyperliquid sees as the signer. Throws with a specific,
+ * user-actionable message on any failure.
+ */
+export function validateAgentKeyFormat(rawKey: string): {
+  key: `0x${string}`
+  address: `0x${string}`
+} {
+  const key = rawKey.trim()
+  if (!key) {
+    throw new Error('Agent key is empty — paste the long 0x… string from Hyperliquid\'s API page.')
+  }
+  if (!key.startsWith('0x')) {
+    throw new Error('Agent key must start with "0x". Make sure you copied the whole string (no leading quote or space).')
+  }
+  if (key.length !== 66) {
+    throw new Error(
+      `Agent key must be exactly 66 characters (0x + 64 hex digits). Got ${key.length}. ` +
+      'Re-copy from Hyperliquid — partial selections silently truncate.',
+    )
+  }
+  if (!HEX_KEY_RE.test(key)) {
+    throw new Error('Agent key contains non-hex characters. Only 0-9 and a-f are allowed after the "0x" prefix.')
+  }
+  const account = privateKeyToAccount(key as `0x${string}`)
+  return { key: key as `0x${string}`, address: account.address as `0x${string}` }
+}
+
+export function validateHLUserFormat(rawUser: string): `0x${string}` {
+  const u = rawUser.trim()
+  if (!HEX_ADDR_RE.test(u)) {
+    throw new Error('Wallet address must be a 0x-prefixed 40-hex-char address (the wallet you connected to Hyperliquid).')
+  }
+  return u.toLowerCase() as `0x${string}`
+}
+
+/**
+ * Ask Hyperliquid whether `agentAddress` is currently approved for `hlUser`
+ * on the given network. Catches the most common error ("user does not exist"
+ * = wallet never deposited) and turns it into a clear, actionable message.
+ *
+ * Network IO — call from request handlers, not from DB write paths.
+ */
+export async function verifyAgentOnHL(
+  agentAddress: `0x${string}`,
+  hlUser: `0x${string}`,
+  network: 'testnet' | 'mainnet',
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const info = new InfoClient({ transport: new HttpTransport({ isTestnet: network === 'testnet' }) })
+  const subdomain = network === 'testnet' ? 'app.hyperliquid-testnet.xyz' : 'app.hyperliquid.xyz'
+  try {
+    const agents = await info.extraAgents({ user: hlUser })
+    const target = agentAddress.toLowerCase()
+    const found = agents.find((a) => a.address.toLowerCase() === target)
+    if (!found) {
+      const approvedList = agents.length === 0
+        ? 'No agents are currently approved for this wallet on this network.'
+        : `Currently approved on this wallet: ${agents.map((a) => a.address.slice(0, 8) + '…').join(', ')}.`
+      return {
+        ok: false,
+        reason: `Agent ${agentAddress.slice(0, 10)}… is not approved on ${network} for wallet ${hlUser.slice(0, 10)}…. ` +
+                approvedList + ' ' +
+                `Generate a fresh agent at ${subdomain} → More → API while connected as ${hlUser}, then re-save.`,
+      }
+    }
+    return { ok: true }
+  } catch (e) {
+    const msg = (e instanceof Error ? e.message : String(e)).toLowerCase()
+    if (msg.includes('does not exist') || msg.includes('user does not exist')) {
+      return {
+        ok: false,
+        reason: `Wallet ${hlUser} has no account on ${network}. ` +
+                (network === 'testnet'
+                  ? `Get free testnet USDC at ${subdomain}/drip, then any wallet activity creates the account.`
+                  : `Bridge USDC into Hyperliquid mainnet first via the deposit flow at ${subdomain}.`),
+      }
+    }
+    return {
+      ok: false,
+      reason: `Could not verify agent against Hyperliquid (${network}): ${(e as Error).message ?? String(e)}`,
+    }
+  }
+}
+
 export function saveHLCredentials(
   userId: string,
   agentKey: string,
@@ -187,23 +278,22 @@ export function saveHLCredentials(
   network: 'testnet' | 'mainnet',
 ): void {
   // agentKey may be blank — caller wants to update address/network only (keep existing key).
-  if (agentKey && (!agentKey.startsWith('0x') || agentKey.length !== 66)) {
-    throw new Error('agentKey must be a 0x-prefixed 64-hex-char private key')
+  if (agentKey) {
+    // Use the strict validator so all callers get the same helpful errors.
+    validateAgentKeyFormat(agentKey)
   }
-  if (!hlUser.startsWith('0x') || hlUser.length !== 42) {
-    throw new Error('hlUser must be a 0x-prefixed 40-hex-char address')
-  }
+  const normalizedUser = validateHLUserFormat(hlUser)
   const db = getDb()
   if (agentKey) {
-    const encrypted = encryptSecret(agentKey)
+    const encrypted = encryptSecret(agentKey.trim())
     db.prepare(
       `UPDATE users SET hl_key_enc = ?, hl_user = ?, hl_network = ? WHERE id = ?`,
-    ).run(encrypted, hlUser.toLowerCase(), network, userId)
+    ).run(encrypted, normalizedUser, network, userId)
   } else {
     // Keep the existing encrypted key — only refresh address and network.
     db.prepare(
       `UPDATE users SET hl_user = ?, hl_network = ? WHERE id = ?`,
-    ).run(hlUser.toLowerCase(), network, userId)
+    ).run(normalizedUser, network, userId)
   }
 }
 

@@ -45,6 +45,9 @@ import {
   loadUserCreds,
   saveHLCredentials,
   userCount,
+  validateAgentKeyFormat,
+  validateHLUserFormat,
+  verifyAgentOnHL,
   verifyPassword,
 } from './users.js'
 import { runMigrationIfNeeded } from './migrate.js'
@@ -220,25 +223,47 @@ app.get('/auth/me', requireAuth, (req: Request, res: Response) => {
 
 // ─── User settings ────────────────────────────────────────────────────────────
 
-app.put('/settings/credentials', requireAuth, (req: Request, res: Response) => {
+app.put('/settings/credentials', requireAuth, async (req: Request, res: Response) => {
   if (!MULTI_USER) { res.status(404).json({ error: 'Multi-user mode is not enabled' }); return }
   const uid = req.user!.sub
   const b = (req.body ?? {}) as Record<string, unknown>
-  const agentKey = typeof b.agentKey === 'string' ? (b.agentKey as string).trim() : ''
-  const hlUser = typeof b.hlUser === 'string' ? (b.hlUser as string).trim() : ''
+  const agentKeyRaw = typeof b.agentKey === 'string' ? (b.agentKey as string) : ''
+  const hlUserRaw = typeof b.hlUser === 'string' ? (b.hlUser as string) : ''
   const network = b.network === 'testnet' ? 'testnet' as const : 'mainnet' as const
+  // Opt-out flag — admin can set to "skip" if HL is unreachable during a
+  // recovery scenario. Default behaviour validates live.
+  const skipHLCheck = b.skipHLCheck === true
+
   try {
-    saveHLCredentials(uid, agentKey, hlUser, network)
+    // 1) Format checks first — cheap, no network, catches typos and partial pastes immediately.
+    const hlUser = validateHLUserFormat(hlUserRaw)
+    let derivedAgent: `0x${string}` | null = null
+    if (agentKeyRaw.trim()) {
+      derivedAgent = validateAgentKeyFormat(agentKeyRaw).address
+    }
+
+    // 2) Live HL check — confirms the agent is actually approved before we touch the DB.
+    // Only when a new key was provided. Address-only / network-only updates skip it
+    // since the existing encrypted key is preserved.
+    if (derivedAgent && !skipHLCheck) {
+      const verify = await verifyAgentOnHL(derivedAgent, hlUser, network)
+      if (!verify.ok) {
+        res.status(400).json({ error: verify.reason, derivedAgent })
+        return
+      }
+    }
+
+    // 3) Persist + propagate to running bots.
+    saveHLCredentials(uid, agentKeyRaw, hlUser, network)
     evictClientCache(hlUser)
-    // Push fresh credentials to any signal bots already running for this user.
     const newCreds = (() => { try { return loadUserCreds(uid) } catch { return null } })()
     if (newCreds) {
       for (const sum of listSignalBots(uid)) {
         try { getSignalBot(sum.id, uid).updateCreds(newCreds) } catch { /* best effort */ }
       }
     }
-    log.ok(`User ${req.user!.email} updated HL credentials`)
-    res.json({ ok: true })
+    log.ok(`User ${req.user!.email} updated HL credentials${derivedAgent ? ` (agent ${derivedAgent.slice(0, 10)}…)` : ' (address/network only)'}`)
+    res.json({ ok: true, derivedAgent })
   } catch (e) {
     res.status(400).json({ error: (e as Error).message })
   }
