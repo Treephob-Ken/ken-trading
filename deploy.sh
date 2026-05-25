@@ -28,9 +28,6 @@ fi
 echo "── Fetching latest from origin ──"
 git fetch origin
 
-# Did bot deps change? Capture the pre-pull bot/package.json hash so we know
-# whether to run npm ci after.
-OLD_PKG_HASH=$(sha256sum bot/package.json 2>/dev/null | cut -d' ' -f1)
 OLD_HEAD=$(git rev-parse HEAD)
 
 echo "── Resetting working tree to origin/master ──"
@@ -40,7 +37,6 @@ echo "── Resetting working tree to origin/master ──"
 git reset --hard origin/master
 
 NEW_HEAD=$(git rev-parse HEAD)
-NEW_PKG_HASH=$(sha256sum bot/package.json | cut -d' ' -f1)
 
 if [ "$OLD_HEAD" = "$NEW_HEAD" ]; then
   echo "── Already at latest ($NEW_HEAD), nothing to deploy ──"
@@ -49,15 +45,18 @@ fi
 
 echo "── Moved $OLD_HEAD → $NEW_HEAD ──"
 
-# Only run npm ci when bot/package.json actually changed. npm ci is preferable
-# to npm install on the VPS: it reads the committed lockfile, never writes to
-# it, and refuses to start if package.json/lock are out of sync — exactly
-# what we want in production.
-if [ "$OLD_PKG_HASH" != "$NEW_PKG_HASH" ]; then
-  echo "── bot/package.json changed → npm ci ──"
-  ( cd bot && npm ci --omit=dev || npm ci )
+# Detect node_modules vs package-lock.json drift. npm writes a copy of the
+# resolved lockfile to node_modules/.package-lock.json on every successful
+# install — diffing it against the project lock catches every case where
+# install is needed (missing deps, stale node_modules from a prior failed
+# install, version drift after a pull, etc). Way more reliable than just
+# comparing git versions of package.json.
+NM_LOCK="bot/node_modules/.package-lock.json"
+if [ ! -d bot/node_modules ] || [ ! -f "$NM_LOCK" ] || ! cmp -s bot/package-lock.json "$NM_LOCK"; then
+  echo "── node_modules out of sync with bot/package-lock.json → npm install ──"
+  ( cd bot && npm install --no-audit --no-fund )
 else
-  echo "── bot/package.json unchanged, skipping npm install ──"
+  echo "── node_modules in sync with bot/package-lock.json, skipping install ──"
 fi
 
 echo "── Restarting trading-bot ──"
