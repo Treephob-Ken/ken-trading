@@ -75,14 +75,17 @@ export default function LiveStatusCard({ status, lastPrice }: Props) {
   const uptime = status.startedAt ? fmtDuration(now - status.startedAt) : '—'
 
   const tf = tfMs(status.config.timeframe)
-  const lastBarText = status.lastClosedBarTime
-    ? fmtRelative(now - status.lastClosedBarTime)
+  // lastClosedBarTime is in seconds (Lightweight Charts convention from
+  // mapKlines in bot/src/strategy/market-data.ts), so convert to ms here.
+  const lastBarMs = status.lastClosedBarTime ? status.lastClosedBarTime * 1000 : null
+  const lastBarText = lastBarMs
+    ? fmtRelative(now - lastBarMs)
     : '—'
   // Next bar = next floor of (now / tf) − now. Uses lastClosedBarTime when
   // available so we line up with the exchange's bar boundaries.
   let nextBarText = '—'
   if (tf > 0) {
-    const anchor = status.lastClosedBarTime ?? now
+    const anchor = lastBarMs ?? now
     const next = Math.ceil((now - anchor) / tf) * tf + anchor
     const remaining = next - now
     nextBarText = remaining > 0 ? fmtDuration(remaining) : '<1s'
