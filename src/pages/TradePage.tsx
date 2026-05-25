@@ -110,10 +110,18 @@ export default function TradePage() {
       return v && v !== '' ? Number(v) : 2
     },
   )
+  // TP is optional — empty = no TP bracket placed.
+  const [tpPct, setTpPct] = useState<number | ''>(
+    () => {
+      const v = localStorage.getItem('trade_tpPct')
+      return v && v !== '' ? Number(v) : ''
+    },
+  )
 
   useEffect(() => { localStorage.setItem('trade_sizingMode', sizingMode) }, [sizingMode])
   useEffect(() => { localStorage.setItem('trade_riskUsd', String(riskUsd)) }, [riskUsd])
   useEffect(() => { localStorage.setItem('trade_slPct', String(slPct)) }, [slPct])
+  useEffect(() => { localStorage.setItem('trade_tpPct', String(tpPct)) }, [tpPct])
 
   // ── Position detail panel state ───────────────────────────────────────────
   // Asset of the position the user has clicked (or auto-selected = first one).
@@ -226,6 +234,8 @@ export default function TradePage() {
   interface SizingResult {
     positionUsd: number; qty: number; margin: number
     maxLev: number; slLong: number; slShort: number
+    tpLong: number | null; tpShort: number | null
+    rrRatio: number | null
   }
   const sizing: SizingResult | null = (() => {
     if (typeof riskUsd !== 'number' || typeof slPct !== 'number') return null
@@ -236,7 +246,11 @@ export default function TradePage() {
     const qty = assetInfo.midPx > 0 ? positionUsd / assetInfo.midPx : 0
     const slLong = assetInfo.midPx * (1 - slPct / 100)
     const slShort = assetInfo.midPx * (1 + slPct / 100)
-    return { positionUsd, qty, margin, maxLev, slLong, slShort }
+    const hasTp = typeof tpPct === 'number' && tpPct > 0
+    const tpLong = hasTp ? assetInfo.midPx * (1 + tpPct / 100) : null
+    const tpShort = hasTp ? assetInfo.midPx * (1 - tpPct / 100) : null
+    const rrRatio = hasTp ? tpPct / slPct : null
+    return { positionUsd, qty, margin, maxLev, slLong, slShort, tpLong, tpShort, rrRatio }
   })()
 
   // ── Order placement ────────────────────────────────────────────────────────
@@ -260,14 +274,28 @@ export default function TradePage() {
 
     setBusy(true); setOrderStatus('Placing order…')
     try {
+      // In Risk-based mode, send the SL/TP percentages so the bot places a real
+      // reduce-only stop on Hyperliquid from the actual fill price. Without
+      // these the order opens bare and the position has no automated downside.
+      const body: Record<string, unknown> = {
+        asset: selectedAsset, side, size, orderType: 'market', maxSlippagePct: slippage,
+      }
+      if (sizingMode === 'risk') {
+        if (typeof slPct === 'number' && slPct > 0) body.slPct = slPct
+        if (typeof tpPct === 'number' && tpPct > 0) body.tpPct = tpPct
+      }
       const res = await apiFetch('/api/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset: selectedAsset, side, size, orderType: 'market', maxSlippagePct: slippage }),
+        body: JSON.stringify(body),
       })
       const data = (await res.json()) as { message?: string; filled?: boolean; error?: string }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      setOrderStatus(`✓ ${side.toUpperCase()} ${size} ${selectedAsset} placed`)
+      const brackets: string[] = []
+      if (typeof body.slPct === 'number') brackets.push(`SL -${body.slPct}%`)
+      if (typeof body.tpPct === 'number') brackets.push(`TP +${body.tpPct}%`)
+      const bracketTag = brackets.length ? ` (${brackets.join(', ')})` : ''
+      setOrderStatus(`✓ ${side.toUpperCase()} ${size} ${selectedAsset}${bracketTag} placed`)
       setTimeout(() => fetchAccount(selectedAsset), 1500)
     } catch (e) {
       setOrderStatus(`✗ ${(e as Error).message}`)
@@ -608,17 +636,23 @@ export default function TradePage() {
 
             {sizingMode === 'risk' ? (
               <>
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Risk per trade ($)">
-                    <input type="number" min="1" step="any" placeholder="e.g. 50"
+                <div className="grid grid-cols-3 gap-2">
+                  <Field label="Risk ($)">
+                    <input type="number" min="1" step="any" placeholder="50"
                       value={riskUsd}
                       onChange={e => setRiskUsd(e.target.value === '' ? '' : +e.target.value)}
                       className={inputCls} />
                   </Field>
-                  <Field label="Stop loss %">
-                    <input type="number" min="0.1" step="0.1" placeholder="e.g. 2"
+                  <Field label="SL %">
+                    <input type="number" min="0.1" step="0.1" placeholder="2"
                       value={slPct}
                       onChange={e => setSlPct(e.target.value === '' ? '' : +e.target.value)}
+                      className={inputCls} />
+                  </Field>
+                  <Field label="TP % (opt.)">
+                    <input type="number" min="0.1" step="0.1" placeholder="4"
+                      value={tpPct}
+                      onChange={e => setTpPct(e.target.value === '' ? '' : +e.target.value)}
                       className={inputCls} />
                   </Field>
                 </div>
@@ -641,8 +675,25 @@ export default function TradePage() {
                       <span className="text-dim">SL long / short</span>
                       <span className="font-mono text-loss">${sizing.slLong.toFixed(4)} / ${sizing.slShort.toFixed(4)}</span>
                     </div>
+                    {sizing.tpLong != null && sizing.tpShort != null && (
+                      <div className="flex justify-between">
+                        <span className="text-dim">TP long / short</span>
+                        <span className="font-mono text-gain">${sizing.tpLong.toFixed(4)} / ${sizing.tpShort.toFixed(4)}</span>
+                      </div>
+                    )}
+                    {sizing.rrRatio != null && (
+                      <div className="flex justify-between">
+                        <span className="text-dim">Risk : Reward</span>
+                        <span className={`font-mono font-semibold ${sizing.rrRatio >= 2 ? 'text-gain' : sizing.rrRatio >= 1 ? 'text-warn' : 'text-loss'}`}>
+                          1 : {sizing.rrRatio.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                     <p className="pt-1 text-[10px] text-dim leading-snug">
-                      A fill that hits the SL loses ~${typeof riskUsd === 'number' ? riskUsd.toFixed(2) : '—'} (the risk you set).
+                      A fill that hits the SL loses ~${typeof riskUsd === 'number' ? riskUsd.toFixed(2) : '—'}.
+                      {sizing.rrRatio != null
+                        ? ` SL & TP will be placed as reduce-only stops on Hyperliquid.`
+                        : ` Leave TP blank to place SL only.`}
                     </p>
                   </div>
                 ) : (

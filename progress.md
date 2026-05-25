@@ -1494,3 +1494,60 @@ Dominance card stays as bars — no chart, no tooltip (bars already show exact %
 - The dialog's modal chart needs `if (open && ref.current)` in the effect so
   the setup only runs after the dialog is actually mounted; otherwise the
   container is `null` on the first open.
+
+---
+
+## 2026-05-25 — Bugfix: Trade page wasn't actually placing SL on Hyperliquid
+
+### What was broken
+Manual orders placed from the Trade page in Risk-based sizing mode were going
+out as bare market orders — no SL, no TP attached. The SL% field was being
+used *only* to back out the position size in the calculator and render the
+"SL long / short" preview; the actual `POST /api/order` body did not include
+`slPct` or `slPrice`, so `placeOrder()` had nothing to convert into a reduce-
+only stop on Hyperliquid.
+
+Behaviour observed: the "Where's my stop loss?" stat tile on the position
+detail card kept showing "—" for manually-opened positions, while signal-bot
+and grid-bot positions on the same account showed their SL correctly. The
+brackets fetcher was working — there was just no SL trigger order to find.
+
+### What changed
+- `src/pages/TradePage.tsx` — risk-based sizing form now includes an optional
+  **TP %** input alongside the existing SL %. Layout changed from 2-col
+  (Risk / SL) to 3-col (Risk / SL / TP).
+- `sizing` calc extended with `tpLong`, `tpShort`, `rrRatio` (= tpPct/slPct).
+- Preview card now shows the TP prices and the R:R ratio with tone (green
+  ≥2:1, warn ≥1:1, loss otherwise) so the user sees the trade-off before
+  pulling the trigger.
+- `placeOrder()` order body now includes `slPct` and (if set) `tpPct` when
+  `sizingMode === 'risk'`. Fixed-USDC mode is unchanged — still places bare
+  market for now, by design.
+- Order status toast now reads `✓ BUY 0.01 BTC (SL -2%, TP +4%) placed`
+  when brackets are sent, so the user has explicit confirmation that the SL
+  went out with the entry.
+
+### Why this matters
+The brackets are placed by `bot/src/trade.ts::placeOrder` from the **actual
+fill price** (not the form's mid-px estimate), so a 2% SL is exactly 2% from
+where the position opened — slippage doesn't compound the risk. The same
+code path is what powers signal-bot and grid-bot SL placement, so manual
+trades now have the same safety surface.
+
+### Verifying the fix
+1. Open a small position from the Trade page in Risk-based mode with SL %
+   and (optionally) TP % set.
+2. Within ~10s the "Where's my stop loss?" tile on the position detail
+   card populates with the actual SL price.
+3. The position chart overlays show entry + SL (+ TP) lines.
+4. On Hyperliquid web: the orders list should show two reduce-only stop
+   orders alongside the position.
+
+### Gotchas
+- `getPositionBrackets()` in `bot/src/trade.ts` returns `null` for both
+  slPx and tpPx when it can't resolve a reference mid-price (the asset
+  meta call is wrapped in try/catch but the classification logic only runs
+  `if (refPx !== null)`). Not the cause of this bug (no triggers existed
+  in the first place), but worth flagging for future: if HL ever rate-
+  limits the meta call, the brackets card would silently go blank even
+  with valid SL/TP on the exchange.
