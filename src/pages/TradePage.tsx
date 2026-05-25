@@ -326,8 +326,9 @@ export default function TradePage() {
     } finally { setBusy(false) }
   }
 
-  const closePosition = async (asset: string) => {
-    if (!confirm(`Close ${asset} position?`)) return
+  // skipConfirm = true lets closeAll batch without re-prompting per asset.
+  const closePosition = async (asset: string, skipConfirm = false) => {
+    if (!skipConfirm && !confirm(`Close ${asset} position?`)) return
     setBusy(true)
     try {
       const res = await apiFetch('/api/close', {
@@ -345,6 +346,41 @@ export default function TradePage() {
       }
     } catch (e) {
       setOrderStatus(`✗ ${(e as Error).message}`)
+    } finally { setBusy(false) }
+  }
+
+  // Close every open position in one click. Confirms once, fires all closes in
+  // parallel (each hits a different asset on HL so they don't queue), reports
+  // a single summary, then refreshes the account.
+  const closeAllPositions = async () => {
+    const list = account?.allPositions ?? []
+    if (list.length === 0) return
+    const summary = list.map(p => `${p.asset} (${p.side} ${p.size})`).join(', ')
+    if (!confirm(`Close ALL ${list.length} open position(s)?\n\n${summary}`)) return
+    setBusy(true)
+    setOrderStatus(`Closing ${list.length} position(s)…`)
+    try {
+      const results = await Promise.all(list.map(p =>
+        apiFetch('/api/close', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset: p.asset, maxSlippagePct: closeSlippage }),
+        })
+        .then(async r => {
+          const data = (await r.json()) as { filled?: boolean; message?: string; error?: string }
+          return { asset: p.asset, ok: r.ok && data.filled !== false, message: data.error || data.message || '' }
+        })
+        .catch(e => ({ asset: p.asset, ok: false, message: (e as Error).message })),
+      ))
+      const ok = results.filter(r => r.ok).length
+      const failed = results.filter(r => !r.ok)
+      if (failed.length === 0) {
+        setOrderStatus(`✓ Closed all ${ok} position(s)`)
+      } else {
+        const failNames = failed.map(r => `${r.asset}: ${r.message || 'failed'}`).join(' · ')
+        setOrderStatus(`⚠ Closed ${ok}/${list.length} — failed: ${failNames}`)
+      }
+      setTimeout(() => fetchAccount(selectedAsset || undefined), 1500)
     } finally { setBusy(false) }
   }
 
@@ -503,13 +539,26 @@ export default function TradePage() {
                 )
               })()}
             </h2>
-            <label className="flex items-center gap-2 text-[10px] text-dim">
-              Close slippage %
-              <input type="number" step="0.1" min="0"
-                value={closeSlippage}
-                onChange={e => setCloseSlippage(+e.target.value)}
-                className="w-16 rounded-lg border border-border bg-panel-2 px-2 py-1 font-mono text-xs text-text outline-none focus:border-brand/60" />
-            </label>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 text-[10px] text-dim">
+                Close slippage %
+                <input type="number" step="0.1" min="0"
+                  value={closeSlippage}
+                  onChange={e => setCloseSlippage(+e.target.value)}
+                  className="w-16 rounded-lg border border-border bg-panel-2 px-2 py-1 font-mono text-xs text-text outline-none focus:border-brand/60" />
+              </label>
+              {positions.length > 1 && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={closeAllPositions}
+                  title="Close every open position at market in one batch"
+                  className="rounded-lg border border-loss/40 bg-loss/10 px-2.5 py-1.5 text-xs font-semibold text-loss hover:bg-loss/20 transition-colors disabled:opacity-40"
+                >
+                  Close all ({positions.length})
+                </button>
+              )}
+            </div>
           </div>
 
           {positions.length === 0 ? (
