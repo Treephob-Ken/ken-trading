@@ -1,4 +1,6 @@
 import express, { type Request, type Response } from 'express'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -79,6 +81,56 @@ function gridBotsForUser(uid?: string): Map<string, BotEntry> {
 // ─── Express setup ────────────────────────────────────────────────────────────
 
 const app = express()
+
+// Trust the immediate proxy (cloudflared on localhost) so req.ip reflects the
+// real client IP rather than 127.0.0.1. Required for rate limiters keyed by IP.
+app.set('trust proxy', 1)
+
+// Security headers — defaults from helmet + a CSP tuned for this app's external
+// dependencies. Tweak directives carefully: a too-tight CSP silently breaks
+// fetches in the browser.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        // Tailwind ships a single compiled CSS file but components occasionally
+        // inline style attrs for dynamic widths (StatTile bars, etc.).
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+        imgSrc: ["'self'", 'data:'],
+        // Whitelist every endpoint the SPA fetches from. Adding a new data
+        // source? Add it here or the browser will block it silently.
+        connectSrc: [
+          "'self'",
+          'https://api.hyperliquid.xyz',
+          'https://api.hyperliquid-testnet.xyz',
+          'wss://api.hyperliquid.xyz',
+          'wss://api.hyperliquid-testnet.xyz',
+          'https://data-api.binance.vision',
+          'wss://data-stream.binance.vision',
+        ],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    // Loosen these two so LW Charts / inline canvases work without trouble.
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }),
+)
+
+// Per-IP brute-force gate on auth endpoints. 10 attempts per 15-min sliding
+// window — enough for a forgetful human, far too few for a credential-stuffer.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many auth attempts. Try again in 15 minutes.' },
+})
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 const EXTRA_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
@@ -171,7 +223,7 @@ const ALLOWED_EMAILS: Set<string> = new Set(
     .filter(Boolean),
 )
 
-app.post('/auth/register', (req: Request, res: Response) => {
+app.post('/auth/register', authLimiter, (req: Request, res: Response) => {
   if (!MULTI_USER) { res.status(404).json({ error: 'Multi-user mode is not enabled' }); return }
   const { email, password } = (req.body ?? {}) as Record<string, unknown>
   if (typeof email !== 'string' || typeof password !== 'string') {
@@ -204,7 +256,7 @@ app.post('/auth/register', (req: Request, res: Response) => {
   }
 })
 
-app.post('/auth/login', (req: Request, res: Response) => {
+app.post('/auth/login', authLimiter, (req: Request, res: Response) => {
   if (!MULTI_USER) { res.status(404).json({ error: 'Multi-user mode is not enabled' }); return }
   const { email, password } = (req.body ?? {}) as Record<string, unknown>
   if (typeof email !== 'string' || typeof password !== 'string') {
@@ -680,9 +732,13 @@ app.get('*', (req: Request, res: Response) => {
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
 const PORT = 3001
+// Bind to localhost by default — cloudflared connects locally on the same VPS,
+// so the public IP doesn't need to expose 3001. Override with HOST=0.0.0.0 if
+// you ever run the bot in a setup where the proxy is on a different host.
+const HOST = process.env.HOST?.trim() || '127.0.0.1'
 
-createServer(app).listen(PORT, () => {
-  log.ok(`Bot dashboard -> http://localhost:${PORT}`)
+createServer(app).listen(PORT, HOST, () => {
+  log.ok(`Bot dashboard -> http://${HOST}:${PORT}`)
 
   if (MULTI_USER) {
     log.ok('Multi-user mode ENABLED')
