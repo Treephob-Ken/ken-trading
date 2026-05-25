@@ -60,6 +60,9 @@ interface SignalBotStatus {
   config: SignalBotConfig; lastSignal: 'buy' | 'sell' | null
   lastSignalAt: number | null; lastEvaluatedAt: number | null
   lastError: string | null; tradesExecuted: number
+  // Last seen direction on the configured higher timeframe. The bot blocks
+  // trades whose direction disagrees with this.
+  mtfTrend?: 'buy' | 'sell' | null
 }
 interface TradeRecord {
   time: number; side: 'buy' | 'sell'; asset: string; size: number; price: number | null
@@ -731,6 +734,51 @@ export default function SignalBotsPage() {
                 </Field>
               </div>
 
+              {/* ── MTF filter — block trades whose direction conflicts with HTF ── */}
+              <div className="my-1 h-px bg-border" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Higher-TF filter</p>
+              <button
+                type="button"
+                disabled={running}
+                onClick={() => patch({ mtfEnabled: !cfg.mtfEnabled })}
+                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                  cfg.mtfEnabled
+                    ? 'border-brand/50 bg-brand/10 text-brand'
+                    : 'border-border bg-panel-2 text-muted hover:text-text'
+                } disabled:opacity-50`}
+              >
+                <span className="flex items-center gap-2">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      cfg.mtfEnabled ? 'bg-brand shadow-[0_0_6px_hsl(var(--brand))]' : 'bg-dim'
+                    }`}
+                  />
+                  {cfg.mtfEnabled ? 'Filter ON' : 'Filter OFF'}
+                </span>
+                <span className="font-mono text-[10px] text-dim">{cfg.mtfTimeframe ?? '—'}</span>
+              </button>
+              {cfg.mtfEnabled && (
+                <Field label="Higher timeframe">
+                  <select
+                    disabled={running}
+                    value={cfg.mtfTimeframe ?? '4h'}
+                    onChange={(e) => patch({ mtfTimeframe: e.target.value })}
+                    className={inputCls}
+                  >
+                    {TIMEFRAMES
+                      .filter((tf) => TIMEFRAMES.indexOf(tf) > TIMEFRAMES.indexOf(cfg.timeframe))
+                      .map((tf) => (
+                        <option key={tf} value={tf}>{tf}</option>
+                      ))}
+                  </select>
+                </Field>
+              )}
+              <p className="text-[10px] text-dim leading-snug">
+                {cfg.mtfEnabled
+                  ? `Bot fetches ${cfg.mtfTimeframe} candles on every tick. Trades only fire when the latest ${cfg.mtfTimeframe} signal points the same direction as the ${cfg.timeframe} entry. Blocked trades are logged.`
+                  : 'Off — every signal on the entry timeframe is taken without checking higher-TF agreement.'}
+              </p>
+
               {/* ── Position Sizing Calculator ── */}
               <div className="my-1 h-px bg-border" />
               <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Risk mode (auto-sizes)</p>
@@ -798,7 +846,16 @@ export default function SignalBotsPage() {
               <LiveBotHeader
                 name={bots.find(b => b.id === selectedId)?.name ?? 'Signal Bot'}
                 state={status.lastError ? (running ? 'error' : 'error') : running ? 'running' : 'stopped'}
-                summary={`${status.config.asset} · ${status.config.timeframe} · ${status.config.strategyId.toUpperCase()}`}
+                summary={
+                  `${status.config.asset} · ${status.config.timeframe} · ${status.config.strategyId.toUpperCase()}` +
+                  (status.config.mtfEnabled && status.config.mtfTimeframe
+                    ? ` · MTF ${status.config.mtfTimeframe}${
+                        status.mtfTrend
+                          ? ` ${status.mtfTrend === 'buy' ? '↑BUY' : '↓SELL'}`
+                          : ' (no HTF signal yet)'
+                      }`
+                    : '')
+                }
                 startedAt={status.startedAt}
                 lastSignal={status.lastSignal}
                 lastSignalAt={status.lastSignalAt}
