@@ -59,6 +59,13 @@ interface Props {
    * Populated by BacktesterPage from the latest backtest result.
    */
   kellyHint?: { fullPct: number; halfPct: number; edgeOk: boolean } | null
+  /** MTF — require higher-timeframe trend agreement before trading. */
+  mtfFilter?: boolean
+  mtfTimeframe?: string
+  /** Timeframes the dropdown should offer (already filtered to higher-than-current). */
+  mtfHigherChoices?: readonly string[]
+  onMtfFilter?: (v: boolean) => void
+  onMtfTimeframe?: (v: string) => void
 }
 
 export default function Controls(props: Props) {
@@ -270,6 +277,57 @@ export default function Controls(props: Props) {
               : 'Always in the market — every signal flips the position.'}
         </p>
       </div>
+
+      {/* ─── MTF Filter — only relevant if BacktesterPage passed handlers ─── */}
+      {typeof props.onMtfFilter === 'function' && (
+        <div>
+          <label className="label flex items-center gap-1">
+            Higher-TF Filter
+            <InfoTip term="Multi-Timeframe" className="text-dim hover:text-muted" />
+            <span className="ml-auto rounded-full border border-brand/30 bg-brand/5 px-1.5 py-0.5 text-[9px] text-brand">
+              deploys to bot
+            </span>
+          </label>
+          <button
+            type="button"
+            onClick={() => props.onMtfFilter?.(!props.mtfFilter)}
+            className={`flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-xs font-medium transition-colors ${
+              props.mtfFilter
+                ? 'border-brand/50 bg-brand/10 text-brand'
+                : 'border-border bg-bg text-muted hover:text-text'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  props.mtfFilter ? 'bg-brand shadow-[0_0_6px_hsl(var(--brand))]' : 'bg-dim'
+                }`}
+              />
+              {props.mtfFilter ? 'Filter ON' : 'Filter OFF'}
+            </span>
+            <span className="font-mono text-[10px] text-dim">{props.mtfTimeframe ?? '—'}</span>
+          </button>
+          {props.mtfFilter && (
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-[11px] text-dim">Higher TF</label>
+              <select
+                className="field flex-1 py-1 text-xs"
+                value={props.mtfTimeframe ?? ''}
+                onChange={(e) => props.onMtfTimeframe?.(e.target.value)}
+              >
+                {(props.mtfHigherChoices ?? []).map((tf) => (
+                  <option key={tf} value={tf}>{tf}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <p className="mt-1.5 text-[11px] text-dim leading-snug">
+            {props.mtfFilter
+              ? `Bot will only take a trade if the ${props.mtfTimeframe} chart's last signal agrees with the entry direction. Conflicting trades are skipped.`
+              : 'Off — every signal on the current timeframe triggers a trade. Toggle on for trend-following confluence.'}
+          </p>
+        </div>
+      )}
 
       <div className="h-px bg-border" />
 

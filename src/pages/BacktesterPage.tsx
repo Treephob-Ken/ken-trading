@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, Info, Rocket } from 'lucide-react'
+import { Activity, Info, Rocket, LayoutGrid, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { Candle, Direction, StrategyId, Trade } from '@/types'
 import { fetchKlines, MAX_BARS, subscribeKline } from '@/lib/binance'
@@ -16,6 +16,15 @@ import ConfidenceStrip from '@/components/ConfidenceStrip'
 import RegimeBreakdownCard from '@/components/RegimeBreakdownCard'
 import ParamStabilityCard from '@/components/ParamStabilityCard'
 import { analyzeRegime } from '@/lib/markov'
+import { TF_HIERARCHY } from '@/lib/multiTF'
+
+// Same list Controls.tsx exposes — keep in sync.
+const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'] as const
+
+function defaultHigherTF(tf: string): string {
+  // Pick the next standard tier up; fall back to the next array entry if not in the map.
+  return TF_HIERARCHY[tf] ?? TIMEFRAMES[Math.min(TIMEFRAMES.indexOf(tf as typeof TIMEFRAMES[number]) + 1, TIMEFRAMES.length - 1)] ?? tf
+}
 
 interface Props {
   symbol: string
@@ -79,6 +88,23 @@ export default function BacktesterPage({
     () => +(localStorage.getItem('bt_deploySize') || '0.01'),
   )
 
+  // ─── MTF state ──────────────────────────────────────────────────────────────
+  // Visual side-by-side toggle. Stored separately from the filter flag because
+  // a user may want to SEE the HTF without enforcing it on the strategy.
+  const [mtfView, setMtfView] = useState(
+    () => localStorage.getItem('bt_mtfView') === 'true',
+  )
+  // The HTF used by both the visual chart and the deploy filter. Defaults to
+  // the next standard tier above the current TF.
+  const [mtfTimeframe, setMtfTimeframe] = useState(
+    () => localStorage.getItem('bt_mtfTimeframe') || defaultHigherTF(timeframe),
+  )
+  // When true, the Signal Bot will skip trades whose direction conflicts with
+  // the last HTF signal. Carried through the deploy payload.
+  const [mtfFilter, setMtfFilter] = useState(
+    () => localStorage.getItem('bt_mtfFilter') === 'true',
+  )
+
   useEffect(() => { localStorage.setItem('bt_startDate', startDate) }, [startDate])
   useEffect(() => { localStorage.setItem('bt_endDate', endDate) }, [endDate])
   useEffect(() => { localStorage.setItem('bt_strategyId', strategyId) }, [strategyId])
@@ -102,6 +128,19 @@ export default function BacktesterPage({
   useEffect(() => {
     localStorage.setItem('bt_deploySize', String(deploySize))
   }, [deploySize])
+  useEffect(() => { localStorage.setItem('bt_mtfView', String(mtfView)) }, [mtfView])
+  useEffect(() => { localStorage.setItem('bt_mtfTimeframe', mtfTimeframe) }, [mtfTimeframe])
+  useEffect(() => { localStorage.setItem('bt_mtfFilter', String(mtfFilter)) }, [mtfFilter])
+
+  // Re-pin the HTF default when the user changes the base TF so the dropdown
+  // doesn't get stuck on a lower TF (which is nonsensical).
+  useEffect(() => {
+    const desired = defaultHigherTF(timeframe)
+    const lowerOrEqual = TIMEFRAMES.indexOf(mtfTimeframe as typeof TIMEFRAMES[number]) <=
+                         TIMEFRAMES.indexOf(timeframe as typeof TIMEFRAMES[number])
+    if (lowerOrEqual) setMtfTimeframe(desired)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeframe])
 
   const [candles, setCandles] = useState<Candle[]>([])
   const [liveCandle, setLiveCandle] = useState<Candle | null>(null)
@@ -176,6 +215,60 @@ export default function BacktesterPage({
     return analyzeRegime(candles)
   }, [candles])
 
+  // ─── HTF (higher-timeframe) data — only fetched when MTF view or filter is on ──
+  const mtfActive = mtfView || mtfFilter
+  const [htfCandles, setHtfCandles] = useState<Candle[]>([])
+  const [htfLoading, setHtfLoading] = useState(false)
+  const [htfError, setHtfError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!mtfActive) { setHtfCandles([]); return }
+    let cancelled = false
+    setHtfLoading(true)
+    setHtfError(null)
+    const startTime = startDate ? Date.parse(startDate) : undefined
+    const endTime = endDate ? Date.parse(endDate) + 86_400_000 : undefined
+    fetchKlines({ symbol, interval: mtfTimeframe, startTime, endTime })
+      .then((data) => {
+        if (cancelled) return
+        setHtfCandles(data)
+        setHtfLoading(false)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setHtfError(e instanceof Error ? e.message : String(e))
+        setHtfCandles([])
+        setHtfLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [mtfActive, symbol, mtfTimeframe, startDate, endDate, reloadKey])
+
+  // Run the same strategy with the same params on the HTF candles. Reuses the
+  // exact same generator so signals match the bot's MTF filter.
+  const htfOutput = useMemo(() => {
+    if (htfCandles.length < 35) return null
+    try { return generateSignals(strategyId, htfCandles, params) } catch { return null }
+  }, [htfCandles, strategyId, params])
+
+  const htfRegime = useMemo(() => {
+    if (htfCandles.length < 30) return null
+    return analyzeRegime(htfCandles)
+  }, [htfCandles])
+
+  // Confluence: compare current vs HTF regime to surface ALIGNED / CONFLICT / NEUTRAL.
+  // Same logic as multiTF.getMultiTFConfluence but kept here to avoid the second
+  // network fetch (we already have htfCandles in state).
+  const confluence = useMemo(() => {
+    const c = regime?.currentLabel
+    const h = htfRegime?.currentLabel
+    if (!c || !h) return null
+    if (c === h) return { kind: 'aligned' as const, text: `${c} on both — strong ${c.toLowerCase()} bias` }
+    if ((c === 'Bull' && h === 'Bear') || (c === 'Bear' && h === 'Bull')) {
+      return { kind: 'conflict' as const, text: `${c} now vs ${h} on ${mtfTimeframe} — fade or stay flat` }
+    }
+    return { kind: 'neutral' as const, text: `${c} now, ${h} on ${mtfTimeframe} — mixed` }
+  }, [regime, htfRegime, mtfTimeframe])
+
   const { output, result } = useMemo(() => {
     if (candles.length < 35) return { output: null, result: null }
     const out = generateSignals(strategyId, candles, params)
@@ -238,6 +331,8 @@ export default function BacktesterPage({
       params,
       direction,
       slPct: stopLossPct > 0 ? stopLossPct : undefined,
+      // MTF filter — bot will reject trades that conflict with the HTF signal.
+      ...(mtfFilter ? { mtfEnabled: true, mtfTimeframe } : {}),
     }
     if (sizingMode === 'volatility') {
       return {
@@ -250,6 +345,7 @@ export default function BacktesterPage({
   }, [
     symbol, strategyId, timeframe, params, direction,
     stopLossPct, sizingMode, initialCapital, targetRiskPct, deploySize,
+    mtfFilter, mtfTimeframe,
   ])
 
   const canDeploy = sizingMode === 'fixed' ? deploySize > 0 : stopLossPct > 0
@@ -290,6 +386,13 @@ export default function BacktesterPage({
             onTargetRisk={setTargetRiskPct}
             onReload={() => setReloadKey((k) => k + 1)}
             kellyHint={kellyHint}
+            mtfFilter={mtfFilter}
+            mtfTimeframe={mtfTimeframe}
+            mtfHigherChoices={TIMEFRAMES.filter(
+              (tf) => TIMEFRAMES.indexOf(tf) > TIMEFRAMES.indexOf(timeframe as typeof TIMEFRAMES[number]),
+            )}
+            onMtfFilter={setMtfFilter}
+            onMtfTimeframe={setMtfTimeframe}
           />
         </div>
 
@@ -328,6 +431,12 @@ export default function BacktesterPage({
               <div className="flex justify-between">
                 <span className="text-dim">Exit</span>
                 <span className="font-mono text-text text-[9px]">opposite signal</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-dim">MTF filter</span>
+                <span className={`font-mono ${mtfFilter ? 'text-brand' : 'text-dim'}`}>
+                  {mtfFilter ? `ON · ${mtfTimeframe}` : 'off'}
+                </span>
               </div>
             </div>
 
@@ -396,57 +505,142 @@ export default function BacktesterPage({
           <ConfidenceStrip result={result} regime={regime} direction={direction} />
         )}
 
-        <div className="card p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-text font-display">
-              {strategyMeta(strategyId).name}
-              <span className="ml-2 text-xs text-dim font-sans font-normal">
-                {pairLabel} · {timeframe}
-              </span>
-            </h2>
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-sm tabular-nums text-text">
-                {lastPrice ? fmtPrice(lastPrice) : '—'}
-              </span>
-              <span
-                className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
-                  connected
-                    ? 'border-gain/30 bg-gain/10 text-gain'
-                    : 'border-border bg-panel text-dim'
-                }`}
-              >
-                <Activity className="h-3 w-3" />
-                {connected ? 'Live' : isLiveRange ? 'Connecting' : 'Historical'}
-              </span>
+        <div className={`flex flex-col gap-4 ${mtfView ? 'xl:flex-row' : ''}`}>
+          {/* ── Current TF chart ── */}
+          <div className={`card p-4 ${mtfView ? 'xl:flex-1 xl:min-w-0' : ''}`}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-text font-display">
+                {strategyMeta(strategyId).name}
+                <span className="ml-2 text-xs text-dim font-sans font-normal">
+                  {pairLabel} · {timeframe}
+                </span>
+              </h2>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm tabular-nums text-text">
+                  {lastPrice ? fmtPrice(lastPrice) : '—'}
+                </span>
+                <span
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
+                    connected
+                      ? 'border-gain/30 bg-gain/10 text-gain'
+                      : 'border-border bg-panel text-dim'
+                  }`}
+                >
+                  <Activity className="h-3 w-3" />
+                  {connected ? 'Live' : isLiveRange ? 'Connecting' : 'Historical'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMtfView((v) => !v)}
+                  className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors ${
+                    mtfView
+                      ? 'border-brand bg-brand/10 text-brand'
+                      : 'border-border bg-panel-2 text-muted hover:text-text'
+                  }`}
+                  title={mtfView ? 'Hide higher-timeframe chart' : 'Show higher-timeframe chart side by side'}
+                >
+                  <LayoutGrid className="h-3 w-3" />
+                  MTF
+                </button>
+              </div>
             </div>
+
+            {dataCapped && (
+              <div className="mb-3 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+                Loaded the maximum {MAX_BARS.toLocaleString()} bars for this range. Earlier history
+                was truncated — pick a coarser timeframe or a shorter date range to see the full
+                window.
+              </div>
+            )}
+
+            {error ? (
+              <div className="flex h-[480px] flex-col items-center justify-center gap-2 text-center">
+                <p className="text-sm font-medium text-loss">Could not load market data</p>
+                <p className="max-w-sm text-xs text-dim">{error}</p>
+              </div>
+            ) : loading && candles.length === 0 ? (
+              <div className="flex h-[480px] items-center justify-center text-sm text-dim">
+                Loading market data…
+              </div>
+            ) : (
+              <ChartPanel
+                candles={candles}
+                output={output}
+                trades={result?.trades ?? []}
+                liveCandle={isLiveRange ? liveCandle : null}
+                selectedTrade={selectedTrade}
+                regimeLabels={regime?.labels}
+              />
+            )}
           </div>
 
-          {dataCapped && (
-            <div className="mb-3 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-[11px] text-warn">
-              Loaded the maximum {MAX_BARS.toLocaleString()} bars for this range. Earlier history
-              was truncated — pick a coarser timeframe or a shorter date range to see the full
-              window.
-            </div>
-          )}
+          {/* ── HTF chart (only when MTF view is on) ── */}
+          {mtfView && (
+            <div className="card p-4 xl:flex-1 xl:min-w-0">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-text font-display">
+                  Higher TF
+                  <select
+                    className="rounded-md border border-border bg-panel-2 px-2 py-1 text-xs font-mono text-text outline-none focus:border-brand/60"
+                    value={mtfTimeframe}
+                    onChange={(e) => setMtfTimeframe(e.target.value)}
+                    title="Pick the higher timeframe to compare against"
+                  >
+                    {TIMEFRAMES.filter((tf) => TIMEFRAMES.indexOf(tf) > TIMEFRAMES.indexOf(timeframe as typeof TIMEFRAMES[number])).map((tf) => (
+                      <option key={tf} value={tf}>{tf}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-dim font-sans font-normal">{pairLabel}</span>
+                </h2>
+                <div className="flex items-center gap-2">
+                  {confluence && (
+                    <span
+                      className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold ${
+                        confluence.kind === 'aligned'
+                          ? 'border-gain/40 bg-gain/10 text-gain'
+                          : confluence.kind === 'conflict'
+                          ? 'border-loss/40 bg-loss/10 text-loss'
+                          : 'border-warn/40 bg-warn/10 text-warn'
+                      }`}
+                      title={confluence.text}
+                    >
+                      {confluence.kind === 'aligned' ? '✓ ALIGNED' : confluence.kind === 'conflict' ? '✗ CONFLICT' : '~ NEUTRAL'}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setMtfView(false)}
+                    className="flex items-center justify-center rounded-md border border-border bg-panel-2 p-1 text-dim transition-colors hover:text-text"
+                    title="Close MTF view"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
 
-          {error ? (
-            <div className="flex h-[480px] flex-col items-center justify-center gap-2 text-center">
-              <p className="text-sm font-medium text-loss">Could not load market data</p>
-              <p className="max-w-sm text-xs text-dim">{error}</p>
+              {confluence && (
+                <p className="mb-3 text-[11px] text-dim leading-snug">{confluence.text}.</p>
+              )}
+
+              {htfError ? (
+                <div className="flex h-[480px] flex-col items-center justify-center gap-2 text-center">
+                  <p className="text-sm font-medium text-loss">Could not load {mtfTimeframe} data</p>
+                  <p className="max-w-sm text-xs text-dim">{htfError}</p>
+                </div>
+              ) : htfLoading && htfCandles.length === 0 ? (
+                <div className="flex h-[480px] items-center justify-center text-sm text-dim">
+                  Loading {mtfTimeframe}…
+                </div>
+              ) : (
+                <ChartPanel
+                  candles={htfCandles}
+                  output={htfOutput}
+                  trades={[]}
+                  liveCandle={null}
+                  regimeLabels={htfRegime?.labels}
+                />
+              )}
             </div>
-          ) : loading && candles.length === 0 ? (
-            <div className="flex h-[480px] items-center justify-center text-sm text-dim">
-              Loading market data…
-            </div>
-          ) : (
-            <ChartPanel
-              candles={candles}
-              output={output}
-              trades={result?.trades ?? []}
-              liveCandle={isLiveRange ? liveCandle : null}
-              selectedTrade={selectedTrade}
-              regimeLabels={regime?.labels}
-            />
           )}
         </div>
 

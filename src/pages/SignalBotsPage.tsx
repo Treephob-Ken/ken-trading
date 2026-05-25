@@ -47,6 +47,9 @@ interface SignalBotConfig {
   params: Record<string, number>; asset: string; size: number
   slippagePct: number; cooldownSec: number; tradeSide: TradeSide
   tpPct?: number; slPct?: number
+  // MTF filter — block trades that conflict with the higher TF's last signal
+  mtfEnabled?: boolean
+  mtfTimeframe?: string
 }
 interface BotSummary {
   id: string; name: string; running: boolean; strategyId: string
@@ -473,6 +476,8 @@ export default function SignalBotsPage() {
             riskUsd?: number; sizingSlPct?: number
             // Bot risk controls
             slPct?: number; tpPct?: number
+            // MTF filter
+            mtfEnabled?: boolean; mtfTimeframe?: string
           }
           const stratId = pre.strategy ?? strats[0]?.id ?? 'macd'
           const stratMeta = strats.find(s => s.id === stratId)
@@ -491,6 +496,8 @@ export default function SignalBotsPage() {
             tradeSide: (pre.direction === 'short' ? 'sell' : pre.direction === 'both' ? 'both' : 'buy') as TradeSide,
             slPct: pre.slPct,
             tpPct: pre.tpPct,
+            mtfEnabled: pre.mtfEnabled,
+            mtfTimeframe: pre.mtfTimeframe,
           }
           setIsNew(true)
           setSelectedId(null)
