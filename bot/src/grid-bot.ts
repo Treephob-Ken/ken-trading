@@ -178,13 +178,18 @@ export class GridBot {
         `Waiting for trigger price ${this.cfg.triggerPrice} (current ${this.currentPrice})...`,
       )
     } else if (opts.reconcile) {
-      await this.reconcileExistingOrders()
+      // Arm SL/TP on the exchange BEFORE adopting the pre-existing grid orders.
+      // In reconcile mode the old grid orders could fill at any moment, so the
+      // position must be protected before we touch them. The old run's SL/TP
+      // (if any) will be cancelled as orphans inside reconcileExistingOrders,
+      // but our brand-new oids are exempted, so coverage never drops to zero.
       await this.placeSafetyTriggers()
+      await this.reconcileExistingOrders()
       this.state = 'live'
       this.log.ok(`Bot resumed. ${this.orders.size} resting orders on ${this.cfg.asset}.`)
     } else {
-      await this.placeInitialOrders()
       await this.placeSafetyTriggers()
+      await this.placeInitialOrders()
       this.state = 'live'
       this.log.ok(`Bot live. ${this.orders.size} resting orders on ${this.cfg.asset}.`)
     }
@@ -338,6 +343,12 @@ export class GridBot {
       }
 
       if (lineIdx < 0 || this.ordersByLine.has(lineIdx)) {
+        // Don't cancel the SL/TP triggers we just placed — they protect the
+        // position while we sort the grid out. Old-run SL/TP (different oid)
+        // are still cancelled as orphans and immediately replaced.
+        if (o.oid === this.slTriggerOid || o.oid === this.tpTriggerOid) {
+          continue
+        }
         // Orphan: doesn't match any line, or two HL orders mapped to the same line.
         orphanCancels.push({ a: this.meta.index, o: o.oid })
         continue

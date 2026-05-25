@@ -526,7 +526,9 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
 
 app.get('/api/killswitch', requireAuth, (req: Request, res: Response) => {
   if (!MULTI_USER) { res.status(404).json({ error: 'Kill switch requires multi-user mode' }); return }
-  res.json(getKillSwitchStatus(req.user!.sub))
+  const creds = (() => { try { return loadUserCreds(req.user!.sub) } catch { return null } })()
+  const net = creds ? (creds.isTestnet ? 'testnet' : 'mainnet') : undefined
+  res.json(getKillSwitchStatus(req.user!.sub, net))
 })
 
 app.put('/api/killswitch/config', requireAuth, (req: Request, res: Response) => {
@@ -538,7 +540,9 @@ app.put('/api/killswitch/config', requireAuth, (req: Request, res: Response) => 
   try {
     setKillSwitchConfig(req.user!.sub, enabled, pct)
     if (enabled) armKillSwitchForUser(req.user!.sub)
-    res.json(getKillSwitchStatus(req.user!.sub))
+    const creds = (() => { try { return loadUserCreds(req.user!.sub) } catch { return null } })()
+    const net = creds ? (creds.isTestnet ? 'testnet' : 'mainnet') : undefined
+    res.json(getKillSwitchStatus(req.user!.sub, net))
   } catch (e) {
     res.status(400).json({ error: (e as Error).message })
   }

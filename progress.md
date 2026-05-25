@@ -4,7 +4,7 @@
 > Max ~200 lines. When something changes, **edit the relevant section** —
 > don't append a dated entry. Git history is the changelog.
 
-Last reviewed: 2026-05-25
+Last reviewed: 2026-05-25 (pre-mainnet bug audit pass)
 
 ---
 
@@ -161,6 +161,18 @@ pm2 restart cloudflare-tunnel    # if tunnel drops
   top-30 24h `quoteVolume`. If `/api/assets` 401s in multi-user mode,
   `hlAssets.ts` falls back to a hardcoded BTC/ETH/SOL/BNB/XRP list so the
   page still renders something.
+- **Grid bot reconcile order matters.** `start({ reconcile: true })` now
+  places SL/TP triggers BEFORE adopting the pre-existing grid orders, and the
+  orphan-cancel sweep skips our own fresh `slTriggerOid`/`tpTriggerOid`.
+  Reason: in reconcile the old grid orders can fill at any moment, so the
+  position must be protected before we touch the order book. Old-run SL/TP
+  (different oid) are still cancelled as orphans and immediately replaced —
+  coverage never drops to zero.
+- **Kill-switch state is network-tagged.** `readState()` accepts a
+  `currentNetwork` arg and drops the snapshot if it was taken on a different
+  network. The GET endpoint (`/api/killswitch`) and PUT config endpoint both
+  pass the user's current network so testnet→mainnet switches don't show a
+  phantom drawdown until the next watcher tick.
 
 ---
 

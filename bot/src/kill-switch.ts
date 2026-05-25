@@ -103,11 +103,17 @@ export function isTripped(userId: string): boolean {
 }
 
 // Returns the same shape the GET /api/killswitch endpoint serves to the UI.
-export function getKillSwitchStatus(userId: string): {
+// `currentNetwork` is forwarded into readState so stale cross-network state
+// (e.g. a testnet snapshot when the user is now on mainnet) is dropped instead
+// of being shown as a phantom drawdown.
+export function getKillSwitchStatus(
+  userId: string,
+  currentNetwork?: 'testnet' | 'mainnet',
+): {
   config: { enabled: boolean; pct: number }
   state: KillSwitchState
 } {
-  return { config: getKillSwitchConfig(userId), state: readState(userId) }
+  return { config: getKillSwitchConfig(userId), state: readState(userId, currentNetwork) }
 }
 
 // Force the snapshot to the current equity (best effort) and clear the tripped
