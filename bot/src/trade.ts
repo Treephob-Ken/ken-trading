@@ -363,11 +363,39 @@ export async function getAssetInfo(
 ): Promise<{
   asset: string; midPx: number; markPx: number
   szDecimals: number; minSz: number; minNotional: number; maxLeverage: number
+  // Extended market stats — used by the Trade page Asset Info card.
+  funding: number          // hourly funding rate (signed, e.g. 0.0000125 = 0.00125%/h)
+  openInterest: number     // total OI in base units
+  prevDayPx: number        // closing price 24h ago
+  dayNtlVlm: number        // 24h notional volume in USD
+  oraclePx: number         // oracle price
 }> {
   const { info } = getClients(creds)
-  const meta = await getAssetMeta(info, asset.trim().toUpperCase())
-  const minSz = Math.pow(10, -meta.szDecimals)
-  return { asset: meta.name, midPx: meta.midPx, markPx: meta.markPx, szDecimals: meta.szDecimals, minSz, minNotional: minSz * meta.midPx, maxLeverage: meta.maxLeverage }
+  const upper = asset.trim().toUpperCase()
+  const result = await info.metaAndAssetCtxs()
+  const meta = result[0]
+  const ctxs = result[1]
+  const index = meta.universe.findIndex((u) => u.name === upper)
+  if (index < 0) throw new Error(`Asset ${upper} not found on Hyperliquid`)
+  const u = meta.universe[index]
+  const ctx = ctxs[index]
+  const markPx = Number(ctx.markPx)
+  const midPx = Number(ctx.midPx ?? ctx.markPx)
+  const minSz = Math.pow(10, -u.szDecimals)
+  return {
+    asset: upper,
+    midPx,
+    markPx,
+    szDecimals: u.szDecimals,
+    minSz,
+    minNotional: minSz * midPx,
+    maxLeverage: u.maxLeverage,
+    funding: Number(ctx.funding),
+    openInterest: Number(ctx.openInterest),
+    prevDayPx: Number(ctx.prevDayPx),
+    dayNtlVlm: Number(ctx.dayNtlVlm),
+    oraclePx: Number(ctx.oraclePx),
+  }
 }
 
 export async function listAssets(creds?: EnvConfig | null): Promise<string[]> {

@@ -15,6 +15,7 @@ import { fetchKlines } from '@/lib/binance'
 import type { Candle } from '@/types'
 import StatTile, { type Tone } from '@/components/ui/StatTile'
 import InfoTip from '@/components/InfoTip'
+import AssetInfoCard from '@/components/AssetInfoCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,7 +54,17 @@ interface AccountState {
   allPositions: PositionInfo[]
 }
 
-interface AssetInfo { maxLeverage?: number; midPx?: number }
+interface AssetInfo {
+  maxLeverage?: number
+  midPx?: number
+  markPx?: number
+  funding?: number       // hourly rate
+  openInterest?: number
+  prevDayPx?: number
+  dayNtlVlm?: number
+  oraclePx?: number
+  szDecimals?: number
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,6 +97,7 @@ export default function TradePage() {
   // Order form state
   const [selectedAsset, setSelectedAsset] = useState('')
   const [assetSearch, setAssetSearch] = useState('')
+  const [assetMenuOpen, setAssetMenuOpen] = useState(false)
   const [slippage, setSlippage] = useState(2)
   const [closeSlippage, setCloseSlippage] = useState(2)
   const [usdcAmount, setUsdcAmount] = useState<number | ''>('')
@@ -345,6 +357,7 @@ export default function TradePage() {
   const handleSelectAsset = (asset: string) => {
     setSelectedAsset(asset)
     setAssetSearch('')
+    setAssetMenuOpen(false)
   }
 
   const quickSize = (pct: number) => {
@@ -360,8 +373,8 @@ export default function TradePage() {
   return (
     <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
 
-      {/* ── Left: Account + positions ── */}
-      <div className="flex flex-1 flex-col gap-4 min-w-0">
+      {/* ── Right (visual): Account + positions ── */}
+      <div className="flex flex-1 flex-col gap-4 min-w-0 lg:order-2">
 
         {/* Account card */}
         <div className="card p-4">
@@ -568,8 +581,8 @@ export default function TradePage() {
         })()}
       </div>
 
-      {/* ── Right: Place Order (sticky) ── */}
-      <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:sticky lg:top-5 lg:w-[360px]">
+      {/* ── Left (visual): Place Order + Asset Info (sticky) ── */}
+      <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:order-1 lg:sticky lg:top-5 lg:w-[360px]">
         <div className="card p-4">
           <h2 className="mb-4 text-sm font-semibold text-text">Place Order</h2>
 
@@ -581,14 +594,22 @@ export default function TradePage() {
                   type="text"
                   placeholder="Search ETH, BTC, SOL…"
                   value={selectedAsset ? (assetSearch || selectedAsset) : assetSearch}
-                  onFocus={() => { if (selectedAsset) setAssetSearch('') }}
+                  onFocus={() => {
+                    if (selectedAsset) setAssetSearch('')
+                    setAssetMenuOpen(true)
+                  }}
+                  onBlur={() => {
+                    // Delay so a click on a dropdown item registers before we hide it.
+                    setTimeout(() => setAssetMenuOpen(false), 150)
+                  }}
                   onChange={e => {
                     setAssetSearch(e.target.value)
                     if (!e.target.value) setSelectedAsset('')
+                    setAssetMenuOpen(true)
                   }}
                   className={inputCls}
                 />
-                {(assetSearch || !selectedAsset) && filteredSymbols.length > 0 && (
+                {assetMenuOpen && filteredSymbols.length > 0 && (
                   <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-xl border border-border bg-panel shadow-lg">
                     {filteredSymbols.map(s => (
                       <button
@@ -775,6 +796,9 @@ export default function TradePage() {
             )}
           </div>
         </div>
+
+        {/* Asset Info card — fills the space below Place Order */}
+        <AssetInfoCard asset={selectedAsset || null} ctx={assetInfo} />
       </aside>
     </main>
   )
