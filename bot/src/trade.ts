@@ -311,26 +311,43 @@ export async function placeOrder(
       const closeQty = roundSize(result.filledSize, meta)
       const limitMul = closeSide === 'sell' ? 0.95 : 1.05
 
+      // grouping='positionTpsl' tells Hyperliquid these are TP/SL brackets
+      // attached to the position (rather than standalone trigger orders).
+      // Required for `tpsl: 'tp'` to be accepted — with grouping='na' HL
+      // silently rejects the TP leg while accepting the SL.
+
       if (effectiveTp && effectiveTp > 0) {
         try {
+          const triggerPx = roundPrice(effectiveTp, meta)
+          const limitPx = roundPrice(effectiveTp * limitMul, meta)
           await exchange.order({
-            orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(effectiveTp * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(effectiveTp, meta), isMarket: true, tpsl: 'tp' } } }],
-            grouping: 'na',
+            orders: [{ a: meta.index, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'tp' } } }],
+            grouping: 'positionTpsl',
           })
           result.tpPlaced = true
           log.ok(`TP placed @ ${effectiveTp.toFixed(2)}${tpPct ? ` (+${tpPct}% from fill)` : ''}`)
-        } catch (e) { log.warn(`TP placement failed: ${(e as Error).message}`) }
+        } catch (e) {
+          // Surface the full HL rejection — the catch silently hides errors
+          // that look like "Order has invalid price" / "trigger condition met".
+          const msg = (e as Error).message
+          log.warn(`TP placement failed (asset=${asset}, side=${closeSide}, triggerPx=${roundPrice(effectiveTp, meta)}, qty=${closeQty}): ${msg}`)
+        }
       }
 
       if (effectiveSl && effectiveSl > 0) {
         try {
+          const triggerPx = roundPrice(effectiveSl, meta)
+          const limitPx = roundPrice(effectiveSl * limitMul, meta)
           await exchange.order({
-            orders: [{ a: meta.index, b: closeSide === 'buy', p: roundPrice(effectiveSl * limitMul, meta), s: closeQty, r: true, t: { trigger: { triggerPx: roundPrice(effectiveSl, meta), isMarket: true, tpsl: 'sl' } } }],
-            grouping: 'na',
+            orders: [{ a: meta.index, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'sl' } } }],
+            grouping: 'positionTpsl',
           })
           result.slPlaced = true
           log.ok(`SL placed @ ${effectiveSl.toFixed(2)}${slPct ? ` (-${slPct}% from fill)` : ''}`)
-        } catch (e) { log.warn(`SL placement failed: ${(e as Error).message}`) }
+        } catch (e) {
+          const msg = (e as Error).message
+          log.warn(`SL placement failed (asset=${asset}, side=${closeSide}, triggerPx=${roundPrice(effectiveSl, meta)}, qty=${closeQty}): ${msg}`)
+        }
       }
     }
   }
@@ -481,13 +498,23 @@ export interface PositionBrackets {
 }
 
 /**
- * Walks the user's open orders looking for reduce-only trigger (stop) orders
- * for `asset`. The Hyperliquid SDK marks bracket orders with `triggerCondition`
- * and `isTrigger`. Returns the SL and TP trigger prices if found.
+ * Walks the user's open orders looking for reduce-only trigger orders
+ * (TP / SL) for `asset` and returns their trigger prices.
  *
- * Heuristic for distinguishing SL from TP when only `triggerPx` is exposed:
- * compare the trigger price to the position's entry/mark — for a long, a
- * trigger below mark = SL, above = TP. The caller passes the position side.
+ * IMPORTANT: uses `frontendOpenOrders`, not `openOrders`. The basic
+ * `openOrders` endpoint returns `OpenOrderSchema` which does NOT include
+ * `isTrigger`, `isPositionTpsl`, `triggerPx`, `triggerCondition`, or
+ * `reduceOnly` — so a filter against those fields silently returns
+ * nothing even when triggers exist on the exchange. The frontend
+ * variant returns `FrontendOpenOrderSchema` with all of them.
+ *
+ * Classification (SL vs TP) works in two layers:
+ *  1. `triggerCondition` string from HL ("Stop Market", "Take Profit
+ *     Market", "Price below 123.4", "Price above 123.4") — when present,
+ *     that's the authoritative signal.
+ *  2. Fallback: compare triggerPx to a reference price (position entry,
+ *     else mid). For a long, trigger below ref = SL, above = TP. For a
+ *     short, the inverse.
  */
 export async function getPositionBrackets(
   asset: string,
@@ -496,7 +523,7 @@ export async function getPositionBrackets(
 ): Promise<PositionBrackets> {
   const { info, user } = getClients(creds)
   const want = asset.trim().toUpperCase()
-  const open = (await info.openOrders({ user })) as Array<{
+  const open = (await info.frontendOpenOrders({ user })) as Array<{
     coin: string
     oid: number
     triggerPx?: string | null
@@ -514,31 +541,46 @@ export async function getPositionBrackets(
   )
   if (triggers.length === 0 || !side) return { slPx: null, tpPx: null }
 
-  // Need a reference price to classify trigger as SL vs TP when the SDK doesn't
-  // expose the tpsl tag directly. We use mark price as the reference.
+  // Reference price for fallback classification. Prefer the position's entry
+  // price (stable across the trade), then mark price, then mid. If all fail,
+  // we still try to classify via triggerCondition text.
   let refPx: number | null = null
   try {
-    const meta = await getAssetMeta(info, want)
-    refPx = meta.midPx
-  } catch { /* fine, we'll fall back to price comparison */ }
+    const state = await getAccountState(want, creds)
+    if (state.position?.entryPx) refPx = state.position.entryPx
+    else if (state.position?.markPx) refPx = state.position.markPx
+    else if (state.currentPrice) refPx = state.currentPrice
+  } catch { /* fall through to meta */ }
+  if (refPx === null) {
+    try {
+      const meta = await getAssetMeta(info, want)
+      refPx = meta.midPx
+    } catch { /* fine, we'll fall back to triggerCondition only */ }
+  }
 
   let sl: number | null = null
   let tp: number | null = null
   for (const t of triggers) {
     const px = Number(t.triggerPx)
     if (!Number.isFinite(px)) continue
-    if (side === 'long') {
-      // For a long: SL is below current price, TP is above.
-      if (refPx !== null) {
-        if (px < refPx) sl = sl === null ? px : Math.max(sl, px)  // closest SL below
-        else tp = tp === null ? px : Math.min(tp, px)             // closest TP above
-      }
-    } else {
-      // For a short: SL is above current price, TP is below.
-      if (refPx !== null) {
-        if (px > refPx) sl = sl === null ? px : Math.min(sl, px)
-        else tp = tp === null ? px : Math.max(tp, px)
-      }
+    // First try the triggerCondition text — it carries the user-facing label.
+    const cond = (t.triggerCondition ?? '').toLowerCase()
+    let kind: 'sl' | 'tp' | null = null
+    if (cond.includes('stop')) kind = 'sl'
+    else if (cond.includes('take profit') || cond.includes('takeprofit')) kind = 'tp'
+    // Fallback: classify by price direction relative to the reference.
+    if (kind === null && refPx !== null) {
+      if (side === 'long')  kind = px < refPx ? 'sl' : 'tp'
+      else                  kind = px > refPx ? 'sl' : 'tp'
+    }
+    if (kind === 'sl') {
+      // Pick the closest SL to entry (largest below for long, smallest above for short)
+      if (sl === null) sl = px
+      else sl = side === 'long' ? Math.max(sl, px) : Math.min(sl, px)
+    } else if (kind === 'tp') {
+      // Pick the closest TP to entry
+      if (tp === null) tp = px
+      else tp = side === 'long' ? Math.min(tp, px) : Math.max(tp, px)
     }
   }
   return { slPx: sl, tpPx: tp }

@@ -289,13 +289,25 @@ export default function TradePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const data = (await res.json()) as { message?: string; filled?: boolean; error?: string }
+      const data = (await res.json()) as {
+        message?: string; filled?: boolean; error?: string
+        tpPlaced?: boolean; slPlaced?: boolean
+      }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      const brackets: string[] = []
-      if (typeof body.slPct === 'number') brackets.push(`SL -${body.slPct}%`)
-      if (typeof body.tpPct === 'number') brackets.push(`TP +${body.tpPct}%`)
-      const bracketTag = brackets.length ? ` (${brackets.join(', ')})` : ''
-      setOrderStatus(`✓ ${side.toUpperCase()} ${size} ${selectedAsset}${bracketTag} placed`)
+      // Surface per-leg bracket status. If the user asked for SL or TP but
+      // HL rejected it, we want them to see it immediately instead of
+      // discovering later that their position is unprotected.
+      const slWanted = typeof body.slPct === 'number'
+      const tpWanted = typeof body.tpPct === 'number'
+      const slOk = slWanted && data.slPlaced === true
+      const tpOk = tpWanted && data.tpPlaced === true
+      const tags: string[] = []
+      if (slWanted) tags.push(slOk ? `SL -${body.slPct}% ✓` : `SL ✗`)
+      if (tpWanted) tags.push(tpOk ? `TP +${body.tpPct}% ✓` : `TP ✗`)
+      const bracketTag = tags.length ? ` (${tags.join(', ')})` : ''
+      const allOk = (!slWanted || slOk) && (!tpWanted || tpOk)
+      const prefix = allOk ? '✓' : '⚠'
+      setOrderStatus(`${prefix} ${side.toUpperCase()} ${size} ${selectedAsset}${bracketTag}${allOk ? ' placed' : ' — check bot logs for bracket errors'}`)
       setTimeout(() => fetchAccount(selectedAsset), 1500)
     } catch (e) {
       setOrderStatus(`✗ ${(e as Error).message}`)
@@ -756,8 +768,9 @@ export default function TradePage() {
             {orderStatus && (
               <p className={`text-center text-xs ${
                 orderStatus.startsWith('✓') ? 'text-gain'
-                  : orderStatus.startsWith('✗') ? 'text-loss'
-                    : 'text-dim'
+                  : orderStatus.startsWith('⚠') ? 'text-warn'
+                    : orderStatus.startsWith('✗') ? 'text-loss'
+                      : 'text-dim'
               }`}>{orderStatus}</p>
             )}
           </div>

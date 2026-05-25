@@ -1551,3 +1551,79 @@ trades now have the same safety surface.
   in the first place), but worth flagging for future: if HL ever rate-
   limits the meta call, the brackets card would silently go blank even
   with valid SL/TP on the exchange.
+
+---
+
+## 2026-05-25 — Trade page: TWO follow-up bugs from the SL/TP fix
+
+Tested manual BUY BNB with SL+TP. Got SL on Hyperliquid but: (a) the bot web
+showed "—" for SL, and (b) TP never made it to HL. Two distinct bugs.
+
+### Bug 1 — bot web didn't see SL on Hyperliquid
+
+**Root cause**: `getPositionBrackets()` in `bot/src/trade.ts` was calling
+`info.openOrders({ user })`. That returns `OpenOrderSchema` from the HL SDK,
+which is the basic schema — it does NOT include `isTrigger`, `isPositionTpsl`,
+`triggerPx`, `triggerCondition`, or `reduceOnly`. The TypeScript cast at the
+call site was wishful: those properties don't exist at runtime, so the filter
+`o.isTrigger === true || o.isPositionTpsl === true` was always false. Every
+brackets lookup quietly returned `{ slPx: null, tpPx: null }` even when
+triggers existed.
+
+**Fix**: switched to `info.frontendOpenOrders({ user })` — same call surface,
+but the response shape is `FrontendOpenOrderSchema` with all trigger fields
+populated. Also strengthened classification: now reads `triggerCondition` text
+first (HL labels are "Stop Market", "Take Profit Market", etc.) and falls
+back to comparing triggerPx vs entry-then-mark-then-mid (was only mid before;
+if `getAssetMeta` failed, classification silently produced nothing).
+
+### Bug 2 — TP placement silently failed
+
+**Root cause**: the bracket placement was using `grouping: 'na'` for both SL
+and TP. HL's `na` grouping is "standard order without grouping" — it accepts
+a trigger order with `tpsl: 'sl'` and treats it as a stop, but rejects (or
+mis-routes) `tpsl: 'tp'` because TP-style triggers need to be declared as
+TP/SL grouping. The catch block then swallowed the error to a single-line
+warn, so it looked silent from the outside.
+
+**Fix**:
+- Both SL and TP placements now use `grouping: 'positionTpsl'`. From the
+  Hyperliquid SDK: *"TP/SL order that adjusts proportionally with the
+  position size"*. This is the correct grouping for brackets attached to a
+  live position — and it has the bonus property that if the user later
+  adds to the position, HL automatically resizes the SL/TP to match.
+- The catch now logs the full HL error PLUS the order details
+  (asset/side/triggerPx/qty) so future failures are diagnosable from the
+  bot logs alone, no guessing.
+
+### Bug 3 — UX gap: order toast lied about success
+
+The toast was reading `✓ ... placed` even when only one leg of the bracket
+made it. Now it reads the `tpPlaced` / `slPlaced` flags off the response and
+shows per-leg ticks/Xes:
+
+  - `✓ BUY 0.1 BNB (SL -2% ✓, TP +4% ✓) placed` — both succeeded
+  - `⚠ BUY 0.1 BNB (SL -2% ✓, TP ✗) — check bot logs for bracket errors`
+
+The warning state is now `text-warn` (amber) instead of green so the user's
+eye lands on a partial failure immediately.
+
+### What to do next time you test manually
+1. Place a small trade with both SL% and TP% set.
+2. Watch the toast — should be all ✓.
+3. Watch the position detail card — both "Where's my stop loss?" and
+   "Where's my take profit?" tiles should populate within ~10s.
+4. On Hyperliquid web: orders list should show two reduce-only stop orders.
+5. If anything fails, `pm2 logs trading-bot --lines 50` will now show the
+   exact HL rejection message + the order details we sent.
+
+### Gotchas
+- `frontendOpenOrders` may have slightly higher rate-limit weight than
+  `openOrders`. The brackets endpoint is per-position and only fires when
+  the user clicks/selects a position, so volume should be low. If we ever
+  poll it aggressively, batch or cache the call.
+- If HL changes the `triggerCondition` text format (eg "Stop Market" →
+  "stopMarket"), the case-insensitive contains-match in
+  `getPositionBrackets` still works because we lowercase first. But it's
+  string-matching against an undocumented label, so the entryPx fallback
+  is the durable path.
