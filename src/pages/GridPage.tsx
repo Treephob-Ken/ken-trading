@@ -203,7 +203,7 @@ export default function GridPage({
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
+    <main className="flex w-full flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
 
       {/* ── LEFT: Controls sidebar — mirrors Backtester aside exactly ───────── */}
       <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:sticky lg:top-5 lg:max-h-[calc(100vh-40px)] lg:w-[300px] lg:overflow-y-auto lg:overflow-x-hidden lg:pr-1">

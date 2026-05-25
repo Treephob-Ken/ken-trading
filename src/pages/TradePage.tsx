@@ -371,7 +371,7 @@ export default function TradePage() {
   const positions = account?.allPositions ?? []
 
   return (
-    <main className="mx-auto flex w-full max-w-[2200px] flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
+    <main className="flex w-full flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
 
       {/* ── Right (visual): Account + positions ── */}
       <div className="flex flex-1 flex-col gap-4 min-w-0 lg:order-2">
