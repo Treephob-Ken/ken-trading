@@ -55,6 +55,14 @@ import {
 } from './users.js'
 import { runMigrationIfNeeded } from './migrate.js'
 import { fundamentalsRouter } from './fundamentals.js'
+import {
+  buildAssetSourceMap,
+  fetchFillsFromHL,
+  loadAuditLines,
+  pairRoundTrips,
+  rangeToBounds,
+  summarize,
+} from './journal.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -771,6 +779,82 @@ app.get('/api/signal/bots/:id/chart-data', requireAuth, async (req: Request, res
       candles: candles.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })),
       ...chartData,
     })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// ─── Journal (Trade Log) ──────────────────────────────────────────────────────
+// Read-only views over Hyperliquid fills + the local audit log. All four routes
+// take optional ?from=&to= (ms since epoch) or ?range=24h|7d|30d (defaults 24h).
+
+function parseRange(req: Request): { from: number; to: number; range: '24h' | '7d' | '30d' } {
+  const r = typeof req.query.range === 'string' ? req.query.range : undefined
+  const fromQ = Number(req.query.from)
+  const toQ = Number(req.query.to)
+  if (Number.isFinite(fromQ) && Number.isFinite(toQ) && fromQ < toQ) {
+    return { from: fromQ, to: toQ, range: '24h' }
+  }
+  return rangeToBounds(r)
+}
+
+app.get('/api/journal/audit', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { from, to } = parseRange(req)
+    res.json(loadAuditLines(userId(req), from, to))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+app.get('/api/journal/fills', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set. Add them in Settings.' }); return }
+    const { from, to } = parseRange(req)
+    const srcMap = buildAssetSourceMap(userId(req))
+    const fills = await fetchFillsFromHL(creds, from, to, srcMap)
+    res.json(fills)
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+app.get('/api/journal/roundtrips', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set. Add them in Settings.' }); return }
+    const { from, to } = parseRange(req)
+    const srcMap = buildAssetSourceMap(userId(req))
+    const fills = await fetchFillsFromHL(creds, from, to, srcMap)
+    res.json(pairRoundTrips(fills))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+app.get('/api/journal/summary', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set. Add them in Settings.' }); return }
+    const { from, to, range } = parseRange(req)
+    const srcMap = buildAssetSourceMap(userId(req))
+    const fills = await fetchFillsFromHL(creds, from, to, srcMap)
+    const trips = pairRoundTrips(fills)
+    // openValue: notional of currently-open positions. Pulled from account
+    // state for whichever asset has any positions. Cheap call we already do
+    // elsewhere — but to keep this route fast we just sum the start-position
+    // signal in the latest fill per asset. Good-enough approximation; precise
+    // value lives on /api/account.
+    let openValue = 0
+    const latestPerAsset = new Map<string, { pos: number; px: number }>()
+    for (const f of fills) {
+      const signed = f.side === 'buy' ? +f.size : -f.size
+      const next = (latestPerAsset.get(f.asset)?.pos ?? f.startPosition) + signed
+      latestPerAsset.set(f.asset, { pos: next, px: f.price })
+    }
+    for (const { pos, px } of latestPerAsset.values()) openValue += Math.abs(pos) * px
+    res.json(summarize(fills, trips, range, openValue))
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }

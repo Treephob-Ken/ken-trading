@@ -282,5 +282,25 @@ export const GLOSSARY: Record<string, string> = {
   'Signal Size': 'The quantity of the asset (e.g. 0.1 ETH) to buy or sell per trade signal.',
   'Max Slippage': 'How far past the mid-price the market order may fill, as a percent. The order is an IOC limit capped at this distance, so a thin order book can never fill you at an arbitrarily bad price.',
   'Trade Cooldown': 'Minimum seconds between auto-trades. A new signal arriving inside this window is skipped, preventing rapid-fire orders when signals flip quickly.',
+
+  // ── Trade Log / Journal ────────────────────────────────────────────────
+  'Net PnL':
+    'Total realized profit or loss across every closed round-trip in this window, after fees, taken directly from Hyperliquid. Excludes any positions still open.',
+  'Round-Trip':
+    'A complete trade — one or more fills that open a position plus the fills that close it back to zero. Each round-trip has an entry, an exit, and a single realized PnL.',
+  'Best Round-Trip':
+    'The single most profitable closed trade in the selected window.',
+  'Worst Round-Trip':
+    'The single biggest loss in the selected window. Use it to gut-check whether your worst-case is acceptable.',
+  'Open Notional':
+    'The total dollar value of every position currently open across all assets, regardless of which bot owns it.',
+  'Fills':
+    'Every execution event that hit the order book — both opens and closes. One round-trip usually contains 2+ fills.',
+  'Audit Log':
+    'Every order the bot or you attempted, including the ones the exchange rejected or that timed out. The complete try-history, not just the wins.',
+  'Source — Manual':
+    'A trade that no signal bot or grid bot was configured for — placed by hand from the Trade page or an outside client.',
+  'Holding Time':
+    'How long the position was open, from first opening fill to final closing fill.',
 }
 

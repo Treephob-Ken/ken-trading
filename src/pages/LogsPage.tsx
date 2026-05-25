@@ -1,212 +1,296 @@
-import { useEffect, useRef, useState } from 'react'
-import { getJwt } from '@/contexts/AuthContext'
+import { useEffect, useMemo, useState } from 'react'
+import { Download } from 'lucide-react'
+import { apiFetch } from '@/contexts/AuthContext'
+import { downloadCsv, toCsv } from '@/lib/csv'
+import type { AuditLine, Fill, JournalSummary, RoundTrip } from '@/lib/journal'
+import { sourceLabel } from '@/lib/journal'
+import KpiHero from '@/components/journal/KpiHero'
+import FiltersBar, { type FilterState } from '@/components/journal/FiltersBar'
+import RoundTripsTable from '@/components/journal/RoundTripsTable'
+import FillsTable from '@/components/journal/FillsTable'
+import AuditTable from '@/components/journal/AuditTable'
+import EventsStream from '@/components/journal/EventsStream'
+import TradeDetailModal from '@/components/journal/TradeDetailModal'
+import ActivityHeatmap from '@/components/journal/ActivityHeatmap'
+import BotLeaderboard from '@/components/journal/BotLeaderboard'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+type TabId = 'roundtrips' | 'fills' | 'audit' | 'events'
 
-interface LogLine {
-  ts: string; level: string; msg: string; botId?: string
-}
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const MAX_LINES = 2000
-const LEVEL_FILTERS: { label: string; filter: string }[] = [
-  { label: 'All', filter: 'all' },
-  { label: 'Fills', filter: 'fill' },
-  { label: 'Issues', filter: 'warn err' },
-  { label: 'Info', filter: 'info ok' },
+const TABS: { id: TabId; label: string; hint: string }[] = [
+  { id: 'roundtrips', label: 'Round-Trips', hint: 'Completed trades, entry → exit' },
+  { id: 'fills', label: 'Fills', hint: 'Every execution from Hyperliquid' },
+  { id: 'audit', label: 'Audit', hint: 'Local order attempts, filled or not' },
+  { id: 'events', label: 'Events', hint: 'Live bot log stream' },
 ]
 
-function levelCls(level: string) {
-  if (level === 'ok' || level === 'fill') return 'text-gain'
-  if (level === 'err') return 'text-loss'
-  if (level === 'warn') return 'text-warn'
-  return 'text-text'
+// View Transitions API for crossfade between tabs. No-op in unsupported browsers.
+function transition(setter: () => void) {
+  const d = document as Document & { startViewTransition?: (cb: () => void) => unknown }
+  if (typeof d.startViewTransition === 'function') d.startViewTransition(setter)
+  else setter()
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
-
 export default function LogsPage() {
-  const [lines, setLines] = useState<LogLine[]>([])
-  const [levelFilter, setLevelFilter] = useState('all')
-  const [botFilter, setBotFilter] = useState('all')
-  const [botIds, setBotIds] = useState<string[]>([])
-  const [connected, setConnected] = useState(false)
-  const [autoScroll, setAutoScroll] = useState(true)
-  const boxRef = useRef<HTMLDivElement>(null)
-
-  // ── SSE connection ───────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const jwt = getJwt()
-    // EventSource can't send headers — pass token as query param
-    const url = `/api/logs/stream${jwt ? `?token=${encodeURIComponent(jwt)}` : ''}`
-    const es = new EventSource(url)
-
-    es.onopen = () => setConnected(true)
-    es.onerror = () => setConnected(false)
-
-    es.onmessage = (ev) => {
-      try {
-        const line: LogLine = JSON.parse(ev.data as string)
-        setLines(prev => {
-          const next = [...prev, line]
-          return next.length > MAX_LINES ? next.slice(-MAX_LINES) : next
-        })
-        if (line.botId && line.botId !== '_server') {
-          setBotIds(prev => prev.includes(line.botId!) ? prev : [...prev, line.botId!])
-        }
-      } catch { /* malformed line */ }
-    }
-
-    return () => es.close()
-  }, [])
-
-  // ── Auto-scroll ──────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!autoScroll) return
-    const box = boxRef.current
-    if (box) box.scrollTop = box.scrollHeight
-  }, [lines, autoScroll])
-
-  const handleScroll = () => {
-    const box = boxRef.current
-    if (!box) return
-    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20
-    setAutoScroll(atBottom)
-  }
-
-  // ── Filtered lines ───────────────────────────────────────────────────────────
-
-  const filtered = lines.filter(l => {
-    const levelMatch = levelFilter === 'all' || levelFilter.split(' ').includes(l.level)
-    const botMatch = botFilter === 'all' || l.botId === botFilter || (!l.botId && botFilter === '_server')
-    return levelMatch && botMatch
+  const [tab, setTab] = useState<TabId>('roundtrips')
+  const [filter, setFilter] = useState<FilterState>({
+    range: '24h',
+    bot: 'all',
+    asset: 'all',
+    side: 'all',
+    result: 'all',
+    search: '',
   })
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  const [summary, setSummary] = useState<JournalSummary | null>(null)
+  const [trips, setTrips] = useState<RoundTrip[]>([])
+  const [fills, setFills] = useState<Fill[]>([])
+  const [audit, setAudit] = useState<AuditLine[]>([])
+
+  const [loadingSummary, setLoadingSummary] = useState(true)
+  const [loadingTrips, setLoadingTrips] = useState(true)
+  const [loadingFills, setLoadingFills] = useState(true)
+  const [loadingAudit, setLoadingAudit] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const [detailTrip, setDetailTrip] = useState<RoundTrip | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setError(null)
+    setLoadingSummary(true)
+    setLoadingTrips(true)
+    setLoadingFills(true)
+    setLoadingAudit(true)
+
+    const q = `?range=${filter.range}`
+
+    Promise.all([
+      apiFetch(`/api/journal/summary${q}`).then((r) => r.ok ? r.json() : Promise.reject(new Error(`summary ${r.status}`))),
+      apiFetch(`/api/journal/roundtrips${q}`).then((r) => r.ok ? r.json() : Promise.reject(new Error(`roundtrips ${r.status}`))),
+      apiFetch(`/api/journal/fills${q}`).then((r) => r.ok ? r.json() : Promise.reject(new Error(`fills ${r.status}`))),
+      apiFetch(`/api/journal/audit${q}`).then((r) => r.ok ? r.json() : Promise.reject(new Error(`audit ${r.status}`))),
+    ])
+      .then(([s, t, f, a]) => {
+        if (cancelled) return
+        setSummary(s as JournalSummary)
+        setTrips(t as RoundTrip[])
+        setFills(f as Fill[])
+        setAudit(a as AuditLine[])
+      })
+      .catch((e: Error) => {
+        if (cancelled) return
+        setError(e.message)
+      })
+      .finally(() => {
+        if (cancelled) return
+        setLoadingSummary(false)
+        setLoadingTrips(false)
+        setLoadingFills(false)
+        setLoadingAudit(false)
+      })
+
+    return () => { cancelled = true }
+  }, [filter.range])
+
+  const botOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const r of trips) {
+      const k = r.source.kind === 'manual' ? 'manual' : r.source.botId
+      if (k) map.set(k, r.source.kind === 'manual' ? 'Manual' : r.source.botName || k)
+    }
+    for (const r of fills) {
+      const k = r.source.kind === 'manual' ? 'manual' : r.source.botId
+      if (k && !map.has(k)) map.set(k, r.source.kind === 'manual' ? 'Manual' : r.source.botName || k)
+    }
+    return [...map.entries()].map(([id, name]) => ({ id, name }))
+  }, [trips, fills])
+
+  const assetOptions = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of trips) s.add(r.asset)
+    for (const r of fills) s.add(r.asset)
+    for (const r of audit) s.add(r.asset)
+    return [...s].sort()
+  }, [trips, fills, audit])
+
+  const showResult = tab === 'roundtrips' || tab === 'audit'
+
+  const handleExport = () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    if (tab === 'roundtrips') {
+      const csv = toCsv(
+        trips.map((r) => ({
+          exitTime: new Date(r.exitTime).toISOString(),
+          entryTime: new Date(r.entryTime).toISOString(),
+          asset: r.asset,
+          side: r.side,
+          source: sourceLabel(r.source),
+          entryPx: r.entryPx,
+          exitPx: r.exitPx,
+          size: r.size,
+          closedPnl: r.closedPnl,
+          pnlPct: r.pnlPct,
+          fees: r.fees,
+          holdMs: r.holdMs,
+          fillCount: r.fillCount,
+        })),
+        [
+          { key: 'exitTime', label: 'Exit Time' },
+          { key: 'entryTime', label: 'Entry Time' },
+          { key: 'asset', label: 'Asset' },
+          { key: 'side', label: 'Side' },
+          { key: 'source', label: 'Source' },
+          { key: 'entryPx', label: 'Entry Price' },
+          { key: 'exitPx', label: 'Exit Price' },
+          { key: 'size', label: 'Size' },
+          { key: 'closedPnl', label: 'PnL (USD)' },
+          { key: 'pnlPct', label: 'PnL %' },
+          { key: 'fees', label: 'Fees' },
+          { key: 'holdMs', label: 'Hold (ms)' },
+          { key: 'fillCount', label: 'Fills' },
+        ],
+      )
+      downloadCsv(`roundtrips-${filter.range}-${stamp}.csv`, csv)
+    } else if (tab === 'fills') {
+      const csv = toCsv(
+        fills.map((f) => ({
+          time: new Date(f.time).toISOString(),
+          asset: f.asset,
+          source: sourceLabel(f.source),
+          direction: f.dir,
+          side: f.side,
+          price: f.price,
+          size: f.size,
+          closedPnl: f.closedPnl,
+          fee: f.fee,
+          oid: f.oid,
+          hash: f.hash,
+        })),
+        [
+          { key: 'time', label: 'Time' },
+          { key: 'asset', label: 'Asset' },
+          { key: 'source', label: 'Source' },
+          { key: 'direction', label: 'Direction' },
+          { key: 'side', label: 'Side' },
+          { key: 'price', label: 'Price' },
+          { key: 'size', label: 'Size' },
+          { key: 'closedPnl', label: 'Closed PnL' },
+          { key: 'fee', label: 'Fee' },
+          { key: 'oid', label: 'Order ID' },
+          { key: 'hash', label: 'Tx Hash' },
+        ],
+      )
+      downloadCsv(`fills-${filter.range}-${stamp}.csv`, csv)
+    } else if (tab === 'audit') {
+      const csv = toCsv(
+        audit.map((a) => ({
+          ts: a.ts,
+          asset: a.asset,
+          side: a.side,
+          filled: a.filled,
+          requestedSize: a.requestedSize,
+          filledSize: a.filledSize,
+          avgPx: a.avgPx ?? '',
+          notionalUsd: a.notionalUsd,
+        })),
+        [
+          { key: 'ts', label: 'Time' },
+          { key: 'asset', label: 'Asset' },
+          { key: 'side', label: 'Side' },
+          { key: 'filled', label: 'Filled' },
+          { key: 'requestedSize', label: 'Requested Size' },
+          { key: 'filledSize', label: 'Filled Size' },
+          { key: 'avgPx', label: 'Avg Price' },
+          { key: 'notionalUsd', label: 'Notional (USD)' },
+        ],
+      )
+      downloadCsv(`audit-${filter.range}-${stamp}.csv`, csv)
+    }
+  }
+
+  const canExport = tab !== 'events' && (
+    (tab === 'roundtrips' && trips.length > 0) ||
+    (tab === 'fills' && fills.length > 0) ||
+    (tab === 'audit' && audit.length > 0)
+  )
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden p-5 gap-4">
-
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-5">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div>
-            <h1 className="text-sm font-semibold text-text">Trade Log</h1>
-            <p className="text-[11px] text-dim">All bot activity — live stream</p>
-          </div>
-          <span className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
-            connected
-              ? 'border-gain/30 bg-gain/10 text-gain'
-              : 'border-border bg-panel text-dim'
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-gain animate-pulse' : 'bg-border'}`} />
-            {connected ? 'Live' : 'Connecting…'}
-          </span>
-          <span className="font-mono text-xs text-dim tabular-nums">{lines.length} lines</span>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-base font-semibold text-text">Trade Log</h1>
+          <p className="text-[11px] text-dim">Every fill, every attempt, every event — your trading journal.</p>
         </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Level filters */}
-          <div className="flex items-center rounded-xl border border-border bg-panel-2 p-0.5">
-            {LEVEL_FILTERS.map(f => (
-              <button
-                key={f.filter}
-                type="button"
-                onClick={() => setLevelFilter(f.filter)}
-                className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
-                  levelFilter === f.filter
-                    ? 'bg-brand text-white'
-                    : 'text-dim hover:text-text'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+      {/* KPI Hero */}
+      <KpiHero summary={summary} loading={loadingSummary} />
 
-          {/* Bot filter */}
-          {botIds.length > 0 && (
-            <div className="flex items-center rounded-xl border border-border bg-panel-2 p-0.5">
-              <button
-                type="button"
-                onClick={() => setBotFilter('all')}
-                className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
-                  botFilter === 'all' ? 'bg-brand text-white' : 'text-dim hover:text-text'
-                }`}
-              >
-                All Bots
-              </button>
-              {botIds.map(id => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setBotFilter(id)}
-                  className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
-                    botFilter === id ? 'bg-brand text-white' : 'text-dim hover:text-text'
-                  }`}
-                >
-                  {id.length > 8 ? id.slice(0, 8) + '…' : id}
-                </button>
-              ))}
-            </div>
-          )}
+      {/* Activity heatmap + leaderboard */}
+      <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
+        <ActivityHeatmap series={summary?.dailySeries ?? []} loading={loadingSummary} />
+        <BotLeaderboard rows={summary?.byBot ?? []} loading={loadingSummary} />
+      </div>
 
-          {/* Clear */}
+      {/* Error banner */}
+      {error && (
+        <div className="rounded-lg border border-loss/30 bg-loss/10 px-3 py-2 text-xs text-loss">
+          Couldn't load journal data: {error}. The Events tab still works.
+        </div>
+      )}
+
+      {/* Tabs + export */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center rounded-xl border border-border bg-panel-2 p-0.5 w-fit">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              title={t.hint}
+              onClick={() => transition(() => setTab(t.id))}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                tab === t.id ? 'bg-brand text-white' : 'text-dim hover:text-text'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {canExport && (
           <button
             type="button"
-            onClick={() => { setLines([]); setBotIds([]) }}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs text-dim hover:text-text transition-colors"
+            onClick={handleExport}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-1.5 text-xs text-dim hover:text-text"
+            title="Download the current view as CSV"
           >
-            Clear
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            Export CSV
           </button>
-        </div>
-      </div>
-
-      {/* Log box */}
-      <div className="flex flex-1 min-h-0 flex-col rounded-2xl border border-border bg-bg overflow-hidden">
-        <div
-          ref={boxRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed"
-        >
-          {filtered.length === 0 ? (
-            <p className="text-dim text-center py-8">
-              {connected ? 'Waiting for log lines…' : 'Connecting to log stream…'}
-            </p>
-          ) : (
-            filtered.map((l, i) => (
-              <div key={i} className="mb-0.5 break-words">
-                <span className="text-dim select-none">[{l.ts.slice(11, 19)}]</span>
-                {l.botId && l.botId !== '_server' && (
-                  <span className="ml-1 text-brand/70">[{l.botId.slice(0, 8)}]</span>
-                )}
-                {' '}
-                <span className={levelCls(l.level)}>{l.msg}</span>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Jump to bottom */}
-        {!autoScroll && (
-          <div className="border-t border-border px-4 py-2 text-right">
-            <button
-              type="button"
-              onClick={() => {
-                setAutoScroll(true)
-                const box = boxRef.current
-                if (box) box.scrollTop = box.scrollHeight
-              }}
-              className="rounded-lg bg-brand/10 border border-brand/20 px-3 py-1 text-xs font-semibold text-brand hover:bg-brand/15 transition-colors"
-            >
-              ↓ Latest
-            </button>
-          </div>
         )}
       </div>
+
+      {/* Filters */}
+      {tab !== 'events' && (
+        <FiltersBar
+          state={filter}
+          onChange={setFilter}
+          bots={botOptions}
+          assets={assetOptions}
+          showResult={showResult}
+        />
+      )}
+
+      {/* Active tab */}
+      {tab === 'roundtrips' && (
+        <RoundTripsTable rows={trips} loading={loadingTrips} filter={filter} onSelect={setDetailTrip} />
+      )}
+      {tab === 'fills' && <FillsTable rows={fills} loading={loadingFills} filter={filter} />}
+      {tab === 'audit' && <AuditTable rows={audit} loading={loadingAudit} filter={filter} />}
+      {tab === 'events' && <EventsStream />}
+
+      {/* Detail modal */}
+      <TradeDetailModal trip={detailTrip} onClose={() => setDetailTrip(null)} />
     </div>
   )
 }
