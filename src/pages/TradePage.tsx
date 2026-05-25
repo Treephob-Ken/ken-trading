@@ -17,6 +17,7 @@ import type { Candle } from '@/types'
 import StatTile, { type Tone } from '@/components/ui/StatTile'
 import InfoTip from '@/components/InfoTip'
 import AssetInfoCard from '@/components/AssetInfoCard'
+import MultiBotConflictBanner from '@/components/MultiBotConflictBanner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -621,13 +622,21 @@ export default function TradePage() {
         {(() => {
           const pos = account?.allPositions.find((p) => p.asset === selectedPosAsset) ?? null
           if (!pos) return null
+          const posSources = sources[pos.asset] ?? []
           return (
-            <PositionDetailCard
-              position={pos}
-              brackets={brackets}
-              sources={sources[pos.asset] ?? []}
-              openedAt={posOpenedAt[pos.asset] ?? null}
-            />
+            <>
+              {/* Multi-bot conflict warning — HL keeps one position per asset,
+                  two bots on the same asset will fight each other. */}
+              {posSources.length >= 2 && (
+                <MultiBotConflictBanner asset={pos.asset} sources={posSources} />
+              )}
+              <PositionDetailCard
+                position={pos}
+                brackets={brackets}
+                sources={posSources}
+                openedAt={posOpenedAt[pos.asset] ?? null}
+              />
+            </>
           )
         })()}
       </div>

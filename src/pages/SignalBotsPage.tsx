@@ -27,6 +27,7 @@ import type { StrategyOutput } from '@/lib/strategies'
 import type { Candle, StrategyId } from '@/types'
 import LiveBotHeader from '@/components/LiveBotHeader'
 import StrandedBanner, { type StrandedPosition } from '@/components/StrandedBanner'
+import MultiBotConflictBanner from '@/components/MultiBotConflictBanner'
 import LiveStatusCard from '@/components/signalbot/LiveStatusCard'
 import SignalFunnelCard from '@/components/signalbot/SignalFunnelCard'
 import EnsembleVotesCard from '@/components/signalbot/EnsembleVotesCard'
@@ -778,6 +779,19 @@ export default function SignalBotsPage() {
                       refresh()
                       refreshSources()
                     }}
+                  />
+                )
+              })()}
+
+              {/* Multi-bot conflict — two or more bots on this asset. */}
+              {selectedId && !isNew && cfg.asset && (() => {
+                const arr = sources[cfg.asset.toUpperCase()] ?? []
+                if (arr.length < 2) return null
+                return (
+                  <MultiBotConflictBanner
+                    asset={cfg.asset.toUpperCase()}
+                    sources={arr}
+                    hideBotId={selectedId}
                   />
                 )
               })()}

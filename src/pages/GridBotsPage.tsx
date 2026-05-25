@@ -21,6 +21,7 @@ import { useHLAssets } from '@/lib/hlAssets'
 import { fetchKlines } from '@/lib/binance'
 import LiveBotHeader from '@/components/LiveBotHeader'
 import StrandedBanner, { type StrandedPosition } from '@/components/StrandedBanner'
+import MultiBotConflictBanner from '@/components/MultiBotConflictBanner'
 import GridActivityCard from '@/components/gridbot/GridActivityCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -592,6 +593,19 @@ export default function GridBotsPage() {
                       refresh()
                       refreshSources()
                     }}
+                  />
+                )
+              })()}
+
+              {/* Multi-bot conflict */}
+              {selectedId && !isNew && cfg.asset && (() => {
+                const arr = sources[cfg.asset.toUpperCase()] ?? []
+                if (arr.length < 2) return null
+                return (
+                  <MultiBotConflictBanner
+                    asset={cfg.asset.toUpperCase()}
+                    sources={arr}
+                    hideBotId={selectedId}
                   />
                 )
               })()}
