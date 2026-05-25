@@ -6,7 +6,7 @@
 import { Router, type Request, type Response } from 'express'
 import { requireAuth } from './auth.js'
 import { fetchKlines } from './strategy/market-data.js'
-import { ema, bollinger } from './strategy/indicators.js'
+import { ema, bollinger, sma, atr } from './strategy/indicators.js'
 
 // ─── tiny in-memory cache ────────────────────────────────────────────────────
 
@@ -438,6 +438,188 @@ async function computeVerdict(asset = 'BTC'): Promise<VerdictSnapshot> {
   }
 }
 
+// ─── Realized Volatility & ATR% ─────────────────────────────────────────────
+// "How violent is the market?" — sets grid spacing, SL distance, risk sizing.
+
+export type VolZone = 'Calm' | 'Normal' | 'Elevated' | 'Extreme'
+
+export interface VolPoint { time: number; rv7: number | null; rv30: number | null; atrPct: number | null }
+export interface VolResult {
+  current: { rv7: number; rv30: number; atrPct: number; zone: VolZone }
+  history: VolPoint[]
+}
+
+function rollingStd(values: number[], period: number): number[] {
+  const out = new Array<number>(values.length).fill(NaN)
+  for (let i = period - 1; i < values.length; i++) {
+    let sum = 0
+    for (let j = i - period + 1; j <= i; j++) sum += values[j]
+    const mean = sum / period
+    let sq = 0
+    for (let j = i - period + 1; j <= i; j++) sq += (values[j] - mean) ** 2
+    out[i] = Math.sqrt(sq / period)
+  }
+  return out
+}
+
+function classifyVol(rv30: number): VolZone {
+  if (rv30 < 25) return 'Calm'
+  if (rv30 < 50) return 'Normal'
+  if (rv30 < 80) return 'Elevated'
+  return 'Extreme'
+}
+
+async function fetchVolatility(): Promise<VolResult> {
+  return cachedFetch('volatility', 30 * 60 * 1000, async () => {
+    const candles = await fetchKlines('BTCUSDT', '1d', 400)
+    if (candles.length < 60) throw new Error(`Not enough candles for volatility`)
+    const closes = candles.map((c) => c.close)
+    // Daily log returns
+    const logRet: number[] = []
+    for (let i = 1; i < closes.length; i++) logRet.push(Math.log(closes[i] / closes[i - 1]))
+    const std7 = rollingStd(logRet, 7)
+    const std30 = rollingStd(logRet, 30)
+    // Annualize: sqrt(365) and convert to percentage points.
+    const ann = Math.sqrt(365) * 100
+    const atrSeries = atr(candles.map((c) => c.high), candles.map((c) => c.low), closes, 14)
+    const atrPct = atrSeries.map((v, i) => (Number.isFinite(v) && closes[i] > 0 ? (v / closes[i]) * 100 : NaN))
+    const history: VolPoint[] = []
+    for (let i = 0; i < logRet.length; i++) {
+      const cIdx = i + 1
+      history.push({
+        time: candles[cIdx].time,
+        rv7: Number.isFinite(std7[i]) ? std7[i] * ann : null,
+        rv30: Number.isFinite(std30[i]) ? std30[i] * ann : null,
+        atrPct: Number.isFinite(atrPct[cIdx]) ? atrPct[cIdx] : null,
+      })
+    }
+    const last = history[history.length - 1]
+    const rv7 = last.rv7 ?? 0
+    const rv30 = last.rv30 ?? 0
+    const atrPctNow = last.atrPct ?? 0
+    return {
+      current: { rv7, rv30, atrPct: atrPctNow, zone: classifyVol(rv30) },
+      history,
+    }
+  })
+}
+
+// ─── Cycle Position (Mayer Multiple + Pi Cycle Top) ──────────────────────────
+// Mayer = price / 200DMA. Pi Cycle = 111DMA × 2 crossing 350DMA marks tops.
+
+export type MayerZone = 'Cheap' | 'Fair' | 'Hot' | 'Cycle Top'
+
+export interface CyclePoint {
+  time: number
+  close: number
+  ma200: number | null
+  ma111x2: number | null
+  ma350: number | null
+  mayer: number | null
+}
+export interface CycleResult {
+  current: {
+    mayer: number
+    zone: MayerZone
+    ma200: number
+    ma111x2: number
+    ma350: number
+    piGapPct: number    // (ma111*2 - ma350) / ma350 × 100. Crosses 0 = Pi Cycle Top signal.
+  }
+  history: CyclePoint[]
+}
+
+function classifyMayer(m: number): MayerZone {
+  if (m < 0.8) return 'Cheap'
+  if (m < 1.8) return 'Fair'
+  if (m < 2.4) return 'Hot'
+  return 'Cycle Top'
+}
+
+async function fetchCycle(): Promise<CycleResult> {
+  return cachedFetch('cycle', 60 * 60 * 1000, async () => {
+    // 1000 daily candles ≈ 2.7y — enough for 350DMA + a usable Mayer history.
+    const candles = await fetchKlines('BTCUSDT', '1d', 1000)
+    if (candles.length < 360) throw new Error(`Not enough candles for cycle (got ${candles.length})`)
+    const closes = candles.map((c) => c.close)
+    const ma200 = sma(closes, 200)
+    const ma111 = sma(closes, 111)
+    const ma350 = sma(closes, 350)
+    const history: CyclePoint[] = candles.map((c, i) => ({
+      time: c.time,
+      close: c.close,
+      ma200: Number.isFinite(ma200[i]) ? ma200[i] : null,
+      ma111x2: Number.isFinite(ma111[i]) ? ma111[i] * 2 : null,
+      ma350: Number.isFinite(ma350[i]) ? ma350[i] : null,
+      mayer: Number.isFinite(ma200[i]) && ma200[i] > 0 ? c.close / ma200[i] : null,
+    }))
+    const last = history[history.length - 1]
+    const mayer = last.mayer ?? 0
+    const ma200Now = last.ma200 ?? 0
+    const ma111x2Now = last.ma111x2 ?? 0
+    const ma350Now = last.ma350 ?? 0
+    const piGapPct = ma350Now > 0 ? ((ma111x2Now - ma350Now) / ma350Now) * 100 : 0
+    return {
+      current: { mayer, zone: classifyMayer(mayer), ma200: ma200Now, ma111x2: ma111x2Now, ma350: ma350Now, piGapPct },
+      history,
+    }
+  })
+}
+
+// ─── Smart-money positioning (Top-trader L/S + Coinbase Premium) ─────────────
+// Top-trader L/S = positioning of Binance's accounts holding open futures
+// positions. Premium Gap = Coinbase spot - Binance spot, % of Binance — when
+// positive, US institutional flow is outbidding Asia.
+
+interface BinanceLSRow { timestamp: number; longShortRatio: string }
+type CoinbaseCandle = [number, number, number, number, number, number]
+
+export interface LSPoint { time: number; ratio: number }
+export interface PremiumPoint { time: number; pct: number }
+
+export interface SmartMoneyResult {
+  longShort: { current: number; history: LSPoint[] }
+  premium: { current: number; history: PremiumPoint[] }
+}
+
+async function fetchSmartMoney(): Promise<SmartMoneyResult> {
+  return cachedFetch('smartmoney', 5 * 60 * 1000, async () => {
+    const [lsRaw, cbRaw, bnCandles] = await Promise.all([
+      fetchJSON<BinanceLSRow[]>(
+        `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=4h&limit=180`,
+      ),
+      fetchJSON<CoinbaseCandle[]>(
+        `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400`,
+      ),
+      fetchKlines('BTCUSDT', '1d', 300),
+    ])
+    const ls: LSPoint[] = lsRaw.map((r) => ({
+      time: Math.floor(r.timestamp / 1000),
+      ratio: Number(r.longShortRatio),
+    }))
+    // Coinbase candles: [time, low, high, open, close, volume], newest-first.
+    // Map by day-start UTC so we can join against Binance daily closes.
+    const cbByDay = new Map<number, number>()
+    for (const row of cbRaw) {
+      // row[0] is unix seconds at UTC midnight for daily granularity.
+      cbByDay.set(row[0], row[4])
+    }
+    const premium: PremiumPoint[] = []
+    for (const c of bnCandles) {
+      const cbClose = cbByDay.get(c.time)
+      if (cbClose != null && c.close > 0) {
+        premium.push({ time: c.time, pct: ((cbClose - c.close) / c.close) * 100 })
+      }
+    }
+    if (ls.length === 0) throw new Error('Empty long/short response')
+    if (premium.length === 0) throw new Error('Empty Coinbase premium series')
+    return {
+      longShort: { current: ls[ls.length - 1].ratio, history: ls },
+      premium: { current: premium[premium.length - 1].pct, history: premium },
+    }
+  })
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 export const fundamentalsRouter = Router()
@@ -477,5 +659,20 @@ fundamentalsRouter.get('/regime', requireAuth, async (req: Request, res: Respons
 fundamentalsRouter.get('/verdict', requireAuth, async (req: Request, res: Response) => {
   const asset = (typeof req.query.asset === 'string' ? req.query.asset : 'BTC').toUpperCase()
   try { res.json(await computeVerdict(asset)) }
+  catch (e) { res.status(502).json({ error: (e as Error).message }) }
+})
+
+fundamentalsRouter.get('/volatility', requireAuth, async (_req: Request, res: Response) => {
+  try { res.json(await fetchVolatility()) }
+  catch (e) { res.status(502).json({ error: (e as Error).message }) }
+})
+
+fundamentalsRouter.get('/cycle', requireAuth, async (_req: Request, res: Response) => {
+  try { res.json(await fetchCycle()) }
+  catch (e) { res.status(502).json({ error: (e as Error).message }) }
+})
+
+fundamentalsRouter.get('/smart-money', requireAuth, async (_req: Request, res: Response) => {
+  try { res.json(await fetchSmartMoney()) }
   catch (e) { res.status(502).json({ error: (e as Error).message }) }
 })

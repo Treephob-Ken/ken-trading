@@ -1374,3 +1374,63 @@ positioning, and breadth — each presented as a question the card answers.
   upstream — increase cache TTL or switch to a CDN-fronted Binance mirror.
 - `bollinger()` from `bot/src/strategy/indicators.ts` returns `{ mid, upper, lower }`
   (not `middle`) — caught this on the first build.
+
+---
+
+## 2026-05-25 — Fundamentals page polish + 3 Tier-A cards
+
+### What changed
+**Polish pass** (applied via `/ui-ux-pro-max` + `/modern-web-guidance` skills):
+- **Container queries** on each Q-card (`.fund-card` in `index.css`) — cards now reflow based on
+  their own width, not the page viewport.
+- **Lightweight Charts** `rightOffset: 0` + `fixLeftEdge/fixRightEdge: true` + `attachReflow()`
+  helper that re-runs `fitContent()` on every resize. Fixes the "data clusters on the left,
+  whitespace on the right" bug.
+- **View Transitions API** wraps the refresh state swap — smooth cross-fade between old and new
+  readings on supporting browsers; falls back to instant update otherwise.
+- **`prefers-reduced-motion`** guard in `index.css` disables refresh spin + VT animations.
+- **Accessibility**: `aria-live="polite"` on verdict card; `aria-label` summaries on every chart
+  container; `role="progressbar"` with min/max/now on dominance bars; `role="alert"` on error
+  banner; `aria-busy` skeleton; `focus-visible:ring` on refresh button.
+- **Trend arrows** on chips — computed from the last value vs ~7-period-ago in history series we
+  already fetch. Adds shape redundancy so colorblind users can read the chips.
+- **Tabular numerals** (`.fund-num` → `font-variant-numeric: tabular-nums`) on every numeric
+  readout.
+- **Skeleton grid** matches the final card heights so there's zero CLS on first load.
+
+**Three new Tier-A cards** (server `bot/src/fundamentals.ts` + frontend cards):
+
+1. **Realized Volatility & ATR%** — *"How violent is the market right now?"*
+   - Computes 7D/30D annualized realized volatility from daily log returns + 14D ATR%
+   - Zone labels: Calm (<25%), Normal (25-50%), Elevated (50-80%), Extreme (>80%)
+   - Interpretation tells the bot operator how to adjust grid spacing + SL distance
+   - Source: Binance daily klines (free)
+
+2. **Cycle Position (Mayer Multiple + Pi Cycle Top)** — *"Where in the macro cycle are we?"*
+   - Log-scale price chart with 200DMA overlay, 111DMA × 2 and 350DMA (Pi Cycle indicator)
+   - Mayer zones: Cheap (<0.8), Fair (0.8-1.8), Hot (1.8-2.4), Cycle Top (>2.4)
+   - `piGapPct` = distance from 111DMAx2 to 350DMA crossover; negative = not in top zone
+   - Source: Binance daily klines (1000 bars ≈ 2.7y, enough for 350DMA)
+
+3. **Smart-Money Positioning (Top-Trader L/S + Coinbase Premium)** — *"Where is the smart money?"*
+   - Binance top-trader long/short account ratio (`futures/data/topLongShortAccountRatio`, 4h, 30 days)
+   - Coinbase Premium Gap = (Coinbase BTC-USD daily close − Binance BTCUSDT daily close) / Binance × 100
+   - Source: Binance public + `api.exchange.coinbase.com/products/BTC-USD/candles` (both free)
+
+### Decisions worth remembering
+- Did NOT touch the verdict aggregator. The 5-input verdict scoring is balanced and tested;
+  bolting on 3 more dimensions would require retuning weights. v2 verdict can incorporate them
+  later if the standalone cards prove useful.
+- Coinbase candle endpoint (`api.exchange.coinbase.com`) caps at 300 bars and no API key —
+  10 months of premium history, plenty for the card.
+- Pi Cycle Top is rendered as two dotted MA lines on the cycle chart rather than a separate
+  signal marker; reading the gap is more honest about how blunt the indicator actually is.
+- Cycle chart uses `mode: 1` (log scale) on the right price scale so multi-year BTC price
+  history doesn't get squashed by recent values.
+- 8 cards in a 2-col grid = 4 rows, no empty slots.
+
+### Gotchas
+- Binance fapi top L/S endpoint sometimes returns rate-block on specific cloud IPs from
+  certain regions; same risk profile as the existing funding/OI endpoints.
+- CoinMetrics community MVRV and now Coinbase Exchange API are both rate-limited — our cache
+  TTLs (6h MVRV, 5m smart-money) stay well under the limits.

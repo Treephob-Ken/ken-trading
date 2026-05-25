@@ -54,6 +54,30 @@ interface RegimeResult {
   donchianPos: number; bbBandwidth: number; return30d: number; return90d: number
 }
 
+type VolZone = 'Calm' | 'Normal' | 'Elevated' | 'Extreme'
+interface VolPoint { time: number; rv7: number | null; rv30: number | null; atrPct: number | null }
+interface VolResult {
+  current: { rv7: number; rv30: number; atrPct: number; zone: VolZone }
+  history: VolPoint[]
+}
+
+type MayerZone = 'Cheap' | 'Fair' | 'Hot' | 'Cycle Top'
+interface CyclePoint {
+  time: number; close: number
+  ma200: number | null; ma111x2: number | null; ma350: number | null; mayer: number | null
+}
+interface CycleResult {
+  current: { mayer: number; zone: MayerZone; ma200: number; ma111x2: number; ma350: number; piGapPct: number }
+  history: CyclePoint[]
+}
+
+interface LSPoint { time: number; ratio: number }
+interface PremiumPoint { time: number; pct: number }
+interface SmartMoneyResult {
+  longShort: { current: number; history: LSPoint[] }
+  premium: { current: number; history: PremiumPoint[] }
+}
+
 interface Bundle {
   verdict: Verdict
   fng: FngResult
@@ -62,6 +86,9 @@ interface Bundle {
   oi: OiResult
   dominance: DominanceResult
   regime: RegimeResult
+  volatility: VolResult
+  cycle: CycleResult
+  smartMoney: SmartMoneyResult
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -124,18 +151,22 @@ export default function FundamentalsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const endpoints = ['verdict', 'fear-greed', 'mvrv', 'funding', 'oi', 'dominance', 'regime?asset=BTC&tf=1d']
+      const endpoints = [
+        'verdict', 'fear-greed', 'mvrv', 'funding', 'oi', 'dominance',
+        'regime?asset=BTC&tf=1d', 'volatility', 'cycle', 'smart-money',
+      ]
       const results = await Promise.all(
         endpoints.map((e) => apiFetch(`/api/fundamentals/${e}`).then(async (r) => {
           if (!r.ok) throw new Error(`${e}: ${(await r.json().catch(() => ({})) as { error?: string }).error ?? r.status}`)
           return r.json()
         })),
       )
-      const [verdict, fng, mvrv, funding, oi, dominance, regime] = results as [
+      const [verdict, fng, mvrv, funding, oi, dominance, regime, volatility, cycle, smartMoney] = results as [
         Verdict, FngResult, MvrvResult, FundingResult, OiResult, DominanceResult, RegimeResult,
+        VolResult, CycleResult, SmartMoneyResult,
       ]
       withViewTransition(() => {
-        setData({ verdict, fng, mvrv, funding, oi, dominance, regime })
+        setData({ verdict, fng, mvrv, funding, oi, dominance, regime, volatility, cycle, smartMoney })
         setLastFetch(Date.now())
       })
     } catch (e) {
@@ -201,6 +232,9 @@ export default function FundamentalsPage() {
             <RegimeCard regime={data.regime} />
             <FundingOiCard funding={data.funding} oi={data.oi} />
             <DominanceCard dominance={data.dominance} />
+            <VolatilityCard vol={data.volatility} />
+            <CycleCard cycle={data.cycle} />
+            <SmartMoneyCard sm={data.smartMoney} />
           </section>
         </>
       )}
@@ -220,7 +254,7 @@ function SkeletonGrid() {
         ))}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {Array.from({ length: 5 }).map((_, i) => (
+        {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="h-[340px] rounded-2xl border border-border bg-panel/60 animate-pulse" />
         ))}
       </div>
@@ -598,6 +632,203 @@ function DominanceBar({ label, pct, color }: { label: string; pct: number; color
       </div>
       <span className="fund-num w-14 text-right font-mono text-[11px] text-text">{pct.toFixed(1)}%</span>
     </div>
+  )
+}
+
+// ─── Realized Volatility card ────────────────────────────────────────────────
+
+function VolatilityCard({ vol }: { vol: VolResult }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { rv7, rv30, atrPct, zone } = vol.current
+  const toneByZone: Record<VolZone, Tone> = {
+    Calm: 'gain', Normal: 'neutral', Elevated: 'warn', Extreme: 'loss',
+  }
+  const tone = toneByZone[zone]
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const chart = makeChart(el)
+    const rv30Series = chart.addSeries(AreaSeries, {
+      lineColor: 'rgba(167,139,250,0.9)',
+      topColor: 'rgba(167,139,250,0.30)', bottomColor: 'rgba(167,139,250,0.02)',
+      priceFormat: { type: 'price', precision: 1, minMove: 0.1 },
+    })
+    rv30Series.setData(
+      vol.history
+        .filter((p) => p.rv30 != null)
+        .map((p) => ({ time: t(p.time), value: p.rv30 as number })),
+    )
+    const rv7Series = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 })
+    rv7Series.setData(
+      vol.history
+        .filter((p) => p.rv7 != null)
+        .map((p) => ({ time: t(p.time), value: p.rv7 as number })),
+    )
+    // Zone bands at 25 / 50 / 80 %
+    for (const [val, color] of [[25, 'rgba(34,197,94,0.4)'], [50, 'rgba(245,158,11,0.4)'], [80, 'rgba(239,68,68,0.4)']] as const) {
+      const band = chart.addSeries(LineSeries, { color, lineWidth: 1, lineStyle: LineStyle.Dotted })
+      band.setData(vol.history.map((p) => ({ time: t(p.time), value: val })))
+    }
+    return attachReflow(chart, el)
+  }, [vol])
+
+  const interp = `30D annualized RV at ${rv30.toFixed(1)}% (zone: ${zone}); 7D at ${rv7.toFixed(1)}%; daily ATR ${atrPct.toFixed(2)}% of price. ` +
+    (zone === 'Calm' ? 'Tight grids and tight SLs work — but compressions historically resolve into expansion.'
+    : zone === 'Normal' ? 'Standard regime — bot defaults are appropriate.'
+    : zone === 'Elevated' ? 'Widen grid spacing and SL distance; consider reducing position size.'
+    : 'Extreme vol — protect capital. Avoid fresh entries, reduce leverage, expect overnight gaps.')
+
+  return (
+    <QCard
+      question="How violent is the market right now?"
+      interpretation={interp}
+      ariaSummary={`Realized volatility 30 day ${rv30.toFixed(1)} percent, zone ${zone}`}
+    >
+      <StatHeader tone={tone} value={`${rv30.toFixed(1)}%`} label={`30D RV · ${zone}`} hint={`7D RV ${rv7.toFixed(1)}% · daily ATR ${atrPct.toFixed(2)}%`} />
+      <div ref={containerRef} className="fund-well h-[220px] w-full overflow-hidden" />
+    </QCard>
+  )
+}
+
+// ─── Cycle Position card (Mayer + Pi Cycle) ──────────────────────────────────
+
+function CycleCard({ cycle }: { cycle: CycleResult }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { mayer, zone, piGapPct } = cycle.current
+  const toneByZone: Record<MayerZone, Tone> = {
+    Cheap: 'gain', Fair: 'neutral', Hot: 'warn', 'Cycle Top': 'loss',
+  }
+  const tone = toneByZone[zone]
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    // Log scale so a multi-year price series is readable.
+    const chart = createChart(el, {
+      autoSize: true,
+      layout: {
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: '#8b93a7',
+        fontFamily: "'Inter', system-ui, sans-serif",
+      },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+      crosshair: { mode: 1 },
+      timeScale: { timeVisible: false, secondsVisible: false, borderColor: '#2a3142', rightOffset: 0, barSpacing: 1, fixLeftEdge: true, fixRightEdge: true },
+      rightPriceScale: { borderColor: '#2a3142', mode: 1 /* Logarithmic */, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      handleScale: false, handleScroll: false,
+    })
+    const priceSer = chart.addSeries(LineSeries, { color: '#e8e8f2', lineWidth: 1 })
+    priceSer.setData(cycle.history.map((p) => ({ time: t(p.time), value: p.close })))
+    const ma200Ser = chart.addSeries(LineSeries, { color: '#a78bfa', lineWidth: 1, lineStyle: LineStyle.Dashed })
+    ma200Ser.setData(cycle.history.filter((p) => p.ma200 != null).map((p) => ({ time: t(p.time), value: p.ma200 as number })))
+    const ma111Ser = chart.addSeries(LineSeries, { color: '#10b981', lineWidth: 1, lineStyle: LineStyle.Dotted })
+    ma111Ser.setData(cycle.history.filter((p) => p.ma111x2 != null).map((p) => ({ time: t(p.time), value: p.ma111x2 as number })))
+    const ma350Ser = chart.addSeries(LineSeries, { color: '#ef4444', lineWidth: 1, lineStyle: LineStyle.Dotted })
+    ma350Ser.setData(cycle.history.filter((p) => p.ma350 != null).map((p) => ({ time: t(p.time), value: p.ma350 as number })))
+    return attachReflow(chart, el)
+  }, [cycle])
+
+  const piNote = piGapPct < 0
+    ? `Pi Cycle Top is ${Math.abs(piGapPct).toFixed(1)}% away (111DMA × 2 below 350DMA — not in top zone).`
+    : `⚠ Pi Cycle Top triggered ${piGapPct.toFixed(1)}% above the line — historically a cycle peak warning.`
+
+  const interp = `Mayer Multiple at ${mayer.toFixed(2)} (zone: ${zone}). ${piNote} ` +
+    (zone === 'Cheap' ? 'Below 0.8 — generational accumulation zone in prior cycles.'
+    : zone === 'Fair' ? 'Mid-range — neither cheap nor euphoric.'
+    : zone === 'Hot' ? 'Above 1.8 — late-cycle territory, prior cycle tops formed around here.'
+    : 'Above 2.4 — historical cycle-top zone, take risk off.')
+
+  return (
+    <QCard
+      question="Where are we in the macro cycle?"
+      interpretation={interp}
+      ariaSummary={`Mayer Multiple ${mayer.toFixed(2)}, zone ${zone}`}
+    >
+      <StatHeader tone={tone} value={mayer.toFixed(2)} label={`Mayer · ${zone}`} hint="log price · 200DMA (violet) · 111DMAx2 (green) · 350DMA (red)" />
+      <div ref={containerRef} className="fund-well h-[240px] w-full overflow-hidden" />
+    </QCard>
+  )
+}
+
+// ─── Smart-money positioning card ────────────────────────────────────────────
+
+function SmartMoneyCard({ sm }: { sm: SmartMoneyResult }) {
+  const lsRef = useRef<HTMLDivElement>(null)
+  const prRef = useRef<HTMLDivElement>(null)
+  const lsCurrent = sm.longShort.current
+  const prCurrent = sm.premium.current
+  const lsTone: Tone =
+    lsCurrent > 1.6 ? 'loss' : lsCurrent > 1.2 ? 'warn' : lsCurrent > 0.8 ? 'neutral' : 'gain'
+  const prTone: Tone =
+    prCurrent > 0.15 ? 'gain' : prCurrent > 0.05 ? 'gain' : prCurrent > -0.05 ? 'neutral' : prCurrent > -0.15 ? 'warn' : 'loss'
+  const lsTC = toneClasses[lsTone]
+  const prTC = toneClasses[prTone]
+
+  useEffect(() => {
+    const lel = lsRef.current; const pel = prRef.current
+    if (!lel || !pel) return
+    const lChart = makeChart(lel)
+    const lSer = lChart.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1 })
+    lSer.setData(sm.longShort.history.map((p) => ({ time: t(p.time), value: p.ratio })))
+    // Reference line at 1.0
+    const lRef = lChart.addSeries(LineSeries, { color: '#5b6478', lineWidth: 1, lineStyle: LineStyle.Dashed })
+    lRef.setData(sm.longShort.history.map((p) => ({ time: t(p.time), value: 1 })))
+
+    const pChart = makeChart(pel)
+    const pSer = pChart.addSeries(AreaSeries, {
+      lineColor: 'rgba(34,197,94,0.9)',
+      topColor: 'rgba(34,197,94,0.30)', bottomColor: 'rgba(239,68,68,0.10)',
+    })
+    pSer.setData(sm.premium.history.map((p) => ({ time: t(p.time), value: p.pct })))
+    const pRef = pChart.addSeries(LineSeries, { color: '#5b6478', lineWidth: 1, lineStyle: LineStyle.Dashed })
+    pRef.setData(sm.premium.history.map((p) => ({ time: t(p.time), value: 0 })))
+
+    const cleanupL = attachReflow(lChart, lel)
+    const cleanupP = attachReflow(pChart, pel)
+    return () => { cleanupL(); cleanupP() }
+  }, [sm])
+
+  const lsLabel =
+    lsCurrent > 1.6 ? 'top traders crowded long' :
+    lsCurrent > 1.2 ? 'top traders lean long' :
+    lsCurrent > 0.8 ? 'top traders balanced' :
+                       'top traders lean short'
+  const prLabel =
+    prCurrent > 0.15 ? 'strong US institutional buying' :
+    prCurrent > 0.05 ? 'mild US premium' :
+    prCurrent > -0.05 ? 'flat — no clear directional flow' :
+    prCurrent > -0.15 ? 'mild discount — Asia-led tape' :
+                         'strong negative premium — US outflow'
+
+  const interp = `Top-trader L/S ratio at ${lsCurrent.toFixed(2)} (${lsLabel}). Coinbase Premium at ${prCurrent.toFixed(2)}% — ${prLabel}.`
+
+  return (
+    <QCard
+      question="Where is the smart money positioned?"
+      interpretation={interp}
+      ariaSummary={`Long short ratio ${lsCurrent.toFixed(2)}, Coinbase premium ${prCurrent.toFixed(2)} percent`}
+    >
+      <div className="fund-stat-row flex flex-wrap items-center gap-2">
+        <div className={`inline-flex items-baseline gap-2 rounded-lg border ${lsTC.ring} ${lsTC.bg} px-3 py-1.5`}>
+          <span className={`fund-num font-mono text-base font-semibold ${lsTC.text}`}>{lsCurrent.toFixed(2)}</span>
+          <span className={`text-[10px] font-semibold uppercase tracking-wider ${lsTC.text}`}>Top L/S</span>
+        </div>
+        <div className={`inline-flex items-baseline gap-2 rounded-lg border ${prTC.ring} ${prTC.bg} px-3 py-1.5`}>
+          <span className={`fund-num font-mono text-base font-semibold ${prTC.text}`}>{prCurrent >= 0 ? '+' : ''}{prCurrent.toFixed(2)}%</span>
+          <span className={`text-[10px] font-semibold uppercase tracking-wider ${prTC.text}`}>CB Premium</span>
+        </div>
+        <span className="fund-stat-hint text-[10px] text-dim">Binance top accts · Coinbase vs Binance spot</span>
+      </div>
+      <div>
+        <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Top-trader long/short ratio</p>
+        <div ref={lsRef} className="fund-well h-[100px] w-full overflow-hidden" />
+      </div>
+      <div>
+        <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Coinbase premium gap (%)</p>
+        <div ref={prRef} className="fund-well h-[100px] w-full overflow-hidden" />
+      </div>
+    </QCard>
   )
 }
 
