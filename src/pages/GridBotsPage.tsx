@@ -448,9 +448,14 @@ export default function GridBotsPage() {
   // ── Selection helpers ────────────────────────────────────────────────────────
 
   const selectBot = (id: string) => {
+    const sameBot = id === selectedId
     setSelectedId(id); setIsNew(false); setDirty(false)
     setCfg(null); setStats(null); setLogs([]); setNotice(null)
     setRiskUsd(''); setSlPct('')
+    // Re-clicking the same bot doesn't change selectedId, so the load
+    // useEffect won't re-fire. Call loadBot directly so a "retry by
+    // re-clicking" actually retries.
+    if (sameBot) void loadBot(id)
   }
 
   const startNew = () => {
@@ -753,18 +758,38 @@ export default function GridBotsPage() {
 
         {/* Notice */}
         {notice && (
-          <div className={`card p-3 text-xs ${notice.ok ? 'border-gain/30 bg-gain/5 text-gain' : 'border-loss/30 bg-loss/5 text-loss'}`}>
-            {notice.text}
+          <div className={`card flex flex-wrap items-center justify-between gap-3 p-3 text-xs ${notice.ok ? 'border-gain/30 bg-gain/5 text-gain' : 'border-loss/30 bg-loss/5 text-loss'}`}>
+            <span>{notice.text}</span>
+            {!notice.ok && selectedId && !isNew && (
+              <button
+                type="button"
+                onClick={() => { setNotice(null); void loadBot(selectedId) }}
+                className="rounded-md border border-loss/40 bg-loss/10 px-2.5 py-1 text-[11px] font-semibold text-loss hover:bg-loss/20"
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 
         {/* Loading placeholder — selected a bot but config isn't loaded yet.
             Without this, the right pane was completely empty during the fetch
-            (or forever, if the fetch silently failed). */}
+            (or forever, if the fetch silently failed). Retry button covers the
+            "request hung" case where no error fired but nothing arrived. */}
         {selectedId && !isNew && !cfg && !notice && (
-          <div className="card flex items-center gap-3 p-4 animate-pulse">
-            <Activity className="h-5 w-5 shrink-0 text-dim" />
-            <div className="text-sm text-dim">Loading bot config…</div>
+          <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="flex items-center gap-3">
+              <Activity className="h-5 w-5 shrink-0 animate-pulse text-dim" />
+              <div className="text-sm text-dim">Loading bot config…</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadBot(selectedId)}
+              className="rounded-md border border-border bg-panel-2 px-2.5 py-1 text-[11px] font-semibold text-text hover:border-brand/40"
+              title="Re-fetch this bot's config and logs"
+            >
+              Retry
+            </button>
           </div>
         )}
 
