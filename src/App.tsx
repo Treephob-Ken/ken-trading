@@ -11,6 +11,7 @@ import TradePage from '@/pages/TradePage'
 import LogsPage from '@/pages/LogsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import FundamentalsPage from '@/pages/FundamentalsPage'
+import ScannerPage from '@/pages/ScannerPage'
 import KillSwitchBanner from '@/components/KillSwitchBanner'
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
@@ -85,6 +86,11 @@ export default function App() {
 
           {/* Phase 5 — Logs */}
           <Route path="logs" element={<LogsPage />} />
+
+          {/* Scanner — batch-rank symbols × strategies, feeds Backtester + Grid pages */}
+          <Route path="scanner" element={
+            <ScannerPage onSymbol={setSymbol} onTimeframe={setTimeframe} />
+          } />
 
           {/* Fundamentals — sentiment, valuation, regime, verdict */}
           <Route path="fundamentals" element={<FundamentalsPage />} />

@@ -7,6 +7,7 @@ import {
   CandlestickChart,
   LayoutGrid,
   LineChart,
+  Radar,
   Radio,
   Settings,
 } from 'lucide-react'
@@ -21,6 +22,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { path: '/backtest', icon: LineChart,       label: 'Strategy Backtester' },
+  { path: '/scanner',  icon: Radar,            label: 'Scanner'             },
   { path: '/grid',    icon: LayoutGrid,       label: 'Grid Optimizer'      },
   { path: '/signal',  icon: Radio,            label: 'Signal Bots'         },
   { path: '/bots',    icon: BotMessageSquare, label: 'Grid Bots'           },

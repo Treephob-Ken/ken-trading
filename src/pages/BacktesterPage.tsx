@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, Info, Rocket, LayoutGrid, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import type { Candle, Direction, StrategyId, Trade } from '@/types'
 import { fetchKlines, MAX_BARS, subscribeKline } from '@/lib/binance'
 import { defaultParams, generateSignals, strategyMeta } from '@/lib/strategies'
@@ -47,6 +47,7 @@ export default function BacktesterPage({
 }: Props) {
   const { symbols } = useHLAssets()
   const navigate = useNavigate()
+  const location = useLocation()
   const [startDate, setStartDate] = useState(() => localStorage.getItem('bt_startDate') || '')
   const [endDate, setEndDate] = useState(() => localStorage.getItem('bt_endDate') || '')
   const [strategyId, setStrategyId] = useState<StrategyId>(
@@ -141,6 +142,22 @@ export default function BacktesterPage({
     if (lowerOrEqual) setMtfTimeframe(desired)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeframe])
+
+  // Scanner deep-link: when navigated here with { presetStrategy }, apply it
+  // and clear the state so a page refresh doesn't keep re-applying.
+  useEffect(() => {
+    const preset = (location.state as { presetStrategy?: StrategyId } | null)?.presetStrategy
+    if (!preset) return
+    setStrategyId(preset)
+    let next = defaultParams(preset)
+    try {
+      const saved = localStorage.getItem(`bt_params_${preset}`)
+      if (saved) next = JSON.parse(saved)
+    } catch {}
+    setParams(next)
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const [candles, setCandles] = useState<Candle[]>([])
   const [liveCandle, setLiveCandle] = useState<Candle | null>(null)
