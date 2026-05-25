@@ -30,7 +30,7 @@ import {
   type Signal,
   type StrategyId,
 } from './strategy/strategies.js'
-import { cancelAssetOrders, getAccountState, placeOrder } from './trade.js'
+import { cancelAssetOrders, getAccountState, getAssetInfo, placeOrder } from './trade.js'
 import { MULTI_USER } from './auth.js'
 import type { EnvConfig } from './config.js'
 
@@ -91,6 +91,11 @@ export interface SignalBotConfig {
   // Daily loss circuit-breaker — pause new entries for the rest of the UTC day
   // once the account drops more than this % below its value at UTC midnight.
   dailyLossLimitPct?: number
+  // Pre-trade slippage gate — abort the trade if HL's current mid differs
+  // from the Binance signal close (the price the bot saw when deciding) by
+  // more than this %. Catches Binance↔HL divergence during fast moves where
+  // the bot would otherwise enter at an adverse HL price. Default 0.30%.
+  maxDivergencePct?: number
 }
 
 export interface SignalBotStatus {
@@ -118,6 +123,7 @@ export interface SignalBotStatus {
   blockedByCooldown: number
   blockedByDailyPause: number
   blockedByEnsemble: number    // ensemble had votes but didn't reach threshold
+  blockedBySlippage: number    // HL price drifted too far from Binance signal price
   lastTradeAt: number          // 0 if never traded this session
 }
 
@@ -221,6 +227,10 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const dailyLossLimitPct =
     typeof dlRaw === 'number' && dlRaw > 0 && dlRaw <= 100 ? dlRaw : undefined
 
+  const mdRaw = typeof b.maxDivergencePct === 'string' ? Number(b.maxDivergencePct) : b.maxDivergencePct
+  const maxDivergencePct =
+    typeof mdRaw === 'number' && mdRaw > 0 && mdRaw <= 10 ? mdRaw : undefined
+
   const tpRaw = typeof b.tpPct === 'string' ? Number(b.tpPct) : b.tpPct
   const tpPct = typeof tpRaw === 'number' && tpRaw > 0 ? tpRaw : undefined
   const slRaw = typeof b.slPct === 'string' ? Number(b.slPct) : b.slPct
@@ -235,6 +245,7 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ...(ensembleMode ? { ensembleMode, ensembleStrategyIds, ensembleThreshold } : {}),
     ...(mtfEnabled && mtfTimeframe ? { mtfEnabled, mtfTimeframe } : {}),
     ...(dailyLossLimitPct !== undefined ? { dailyLossLimitPct } : {}),
+    ...(maxDivergencePct !== undefined ? { maxDivergencePct } : {}),
   }
 }
 
@@ -282,6 +293,7 @@ class SignalBot {
   private blockedByCooldown = 0
   private blockedByDailyPause = 0
   private blockedByEnsemble = 0
+  private blockedBySlippage = 0
 
   constructor(
     id: string,
@@ -343,6 +355,7 @@ class SignalBot {
       blockedByCooldown: this.blockedByCooldown,
       blockedByDailyPause: this.blockedByDailyPause,
       blockedByEnsemble: this.blockedByEnsemble,
+      blockedBySlippage: this.blockedBySlippage,
       lastTradeAt: this.lastTradeAt,
     }
   }
@@ -388,6 +401,7 @@ class SignalBot {
     this.blockedByCooldown = 0
     this.blockedByDailyPause = 0
     this.blockedByEnsemble = 0
+    this.blockedBySlippage = 0
     this.persist()
     const cfg = this.config
     if (cfg.ensembleMode && cfg.ensembleStrategyIds?.length) {
@@ -570,6 +584,33 @@ class SignalBot {
 
       this.lastSignal = sig
       this.lastSignalAt = Date.now()
+
+      // ── Slippage gate ───────────────────────────────────────────────────
+      // Bot evaluates on Binance candles but trades on Hyperliquid. During
+      // fast moves these prices can diverge enough that the HL fill would
+      // be at a meaningfully worse price than the bar close that fired the
+      // signal. Reject the trade when the gap exceeds the configured max.
+      if (cfg.maxDivergencePct && cfg.maxDivergencePct > 0) {
+        const signalPx = closedBar.close
+        try {
+          const hlInfo = await getAssetInfo(cfg.asset, this.creds)
+          const hlMid = hlInfo.midPx
+          if (signalPx > 0 && Number.isFinite(hlMid) && hlMid > 0) {
+            const divPct = Math.abs((hlMid - signalPx) / signalPx) * 100
+            if (divPct > cfg.maxDivergencePct) {
+              this.blockedBySlippage++
+              this.log.warn(
+                `${sig.toUpperCase()} blocked by slippage gate: HL mid ${hlMid.toFixed(4)}` +
+                  ` vs signal ${signalPx.toFixed(4)} = ${divPct.toFixed(2)}% drift` +
+                  ` (max ${cfg.maxDivergencePct}%)`,
+              )
+              return
+            }
+          }
+        } catch (e) {
+          this.log.warn(`Slippage gate check failed: ${(e as Error).message} — proceeding without check`)
+        }
+      }
 
       // ── Position-aware execution ─────────────────────────────────────────
       // Fetch live position so we know what to close before opening.

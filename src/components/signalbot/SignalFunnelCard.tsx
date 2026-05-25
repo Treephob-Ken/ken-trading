@@ -7,7 +7,8 @@ interface FunnelStatus {
   blockedByCooldown?: number
   blockedByDailyPause?: number
   blockedByEnsemble?: number
-  config: { ensembleMode?: boolean; mtfEnabled?: boolean; dailyLossLimitPct?: number; cooldownSec: number }
+  blockedBySlippage?: number
+  config: { ensembleMode?: boolean; mtfEnabled?: boolean; dailyLossLimitPct?: number; cooldownSec: number; maxDivergencePct?: number }
 }
 
 interface Props {
@@ -26,11 +27,12 @@ export default function SignalFunnelCard({ status }: Props) {
   const cool = status.blockedByCooldown ?? 0
   const daily = status.blockedByDailyPause ?? 0
   const ens = status.blockedByEnsemble ?? 0
+  const slip = status.blockedBySlippage ?? 0
 
   // Total events the funnel can split between. Ensemble blocks happen BEFORE
   // signalsSeen (the threshold check is what makes a vote "actionable"), so
-  // the visualized bar shows: executed + mtf + cool + daily + ens.
-  const total = executed + mtf + cool + daily + ens
+  // the visualized bar shows: executed + mtf + cool + daily + ens + slip.
+  const total = executed + mtf + cool + daily + ens + slip
   const passRate = pct(executed, seen)
 
   if (total === 0) {
@@ -51,6 +53,7 @@ export default function SignalFunnelCard({ status }: Props) {
     { key: 'cool', n: cool, cls: 'bg-warn/50', label: 'Cooldown' },
     { key: 'daily', n: daily, cls: 'bg-loss/70', label: 'Daily pause' },
     { key: 'ens', n: ens, cls: 'bg-loss/40', label: 'Ensemble' },
+    { key: 'slip', n: slip, cls: 'bg-loss/60', label: 'Slippage' },
   ].filter((s) => s.n > 0)
 
   return (
@@ -113,6 +116,12 @@ export default function SignalFunnelCard({ status }: Props) {
           k="Ensemble"
           info="Strategies voted but didn't reach the consensus threshold."
           n={ens}
+        />
+        <Block
+          on={(status.config.maxDivergencePct ?? 0) > 0}
+          k="Slippage"
+          info="Hyperliquid's price had drifted more than the allowed % away from the Binance signal close at execution time. The trade was aborted to avoid an adverse fill."
+          n={slip}
         />
       </div>
     </div>

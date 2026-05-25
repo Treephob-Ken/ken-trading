@@ -60,6 +60,8 @@ interface SignalBotConfig {
   ensembleThreshold?: number
   // Daily-loss circuit-breaker — pause new entries once today's loss exceeds this %.
   dailyLossLimitPct?: number
+  // Slippage gate — abort if HL mid differs from Binance signal close by more than this %.
+  maxDivergencePct?: number
 }
 interface BotSummary {
   id: string; name: string; running: boolean; strategyId: string
@@ -90,6 +92,7 @@ interface SignalBotStatus {
   blockedByCooldown?: number
   blockedByDailyPause?: number
   blockedByEnsemble?: number
+  blockedBySlippage?: number
   lastTradeAt?: number
 }
 interface TradeRecord {
@@ -787,7 +790,18 @@ export default function SignalBotsPage() {
                     onChange={(e) => patch({ slPct: e.target.value === '' ? undefined : Number(e.target.value) })}
                     className={inputCls} />
                 </Field>
+                <Field label="Max divergence %">
+                  <input type="number" disabled={running} step="0.05" min="0" max="10" placeholder="off (e.g. 0.30)"
+                    value={cfg.maxDivergencePct ?? ''}
+                    onChange={(e) => patch({ maxDivergencePct: e.target.value === '' ? undefined : Number(e.target.value) })}
+                    className={inputCls} />
+                </Field>
               </div>
+              <p className="text-[10px] text-dim leading-snug">
+                {cfg.maxDivergencePct
+                  ? `Slippage gate ON — trade aborted if Hyperliquid's price differs from the Binance signal close by more than ${cfg.maxDivergencePct}%. Protects against Binance↔HL price drift during fast moves.`
+                  : 'Slippage gate OFF — trades always execute regardless of HL price drift from signal close.'}
+              </p>
 
               {/* ── MTF filter — block trades whose direction conflicts with HTF ── */}
               <div className="my-1 h-px bg-border" />

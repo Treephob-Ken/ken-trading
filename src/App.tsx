@@ -11,6 +11,8 @@ import TradePage from '@/pages/TradePage'
 import LogsPage from '@/pages/LogsPage'
 import SettingsPage from '@/pages/SettingsPage'
 import FundamentalsPage from '@/pages/FundamentalsPage'
+import NetworkBadge from '@/components/NetworkBadge'
+import KillSwitchBanner from '@/components/KillSwitchBanner'
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -20,6 +22,10 @@ function AppShell() {
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         {/* 3px brand accent stripe */}
         <div className="h-[3px] w-full shrink-0 bg-brand" />
+        <div className="absolute right-4 top-2 z-50">
+          <NetworkBadge />
+        </div>
+        <KillSwitchBanner />
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
           <Outlet />
         </div>

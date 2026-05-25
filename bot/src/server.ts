@@ -46,15 +46,23 @@ import {
   deleteUser,
   findUserById,
   findUserByEmail,
+  getKillSwitchConfig,
   listUsers,
   loadUserCreds,
   saveHLCredentials,
+  setKillSwitchConfig,
   userCount,
   validateAgentKeyFormat,
   validateHLUserFormat,
   verifyAgentOnHL,
   verifyPassword,
 } from './users.js'
+import {
+  getKillSwitchStatus,
+  isTripped,
+  startKillSwitchWatcher,
+  unlock as unlockKillSwitch,
+} from './kill-switch.js'
 import { runMigrationIfNeeded } from './migrate.js'
 import { fundamentalsRouter } from './fundamentals.js'
 import {
@@ -125,6 +133,49 @@ function maybeAutostartGridBots(uid?: string, credsProvider?: () => EnvConfig | 
       log.err(`Could not autostart grid bot ${id}: ${(e as Error).message}`)
     }
   }
+}
+
+// ─── Kill switch wiring ───────────────────────────────────────────────────────
+
+// Stop every running bot for `uid`, cancel all open orders for assets they
+// trade, and close every open position at market. Used by the kill switch
+// when account drawdown trips the threshold.
+async function stopEverythingAndClose(uid: string, creds: EnvConfig): Promise<void> {
+  // 1) Stop grid bots
+  const gMap = gridBotsForUser(uid)
+  for (const entry of gMap.values()) {
+    if (entry.running) {
+      try { await entry.bot.shutdown() } catch (e) { log.err(`Kill switch: grid shutdown failed for ${entry.id}: ${(e as Error).message}`) }
+      entry.running = false
+      writeGridRuntime(uid, entry.id, false)
+    }
+  }
+  // 2) Stop signal bots
+  for (const sum of listSignalBots(uid)) {
+    try { getSignalBot(sum.id, uid).stop() } catch { /* best effort */ }
+  }
+  // 3) Cancel all orders and close all positions
+  try {
+    const acct = await getAccountState(undefined, creds)
+    for (const pos of acct.allPositions) {
+      try {
+        await cancelAssetOrders(pos.asset, creds)
+        await closePosition(pos.asset, undefined, creds)
+        log.warn(`Kill switch: closed ${pos.side} ${pos.size} ${pos.asset}`)
+      } catch (e) {
+        log.err(`Kill switch: close ${pos.asset} failed: ${(e as Error).message}`)
+      }
+    }
+  } catch (e) {
+    log.err(`Kill switch: could not fetch positions: ${(e as Error).message}`)
+  }
+}
+
+function armKillSwitchForUser(uid: string): void {
+  startKillSwitchWatcher(uid, {
+    stopEverythingAndClose,
+    credsProvider: () => { try { return loadUserCreds(uid) } catch { return null } },
+  })
 }
 
 // ─── Express setup ────────────────────────────────────────────────────────────
@@ -301,6 +352,7 @@ app.post('/auth/register', authLimiter, (req: Request, res: Response) => {
       void maybeAutostartSignalBots(user.id, credsFn)
       maybeAutostartGridBots(user.id, credsFn)
     }
+    armKillSwitchForUser(user.id)
     const token = signToken(user)
     res.json({ token, user: { id: user.id, email: user.email, isAdmin: user.isAdmin } })
   } catch (e) {
@@ -370,6 +422,40 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
     res.json({ ok: true, derivedAgent })
   } catch (e) {
     res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+// ─── Kill switch ──────────────────────────────────────────────────────────────
+
+app.get('/api/killswitch', requireAuth, (req: Request, res: Response) => {
+  if (!MULTI_USER) { res.status(404).json({ error: 'Kill switch requires multi-user mode' }); return }
+  res.json(getKillSwitchStatus(req.user!.sub))
+})
+
+app.put('/api/killswitch/config', requireAuth, (req: Request, res: Response) => {
+  if (!MULTI_USER) { res.status(404).json({ error: 'Kill switch requires multi-user mode' }); return }
+  const b = (req.body ?? {}) as Record<string, unknown>
+  const enabled = b.enabled === true
+  const pctRaw = typeof b.pct === 'string' ? Number(b.pct) : b.pct
+  const pct = typeof pctRaw === 'number' && Number.isFinite(pctRaw) ? pctRaw : 15
+  try {
+    setKillSwitchConfig(req.user!.sub, enabled, pct)
+    if (enabled) armKillSwitchForUser(req.user!.sub)
+    res.json(getKillSwitchStatus(req.user!.sub))
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+app.post('/api/killswitch/unlock', requireAuth, async (req: Request, res: Response) => {
+  if (!MULTI_USER) { res.status(404).json({ error: 'Kill switch requires multi-user mode' }); return }
+  const uid = req.user!.sub
+  const creds = (() => { try { return loadUserCreds(uid) } catch { return null } })()
+  try {
+    const state = await unlockKillSwitch(uid, creds)
+    res.json({ config: getKillSwitchConfig(uid), state })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
   }
 })
 
@@ -486,6 +572,9 @@ app.delete('/api/bots/:id', requireAuth, (req: Request, res: Response) => {
 app.post('/api/bots/:id/start', requireAuth, async (req: Request, res: Response) => {
   const id = req.params.id
   const uid = userId(req)
+  if (MULTI_USER && uid && isTripped(uid)) {
+    res.status(423).json({ error: 'Kill switch tripped — unlock in Settings before starting bots' }); return
+  }
   const map = gridBotsForUser(uid)
   if (map.get(id)?.running) { res.json({ ok: true }); return }
   try {
@@ -570,6 +659,19 @@ app.get('/api/logs/stream', (req: Request, res: Response) => {
 })
 
 // ─── Direct trade ─────────────────────────────────────────────────────────────
+
+// Lightweight network probe — used by the dashboard header badge so every
+// page shows mainnet/testnet at a glance. Works in both single-tenant
+// (reads HL_NETWORK env) and multi-user mode (per-user saved network).
+app.get('/api/network', requireAuth, (req: Request, res: Response) => {
+  if (MULTI_USER) {
+    const user = req.user?.sub ? findUserById(req.user.sub) : null
+    res.json({ network: user?.hlNetwork ?? 'mainnet', configured: !!user?.hlConfigured })
+    return
+  }
+  const env = process.env.HL_NETWORK?.trim().toLowerCase()
+  res.json({ network: env === 'mainnet' ? 'mainnet' : 'testnet', configured: !!process.env.HL_AGENT_PRIVATE_KEY })
+})
 
 app.get('/api/account', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -776,8 +878,12 @@ app.delete('/api/signal/bots/:id', requireAuth, (req: Request, res: Response) =>
 })
 
 app.post('/api/signal/bots/:id/start', requireAuth, (req: Request, res: Response) => {
+  const uid = userId(req)
+  if (MULTI_USER && uid && isTripped(uid)) {
+    res.status(423).json({ error: 'Kill switch tripped — unlock in Settings before starting bots' }); return
+  }
   try {
-    const bot = getSignalBot(req.params.id, userId(req))
+    const bot = getSignalBot(req.params.id, uid)
     bot.start()
     res.json(bot.getStatus())
   } catch (e) {
@@ -943,6 +1049,7 @@ createServer(app).listen(PORT, HOST, () => {
         const credsFn = () => { try { return loadUserCreds(u.id) } catch { return null } }
         maybeAutostartSignalBots(u.id, credsFn)
         maybeAutostartGridBots(u.id, credsFn)
+        armKillSwitchForUser(u.id)
       }
     } else {
       log.info('No users yet — register at /auth/register to get started')

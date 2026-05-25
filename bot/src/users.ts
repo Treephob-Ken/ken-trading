@@ -48,6 +48,14 @@ export function getDb(): ReturnType<typeof Database> {
       hl_network  TEXT NOT NULL DEFAULT 'mainnet'
     );
   `)
+  // Kill-switch columns — added in a later migration. ALTER TABLE ADD COLUMN
+  // is idempotent only via try/catch since SQLite errors if the column exists.
+  for (const col of [
+    `ALTER TABLE users ADD COLUMN kill_switch_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN kill_switch_pct REAL NOT NULL DEFAULT 15`,
+  ]) {
+    try { _db.exec(col) } catch { /* column already exists */ }
+  }
   return _db
 }
 
@@ -295,6 +303,30 @@ export function saveHLCredentials(
       `UPDATE users SET hl_user = ?, hl_network = ? WHERE id = ?`,
     ).run(normalizedUser, network, userId)
   }
+}
+
+// ─── Kill-switch config ────────────────────────────────────────────────────────
+
+export interface KillSwitchConfig {
+  enabled: boolean
+  pct: number   // drawdown % from UTC-midnight snapshot that trips the switch
+}
+
+export function getKillSwitchConfig(userId: string): KillSwitchConfig {
+  const row = getDb()
+    .prepare('SELECT kill_switch_enabled, kill_switch_pct FROM users WHERE id = ?')
+    .get(userId) as { kill_switch_enabled: number; kill_switch_pct: number } | undefined
+  if (!row) return { enabled: false, pct: 15 }
+  return { enabled: row.kill_switch_enabled !== 0, pct: row.kill_switch_pct }
+}
+
+export function setKillSwitchConfig(userId: string, enabled: boolean, pct: number): void {
+  if (!Number.isFinite(pct) || pct < 1 || pct > 90) {
+    throw new Error('Kill-switch drawdown must be between 1% and 90%')
+  }
+  getDb()
+    .prepare('UPDATE users SET kill_switch_enabled = ?, kill_switch_pct = ? WHERE id = ?')
+    .run(enabled ? 1 : 0, pct, userId)
 }
 
 // Load a user's HL credentials as an EnvConfig, ready to pass to createClients().
