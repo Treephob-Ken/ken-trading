@@ -332,7 +332,7 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
         <h3 className="text-sm font-semibold text-text">
           Chart
           <span className="ml-2 text-xs font-normal font-sans text-dim">
-            {cfg.symbol.replace(/USDT$/, '/USDT')} · {cfg.timeframe}
+            {cfg.symbol.replace(/USDT$/, '/USDC')} · {cfg.timeframe}
           </span>
         </h3>
         <div className="flex items-center gap-2">
@@ -786,7 +786,7 @@ export default function SignalBotsPage() {
                   }}
                   className={inputCls}
                 >
-                  {symbols.map(s => <option key={s.symbol} value={s.symbol}>{s.base}/USDT</option>)}
+                  {symbols.map(s => <option key={s.symbol} value={s.symbol}>{s.base}/USDC</option>)}
                 </select>
               </Field>
 

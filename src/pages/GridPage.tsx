@@ -156,7 +156,7 @@ export default function GridPage({
     [candles, lookback],
   )
 
-  const pairLabel = symbol.replace(/USDT$/, '/USDT')
+  const pairLabel = symbol.replace(/USDT$/, '/USDC')
   const lastPrice = candles[candles.length - 1]?.close ?? 0
 
   // ── regime ───────────────────────────────────────────────────────────────────

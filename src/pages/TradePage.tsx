@@ -473,7 +473,7 @@ export default function TradePage() {
           <div className="card p-3">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-dim font-display">
-                Context — {selectedAsset}/USDT
+                Context — {selectedAsset}/USDC
               </h3>
               <span className="text-[10px] text-dim">
                 {account?.network ? account.network.toUpperCase() : '—'}
@@ -585,7 +585,7 @@ export default function TradePage() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-text">{pos.asset}/USDT</span>
+                        <span className="font-semibold text-text">{pos.asset}/USDC</span>
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
                           pos.side === 'long' ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'
                         }`}>{pos.side}</span>
@@ -669,7 +669,7 @@ export default function TradePage() {
                         onMouseDown={() => handleSelectAsset(s.base)}
                         className="w-full px-3 py-2 text-left text-sm hover:bg-panel-2 text-text"
                       >
-                        {s.base}/USDT
+                        {s.base}/USDC
                       </button>
                     ))}
                   </div>
@@ -1009,7 +1009,7 @@ function PositionDetailCard({
           {position.side === 'long' ? '↑ LONG' : '↓ SHORT'}
         </span>
         <h3 className="text-sm font-bold text-text font-display">
-          {position.asset}/USDT
+          {position.asset}/USDC
           <span className="ml-2 text-xs font-mono text-dim font-normal">
             {position.size} @ ${entry.toFixed(4)}
           </span>
@@ -1239,14 +1239,14 @@ function PositionChart({
   if (loading && candles.length === 0) {
     return (
       <div className="flex h-[280px] items-center justify-center rounded-lg border border-border bg-panel-2 text-sm text-dim">
-        Loading {asset}/USDT chart…
+        Loading {asset}/USDC chart…
       </div>
     )
   }
   return (
     <div className="rounded-lg border border-border bg-panel-2 p-2">
       <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[10px] text-dim">
-        <span>{asset}/USDT · {POS_CHART_TF}</span>
+        <span>{asset}/USDC · {POS_CHART_TF}</span>
         <span className="ml-auto flex flex-wrap gap-2">
           <span className="flex items-center gap-1">
             <span className={`h-0.5 w-3 ${side === 'long' ? 'bg-gain' : 'bg-loss'}`} /> entry

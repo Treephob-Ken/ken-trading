@@ -80,7 +80,7 @@ export default function AssetInfoCard({ asset, ctx }: Props) {
     <div className="card p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text">
-          {asset}/USDT <span className="text-[11px] font-normal text-dim">market</span>
+          {asset}/USDC <span className="text-[11px] font-normal text-dim">market</span>
         </h3>
         <span className="rounded-md border border-border bg-panel-2 px-2 py-0.5 font-mono text-[10px] tabular-nums text-dim">
           {ctx?.maxLeverage ? `${ctx.maxLeverage}× max` : '—'}

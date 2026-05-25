@@ -5,12 +5,15 @@ import type { SymbolInfo } from './binance'
 // Both BacktesterPage and GridPage call useHLAssets() — only one HTTP request fires.
 let _cache: SymbolInfo[] | null = null
 
+// HL-tradeable assets. `symbol` stays as Binance's `{BASE}USDT` because the
+// candle endpoint requires it; `quote` is shown to the user, so we set it to
+// the actual Hyperliquid settlement currency (USDC).
 const FALLBACK: SymbolInfo[] = [
-  { symbol: 'ETHUSDT',  base: 'ETH',  quote: 'USDT' },
-  { symbol: 'BTCUSDT',  base: 'BTC',  quote: 'USDT' },
-  { symbol: 'SOLUSDT',  base: 'SOL',  quote: 'USDT' },
-  { symbol: 'BNBUSDT',  base: 'BNB',  quote: 'USDT' },
-  { symbol: 'XRPUSDT',  base: 'XRP',  quote: 'USDT' },
+  { symbol: 'ETHUSDT',  base: 'ETH',  quote: 'USDC' },
+  { symbol: 'BTCUSDT',  base: 'BTC',  quote: 'USDC' },
+  { symbol: 'SOLUSDT',  base: 'SOL',  quote: 'USDC' },
+  { symbol: 'BNBUSDT',  base: 'BNB',  quote: 'USDC' },
+  { symbol: 'XRPUSDT',  base: 'XRP',  quote: 'USDC' },
 ]
 
 export async function fetchHLAssets(): Promise<SymbolInfo[]> {
@@ -21,7 +24,7 @@ export async function fetchHLAssets(): Promise<SymbolInfo[]> {
   })
   if (!res.ok) throw new Error(`/api/assets returned ${res.status}`)
   const names: string[] = await res.json()
-  _cache = names.map((n) => ({ symbol: `${n}USDT`, base: n, quote: 'USDT' }))
+  _cache = names.map((n) => ({ symbol: `${n}USDT`, base: n, quote: 'USDC' }))
   return _cache
 }
 

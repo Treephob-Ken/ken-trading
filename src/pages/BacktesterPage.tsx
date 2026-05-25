@@ -366,7 +366,7 @@ export default function BacktesterPage({
   ])
 
   const canDeploy = sizingMode === 'fixed' ? deploySize > 0 : stopLossPct > 0
-  const pairLabel = symbol.replace(/USDT$/, '/USDT')
+  const pairLabel = symbol.replace(/USDT$/, '/USDC')
   const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
   const dataCapped = candles.length >= MAX_BARS
 
@@ -668,7 +668,7 @@ export default function BacktesterPage({
               regime={regime}
               strategyName={strategyMeta(strategyId).name}
               direction={direction}
-              symbol={symbol.replace(/USDT$/, '/USDT')}
+              symbol={symbol.replace(/USDT$/, '/USDC')}
             />
             <RegimeBreakdownCard
               result={result}

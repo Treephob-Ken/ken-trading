@@ -606,7 +606,7 @@ export default function GridBotsPage() {
                   className={inputCls}
                 >
                   <option value="">— select —</option>
-                  {symbols.map(s => <option key={s.symbol} value={s.base}>{s.base}/USDT</option>)}
+                  {symbols.map(s => <option key={s.symbol} value={s.base}>{s.base}/USDC</option>)}
                 </select>
               </Field>
 
@@ -901,7 +901,7 @@ export default function GridBotsPage() {
         {cfg && cfg.asset && cfg.lower && cfg.upper && cfg.gridCount && (
           <div className="card p-4">
             <h3 className="mb-3 text-sm font-semibold text-text">
-              {cfg.asset}/USDT · {cfg.timeframe}
+              {cfg.asset}/USDC · {cfg.timeframe}
               <span className="ml-2 text-xs text-dim font-normal">
                 {cfg.lower}–{cfg.upper} · {cfg.gridCount} grids
               </span>

@@ -232,7 +232,7 @@ export const GLOSSARY: Record<string, string> = {
   'ZigZag Threshold %':
     'The minimum percentage price change required to identify a new pivot high or low in wave analysis.',
   'Market Pair':
-    'The cryptocurrency pair (e.g. ETH/USDT) whose historical price data is simulated.',
+    'The cryptocurrency pair (e.g. ETH/USDC) whose historical price data is simulated. Internally the chart uses Binance USDT data, which tracks USDC 1:1 — displayed as /USDC to match Hyperliquid settlement.',
   'Timeframe':
     'The duration of each individual price candle (e.g. 15m, 1h, 1d) on the chart.',
   'Date Range':
@@ -244,7 +244,7 @@ export const GLOSSARY: Record<string, string> = {
   'Position Direction':
     'Select whether the strategy should only execute Long positions, Short positions, or Both.',
   'Capital':
-    'The starting balance in USDT used as the initial base for backtest simulations.',
+    'The starting balance in USDC used as the initial base for backtest simulations.',
   'Fee %':
     'The exchange trading fee rate per trade. Standard spot trading fee on Binance is 0.1%.',
   'Stop Loss %':
