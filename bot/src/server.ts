@@ -681,6 +681,35 @@ app.post('/api/bots/:id/start', requireAuth, async (req: Request, res: Response)
   try {
     const creds = MULTI_USER && uid ? loadUserCreds(uid) : loadEnv()
     const cfg = loadConfig(id, uid)
+
+    // Pre-flight balance check. The bot would otherwise "start" but most order
+    // placements would fail with "insufficient margin" — the bot still shows
+    // running but only a fraction of the grid actually lives. Better to refuse
+    // with a clear message and let the user lower investment or fund the account.
+    if (cfg.investment && cfg.investment > 0) {
+      try {
+        const acct = await getAccountState(undefined, creds)
+        const leverage = Math.max(1, cfg.leverage ?? 1)
+        const requiredMargin = cfg.investment / leverage
+        if (acct.accountValue < requiredMargin) {
+          const net = creds.isTestnet ? 'testnet' : 'mainnet'
+          res.status(400).json({
+            error:
+              `Insufficient ${net} balance: need ~$${requiredMargin.toFixed(2)} ` +
+              `(investment $${cfg.investment} / ${leverage}x leverage) but only ` +
+              `$${acct.accountValue.toFixed(2)} available. Lower investment in ` +
+              `the config or fund the account before starting.`,
+          })
+          return
+        }
+      } catch (e) {
+        // If we can't reach HL to check, fall through — don't block on a
+        // transient API hiccup. The bot will see the same error on first
+        // order attempt and surface it in logs.
+        log.warn(`Balance preflight skipped for ${id}: ${(e as Error).message}`)
+      }
+    }
+
     const clients = createClients(creds)
     const logger = createLogger(id)
     const bot = new GridBot(clients, cfg, logger)
