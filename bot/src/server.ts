@@ -74,7 +74,7 @@ import {
   rangeToBounds,
   summarize,
 } from './journal.js'
-import { listRunningGridBotIds, writeGridRuntime } from './grid-runtime.js'
+import { listPausedGridBotIds, listRunningGridBotIds, readGridRuntime, writeGridRuntime } from './grid-runtime.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -414,20 +414,21 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
     // Detect network change BEFORE writing so we can reset network-tagged state.
     const prevUser = findUserById(uid)
     const networkChanged = !!prevUser && prevUser.hlNetwork !== network
-    // Switching INTO mainnet exposes real money — stop every running bot so
-    // they don't silently start trading the new network with state captured
-    // on the old one. Switching to testnet is safe (no real funds), so we
-    // leave bots running and just swap their credentials.
-    const stoppingForMainnet = networkChanged && network === 'mainnet'
-    let stoppedSignalCount = 0
-    let stoppedGridCount = 0
-    if (stoppingForMainnet) {
+    // Switching INTO mainnet exposes real money — pause every running bot
+    // (stop + mark) so they don't silently start trading the new network with
+    // state captured on the old one. The marker lets us auto-resume them on
+    // the next switch BACK to testnet for a smooth round-trip.
+    const switchingToMainnet = networkChanged && network === 'mainnet'
+    const switchingToTestnet = networkChanged && network === 'testnet'
+    let pausedSignalCount = 0
+    let pausedGridCount = 0
+    let resumedSignalCount = 0
+    let resumedGridCount = 0
+    if (switchingToMainnet) {
       for (const sum of listSignalBots(uid)) {
         try {
-          const bot = getSignalBot(sum.id, uid)
           if (sum.running) {
-            bot.stop()
-            stoppedSignalCount++
+            if (getSignalBot(sum.id, uid).pauseForNetworkSwitch()) pausedSignalCount++
           }
         } catch { /* best effort */ }
       }
@@ -438,8 +439,8 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
             log.err(`Network switch: grid shutdown failed for ${entry.id}: ${(e as Error).message}`)
           }
           entry.running = false
-          writeGridRuntime(uid, entry.id, false)
-          stoppedGridCount++
+          writeGridRuntime(uid, entry.id, false, true)
+          pausedGridCount++
         }
       }
     }
@@ -461,17 +462,59 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
     if (networkChanged) {
       resetKillSwitchForNetworkChange(uid, network)
     }
+    // Switching BACK to testnet auto-resumes anything that was paused for the
+    // mainnet trip — signal bots check their own marker; grid bots check the
+    // runtime sidecar. Start grids with reconcile=true so existing HL orders
+    // are adopted instead of cancelled and re-placed.
+    if (switchingToTestnet && newCreds) {
+      for (const sum of listSignalBots(uid)) {
+        try {
+          const bot = getSignalBot(sum.id, uid)
+          if (bot.isPausedForNetworkSwitch()) {
+            bot.start()
+            resumedSignalCount++
+          }
+        } catch { /* best effort */ }
+      }
+      for (const id of listPausedGridBotIds(uid)) {
+        try {
+          const cfg = loadConfig(id, uid)
+          const clients = createClients(newCreds)
+          const logger = createLogger(id)
+          const bot = new GridBot(clients, cfg, logger)
+          const map = gridBotsForUser(uid)
+          map.set(id, { id, bot, running: true })
+          writeGridRuntime(uid, id, true, false)
+          bot.start({ reconcile: true }).catch((e: unknown) => {
+            logger.err(`Bot crashed during auto-resume: ${(e as Error).message}`)
+            const entry = map.get(id)
+            if (entry) entry.running = false
+            writeGridRuntime(uid, id, false, false)
+          })
+          resumedGridCount++
+        } catch (e) {
+          log.err(`Network switch: grid auto-resume failed for ${id}: ${(e as Error).message}`)
+        }
+      }
+    }
     const switchNote = networkChanged
       ? ` — network changed to ${network}, account-value baselines reset` +
-        (stoppingForMainnet ? `, stopped ${stoppedSignalCount} signal + ${stoppedGridCount} grid bot(s) for safety` : ' (testnet — bots kept running)')
+        (switchingToMainnet
+          ? `, paused ${pausedSignalCount} signal + ${pausedGridCount} grid bot(s) for safety`
+          : switchingToTestnet
+            ? `, auto-resumed ${resumedSignalCount} signal + ${resumedGridCount} grid bot(s) from previous testnet session`
+            : '')
       : ''
     log.ok(`User ${req.user!.email} updated HL credentials${derivedAgent ? ` (agent ${derivedAgent.slice(0, 10)}…)` : ' (address/network only)'}${switchNote}`)
     res.json({
       ok: true,
       derivedAgent,
       networkChanged,
-      stoppedForMainnet: stoppingForMainnet
-        ? { signalBots: stoppedSignalCount, gridBots: stoppedGridCount }
+      pausedForMainnet: switchingToMainnet
+        ? { signalBots: pausedSignalCount, gridBots: pausedGridCount }
+        : null,
+      resumedOnTestnet: switchingToTestnet
+        ? { signalBots: resumedSignalCount, gridBots: resumedGridCount }
         : null,
     })
   } catch (e) {
@@ -556,15 +599,19 @@ app.post('/admin/users/:id/kill-bots', requireAuth, requireAdmin, async (req: Re
 app.get('/api/bots', requireAuth, (req: Request, res: Response) => {
   const uid = userId(req)
   const map = gridBotsForUser(uid)
-  const all = listConfigs(uid).map((cfg) => ({
-    id: cfg.id!,
-    name: cfg.name ?? cfg.asset,
-    asset: cfg.asset,
-    gridCount: cfg.gridCount,
-    lower: cfg.lower,
-    upper: cfg.upper,
-    running: map.get(cfg.id!)?.running ?? false,
-  }))
+  const all = listConfigs(uid).map((cfg) => {
+    const runtime = readGridRuntime(uid, cfg.id!)
+    return {
+      id: cfg.id!,
+      name: cfg.name ?? cfg.asset,
+      asset: cfg.asset,
+      gridCount: cfg.gridCount,
+      lower: cfg.lower,
+      upper: cfg.upper,
+      running: map.get(cfg.id!)?.running ?? false,
+      pausedForNetworkSwitch: runtime?.pausedForNetworkSwitch ?? false,
+    }
+  })
   res.json(all)
 })
 
@@ -638,18 +685,22 @@ app.post('/api/bots/:id/start', requireAuth, async (req: Request, res: Response)
     const logger = createLogger(id)
     const bot = new GridBot(clients, cfg, logger)
     map.set(id, { id, bot, running: true })
-    writeGridRuntime(uid, id, true)
+    writeGridRuntime(uid, id, true, false)
     res.json({ ok: true })
-    bot.start().catch((e: unknown) => {
+    // Always start in reconcile mode — adopts existing HL orders instead of
+    // wiping them and replacing with identical orders. Safe for fresh-start
+    // cases too: with no open orders, reconcile is a no-op and we place the
+    // full grid as usual.
+    bot.start({ reconcile: true }).catch((e: unknown) => {
       logger.err(`Bot crashed: ${(e as Error).message}`)
       const entry = map.get(id)
       if (entry) entry.running = false
       // Crash: don't auto-resume on next boot — user needs to investigate.
-      writeGridRuntime(uid, id, false)
+      writeGridRuntime(uid, id, false, false)
     })
   } catch (e) {
     gridBotsForUser(uid).delete(id)
-    writeGridRuntime(uid, id, false)
+    writeGridRuntime(uid, id, false, false)
     res.status(500).json({ error: (e as Error).message })
   }
 })
@@ -667,7 +718,9 @@ app.post('/api/bots/:id/stop', requireAuth, async (req: Request, res: Response) 
   } finally {
     entry.running = false
     map.delete(id)
-    writeGridRuntime(uid, id, false)
+    // User-initiated stop clears any paused-for-network-switch marker — they
+    // are consciously taking control, don't auto-resume on next testnet switch.
+    writeGridRuntime(uid, id, false, false)
   }
   res.json({ ok: true })
 })

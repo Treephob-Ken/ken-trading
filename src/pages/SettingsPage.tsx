@@ -47,7 +47,8 @@ export default function SettingsPage() {
         ok?: boolean
         error?: string
         networkChanged?: boolean
-        stoppedForMainnet?: { signalBots: number; gridBots: number } | null
+        pausedForMainnet?: { signalBots: number; gridBots: number } | null
+        resumedOnTestnet?: { signalBots: number; gridBots: number } | null
       }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
       setCreds(prev => prev
@@ -56,16 +57,22 @@ export default function SettingsPage() {
       )
       setAgentKey('')       // clear after save — don't persist key in state
       let msg = 'Credentials saved'
-      if (data.stoppedForMainnet) {
-        const { signalBots, gridBots } = data.stoppedForMainnet
+      if (data.pausedForMainnet) {
+        const { signalBots, gridBots } = data.pausedForMainnet
         const total = signalBots + gridBots
         if (total > 0) {
-          msg = `Saved. Stopped ${total} bot${total === 1 ? '' : 's'} (${signalBots} signal + ${gridBots} grid) — switched to mainnet, start them manually after reviewing.`
+          msg = `Saved. Paused ${total} bot${total === 1 ? '' : 's'} (${signalBots} signal + ${gridBots} grid) — switched to mainnet. They'll auto-resume if you switch back to testnet.`
         } else {
           msg = 'Saved. Switched to mainnet — no bots were running.'
         }
-      } else if (data.networkChanged) {
-        msg = 'Saved. Switched to testnet — bots kept running.'
+      } else if (data.resumedOnTestnet) {
+        const { signalBots, gridBots } = data.resumedOnTestnet
+        const total = signalBots + gridBots
+        if (total > 0) {
+          msg = `Saved. Auto-resumed ${total} bot${total === 1 ? '' : 's'} (${signalBots} signal + ${gridBots} grid) from previous testnet session.`
+        } else {
+          msg = 'Saved. Switched to testnet — no paused bots to resume.'
+        }
       }
       setNotice({ text: msg, ok: true })
     } catch (e) {

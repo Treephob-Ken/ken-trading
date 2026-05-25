@@ -27,6 +27,7 @@ import GridActivityCard from '@/components/gridbot/GridActivityCard'
 
 interface GridBotSummary {
   id: string; name: string; asset: string; gridCount: number; lower: number; upper: number; running: boolean
+  pausedForNetworkSwitch?: boolean
 }
 
 interface GridConfig {
@@ -523,6 +524,7 @@ export default function GridBotsPage() {
             const stranded = (sources[(b.asset || '').toUpperCase()] ?? []).some(
               (s) => s.botId === b.id && s.kind === 'grid' && s.stranded,
             )
+            const paused = b.pausedForNetworkSwitch === true
             return (
               <button
                 key={b.id}
@@ -532,11 +534,21 @@ export default function GridBotsPage() {
                   selectedId === b.id && !isNew ? 'bg-brand/10 text-text' : 'text-dim hover:text-text hover:bg-panel-2'
                 }`}
               >
-                <span className={`h-2 w-2 shrink-0 rounded-full ${b.running ? 'bg-gain animate-pulse' : 'bg-border'}`} />
+                <span className={`h-2 w-2 shrink-0 rounded-full ${
+                  b.running ? 'bg-gain animate-pulse' : paused ? 'bg-warn' : 'bg-border'
+                }`} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-xs font-semibold">{b.name || b.asset}</span>
-                    {stranded && (
+                    {paused && (
+                      <span
+                        title="Auto-stopped when you switched to mainnet — will resume if you switch back to testnet."
+                        className="shrink-0 rounded-sm border border-warn/40 bg-warn/10 px-1 py-px text-[8px] font-bold uppercase tracking-wider text-warn"
+                      >
+                        ⏸ Paused
+                      </span>
+                    )}
+                    {stranded && !paused && (
                       <span
                         title="Bot stopped but a position is still open on this asset"
                         className="shrink-0 rounded-sm border border-warn/40 bg-warn/10 px-1 py-px text-[8px] font-bold uppercase tracking-wider text-warn"

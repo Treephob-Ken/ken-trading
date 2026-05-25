@@ -115,6 +115,7 @@ export interface SignalBotStatus {
   mtfTrend: Signal
   dailyPnlPct: number | null
   dailyPaused: boolean
+  pausedForNetworkSwitch: boolean
   // Signal funnel — counts since last start. Lets the UI explain
   // "why didn't it trade?" without scraping the log.
   signalsSeen: number          // actionable signals on a freshly closed bar (post ensemble consensus)
@@ -136,6 +137,7 @@ export interface SignalBotSummary {
   timeframe: string
   ensembleMode?: boolean
   ensembleCount?: number
+  pausedForNetworkSwitch?: boolean
 }
 
 // Validate a raw config object into a typed SignalBotConfig. Throws on bad
@@ -254,6 +256,11 @@ interface PersistedSignalBot {
   name: string
   config: SignalBotConfig
   running: boolean
+  // True when the bot was auto-stopped because the user switched to mainnet
+  // while this bot was running. On the next switch back to testnet, the server
+  // will auto-resume bots with this flag set and clear it. Independent of
+  // `running` so the bot list UI can show "Paused" instead of plain "Stopped".
+  pausedForNetworkSwitch?: boolean
 }
 
 class SignalBot {
@@ -282,6 +289,10 @@ class SignalBot {
   private dailyStartEquity: number | null = null
   private dailyPaused = false
   private dailyPnlPct: number | null = null
+  // Set when the server auto-stopped this bot because the user switched to
+  // mainnet while it was running. Cleared on auto-resume (switch back to
+  // testnet) or when the user manually starts it.
+  private pausedForNetworkSwitch = false
   private trades: TradeRecord[] = []
   // True once the first poll has recorded the current bar — only bars that
   // close after that are genuine signals we should act on.
@@ -328,6 +339,7 @@ class SignalBot {
       timeframe: this.config.timeframe,
       ensembleMode: this.config.ensembleMode,
       ensembleCount: this.config.ensembleStrategyIds?.length,
+      pausedForNetworkSwitch: this.pausedForNetworkSwitch,
     }
   }
 
@@ -349,6 +361,7 @@ class SignalBot {
       mtfTrend: this.mtfTrend,
       dailyPnlPct: this.dailyPnlPct,
       dailyPaused: this.dailyPaused,
+      pausedForNetworkSwitch: this.pausedForNetworkSwitch,
       signalsSeen: this.signalsSeen,
       signalsExecuted: this.signalsExecuted,
       blockedByMtf: this.blockedByMtf,
@@ -392,6 +405,10 @@ class SignalBot {
 
   start(): void {
     if (this.running) return
+    // Starting clears the network-switch pause marker — whether the start was
+    // an automatic resume on testnet switch, or the user explicitly clicked
+    // Start while the bot was still paused.
+    this.pausedForNetworkSwitch = false
     this.running = true
     this.startedAt = Date.now()
     this.lastError = null
@@ -748,6 +765,7 @@ class SignalBot {
       name: this.name,
       config: this.config,
       running: this.running,
+      pausedForNetworkSwitch: this.pausedForNetworkSwitch || undefined,
     }
     try {
       const dir = signalDirForUser(this.userId)
@@ -756,6 +774,30 @@ class SignalBot {
     } catch (e) {
       this.log.err(`Could not persist signal-bot state: ${(e as Error).message}`)
     }
+  }
+
+  // Stop the bot and tag it so it can be auto-resumed when the user switches
+  // back to the previous network. Returns true if the bot was actually running
+  // (and is therefore now paused); false if it was already stopped.
+  pauseForNetworkSwitch(): boolean {
+    if (!this.running) return false
+    this.pausedForNetworkSwitch = true
+    this.stop()
+    this.log.warn('Paused — switched to mainnet. Will auto-resume on switch back to testnet.')
+    return true
+  }
+
+  // Clear the marker without starting the bot (used when the user manually
+  // takes control while the bot is still paused).
+  clearPauseFlag(): void {
+    if (this.pausedForNetworkSwitch) {
+      this.pausedForNetworkSwitch = false
+      this.persist()
+    }
+  }
+
+  isPausedForNetworkSwitch(): boolean {
+    return this.pausedForNetworkSwitch
   }
 }
 
@@ -835,7 +877,13 @@ function loadBotsForUser(userId: string | undefined, credsProvider?: () => EnvCo
       const rk = registryKey(userId, raw.id)
       if (bots.has(rk)) continue
       const creds = credsProvider ? credsProvider() : null
-      bots.set(rk, new SignalBot(raw.id, raw.name || raw.id, parseSignalConfig(raw.config), userId, creds))
+      const bot = new SignalBot(raw.id, raw.name || raw.id, parseSignalConfig(raw.config), userId, creds)
+      if (raw.pausedForNetworkSwitch) {
+        // Hydrate the flag so the UI shows "Paused" instead of "Stopped".
+        // Field is private; set via the helper that flips it without starting.
+        ;(bot as unknown as { pausedForNetworkSwitch: boolean }).pausedForNetworkSwitch = true
+      }
+      bots.set(rk, bot)
     } catch {
       /* skip a corrupt bot file */
     }
