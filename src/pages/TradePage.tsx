@@ -295,10 +295,10 @@ export default function TradePage() {
       const body: Record<string, unknown> = {
         asset: selectedAsset, side, size, orderType: 'market', maxSlippagePct: slippage,
       }
-      if (sizingMode === 'risk') {
-        if (typeof slPct === 'number' && slPct > 0) body.slPct = slPct
-        if (typeof tpPct === 'number' && tpPct > 0) body.tpPct = tpPct
-      }
+      // SL/TP brackets are independent of sizing mode — both Risk-based and
+      // Fixed USDC orders can opt in to reduce-only stops on the exchange.
+      if (typeof slPct === 'number' && slPct > 0) body.slPct = slPct
+      if (typeof tpPct === 'number' && tpPct > 0) body.tpPct = tpPct
       const res = await apiFetch('/api/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -821,6 +821,49 @@ export default function TradePage() {
                   <div className="rounded-xl border border-border bg-panel-2 px-3 py-2 text-[10px]">
                     <div className="flex justify-between"><span className="text-dim">Qty</span><span className="font-mono text-text">{(usdcAmount / assetInfo.midPx).toFixed(6)} {selectedAsset}</span></div>
                     <div className="flex justify-between mt-1"><span className="text-dim">Notional</span><span className="font-mono text-text">${usdcAmount.toFixed(2)}</span></div>
+                  </div>
+                )}
+
+                {/* SL / TP brackets — optional, same fields as Risk-based mode.
+                    Leave both blank for a bare market order. */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="SL % (opt.)">
+                    <input type="number" min="0.1" step="0.1" placeholder="2"
+                      value={slPct}
+                      onChange={e => setSlPct(e.target.value === '' ? '' : +e.target.value)}
+                      className={inputCls} />
+                  </Field>
+                  <Field label="TP % (opt.)">
+                    <input type="number" min="0.1" step="0.1" placeholder="4"
+                      value={tpPct}
+                      onChange={e => setTpPct(e.target.value === '' ? '' : +e.target.value)}
+                      className={inputCls} />
+                  </Field>
+                </div>
+
+                {selectedAsset && assetInfo?.midPx && (typeof slPct === 'number' || typeof tpPct === 'number') && (
+                  <div className="rounded-xl border border-brand/20 bg-brand/5 px-3 py-2 text-[10px] space-y-1">
+                    {typeof slPct === 'number' && slPct > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-dim">SL long / short</span>
+                        <span className="font-mono text-loss">
+                          ${(assetInfo.midPx * (1 - slPct / 100)).toFixed(4)} /
+                          ${(assetInfo.midPx * (1 + slPct / 100)).toFixed(4)}
+                        </span>
+                      </div>
+                    )}
+                    {typeof tpPct === 'number' && tpPct > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-dim">TP long / short</span>
+                        <span className="font-mono text-gain">
+                          ${(assetInfo.midPx * (1 + tpPct / 100)).toFixed(4)} /
+                          ${(assetInfo.midPx * (1 - tpPct / 100)).toFixed(4)}
+                        </span>
+                      </div>
+                    )}
+                    <p className="pt-0.5 text-[10px] text-dim leading-snug">
+                      Reduce-only stops are placed on Hyperliquid from the fill price.
+                    </p>
                   </div>
                 )}
               </>
