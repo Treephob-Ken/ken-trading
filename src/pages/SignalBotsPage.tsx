@@ -201,8 +201,35 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       s.setData(ln.data.map(p => ({ time: t(p.time), value: p.value })))
     }
 
+    // Horizontal price lines (Elliott Fibonacci retracements, etc.) — same
+    // rendering as the Backtester's ChartPanel so live charts match what the
+    // backtest shows.
+    for (const pl of strategyOutput.priceLines ?? []) {
+      candleSeries.createPriceLine({
+        price: pl.price,
+        color: pl.color,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: pl.label,
+      })
+    }
+
     // Strategy signals (teal/red arrows — identical to Backtester style)
     const allMarkers: SeriesMarker<Time>[] = []
+
+    // Wave-number labels (Elliott ① ② ③ ④ ⑤) — folded into the same marker list.
+    for (const wm of strategyOutput.waveMarkers ?? []) {
+      allMarkers.push({
+        time: t(wm.time) as Time,
+        position: wm.position,
+        color: '#a78bfa',
+        shape: 'circle',
+        text: wm.label,
+        size: 0.5,
+      })
+    }
+
     strategyOutput.signals.forEach((sig, i) => {
       if (!sig) return
       allMarkers.push({
