@@ -11,6 +11,7 @@ import {
   Settings,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import NetworkBadge from '@/components/NetworkBadge'
 
 interface NavItem {
   path: string
@@ -89,6 +90,11 @@ export default function Sidebar() {
           )
         })}
       </nav>
+
+      {/* ── Network badge ── */}
+      <div className="flex flex-col items-center px-2 pb-1">
+        <NetworkBadge />
+      </div>
 
       {/* ── Logout button ── */}
       <div className="flex flex-col items-center p-2 pb-3">
