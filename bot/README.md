@@ -1,10 +1,15 @@
 # Garlic Trading Bot
 
 Live trading bot for Hyperliquid (testnet + mainnet). Runs a grid bot and/or signal bots,
-managed via an Express HTTP server and native HTML dashboard.
+managed via an Express HTTP server that **also serves the React analytics SPA** from
+`bot/public/` — single live surface, no separate frontend deploy.
 
-**Live:** https://bot.garlic-trading.net  
-**Analytics web app:** https://garlic-trading.vercel.app
+**Live:** https://bot.garlic-trading.net
+
+> The legacy native-HTML dashboard at `bot/dashboard/index.html` still exists but is no
+> longer the primary UI — the React SPA (backtester, grid optimizer, scanner, live bot
+> management) is. Build the SPA from the repo root with `npm run build`; output goes to
+> `bot/public/` which is committed to git.
 
 ---
 
@@ -28,8 +33,9 @@ bot/
 │   └── strategy/
 │       ├── indicators.ts  # EMA, ATR, Bollinger, Supertrend, etc.
 │       └── strategies.ts  # 14 named strategies (must stay in sync with web app)
+├── public/                # React SPA build output (committed) — served at GET /
 ├── dashboard/
-│   └── index.html         # native HTML dashboard (served at GET /)
+│   └── index.html         # legacy native HTML dashboard (no longer primary)
 ├── .env.example           # env template
 ├── DEPLOY_VPS.md          # VPS deployment guide (DigitalOcean)
 └── REMOTE_ACCESS.md       # Cloudflare tunnel + security model
@@ -70,6 +76,12 @@ buy fill → sell one line up; sell fill → buy one line down. Config via dashb
 **Signal bot** — polls Binance every 30s, evaluates a strategy on the last closed bar,
 fires a market order on a fresh signal. Supports ensemble mode, MTF filter, daily loss
 circuit-breaker, bracket orders (TP/SL), and budget sizing.
+
+The SPA's **Scanner page** batch-ranks the top ~30 HL-tradeable coins so you don't have
+to hand-pick a symbol + strategy: the Indicator tab finds the best-performing
+strategy+coin+timeframe combo over the last 90d, the Grid tab finds coins currently
+suited to grid trading (Sideways regime, healthy spacing×). Click a row → opens the
+Backtester or Grid Optimizer with that pick preloaded; from there hit "Deploy to bot".
 
 ---
 
