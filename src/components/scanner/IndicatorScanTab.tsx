@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, Square, ArrowRight, Medal } from 'lucide-react'
+import { Play, Square, ArrowRight, Medal, Trophy } from 'lucide-react'
 import type { Direction, StrategyId } from '@/types'
 import type { SymbolInfo } from '@/lib/binance'
 import { STRATEGIES } from '@/lib/strategies'
@@ -9,6 +9,11 @@ import {
   type IndicatorScanRow,
   type ScanProgress,
 } from '@/lib/scanner/indicatorScan'
+import {
+  gradeBg,
+  gradeIndicatorRow,
+  timeAgo,
+} from '@/lib/scanner/verdict'
 
 interface Props {
   universe: SymbolInfo[]
@@ -26,27 +31,76 @@ type SortKey =
 const ALL_TFS = ['1h', '4h'] as const
 const ALL_STRATS: StrategyId[] = STRATEGIES.map((s) => s.id)
 
+const STORAGE_KEY = 'scanner_indicator_results_v1'
+
+interface PersistedState {
+  rows: IndicatorScanRow[]
+  progress: ScanProgress
+  scannedAt: number
+}
+
+function loadPersisted(): PersistedState | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as PersistedState) : null
+  } catch {
+    return null
+  }
+}
+
 export default function IndicatorScanTab({
   universe,
   onPickSymbol,
   onPickTimeframe,
 }: Props) {
   const navigate = useNavigate()
-  const [rows, setRows] = useState<IndicatorScanRow[]>([])
+  const persisted = loadPersisted()
+  const [rows, setRows] = useState<IndicatorScanRow[]>(persisted?.rows ?? [])
   const [scanning, setScanning] = useState(false)
-  const [progress, setProgress] = useState<ScanProgress>({ done: 0, total: 0 })
+  const [progress, setProgress] = useState<ScanProgress>(
+    persisted?.progress ?? { done: 0, total: 0 },
+  )
+  const [scannedAt, setScannedAt] = useState<number | null>(
+    persisted?.scannedAt ?? null,
+  )
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Forces a re-render every 30s so "5 min ago" stays current.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
-  // Filters
-  const [minTrades, setMinTrades] = useState(5)
-  const [direction, setDirection] = useState<Direction>('both')
-  const [tfFilter, setTfFilter] = useState<Record<string, boolean>>({ '1h': true, '4h': true })
-  const [stratFilter, setStratFilter] = useState<Record<StrategyId, boolean>>(
-    () => Object.fromEntries(ALL_STRATS.map((s) => [s, true])) as Record<StrategyId, boolean>,
+  // Filters — persisted in localStorage so they survive across sessions.
+  const [minTrades, setMinTrades] = useState(
+    () => Number(localStorage.getItem('scn_ind_minTrades') ?? 5),
   )
+  const [direction, setDirection] = useState<Direction>(
+    () => (localStorage.getItem('scn_ind_direction') as Direction) ?? 'both',
+  )
+  const [tfFilter, setTfFilter] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('scn_ind_tfFilter')
+      return saved ? JSON.parse(saved) : { '1h': true, '4h': true }
+    } catch {
+      return { '1h': true, '4h': true }
+    }
+  })
+  const [stratFilter, setStratFilter] = useState<Record<StrategyId, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('scn_ind_stratFilter')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return Object.fromEntries(ALL_STRATS.map((s) => [s, true])) as Record<StrategyId, boolean>
+  })
   const [sortKey, setSortKey] = useState<SortKey>('totalReturnPct')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  useEffect(() => { localStorage.setItem('scn_ind_minTrades', String(minTrades)) }, [minTrades])
+  useEffect(() => { localStorage.setItem('scn_ind_direction', direction) }, [direction])
+  useEffect(() => { localStorage.setItem('scn_ind_tfFilter', JSON.stringify(tfFilter)) }, [tfFilter])
+  useEffect(() => { localStorage.setItem('scn_ind_stratFilter', JSON.stringify(stratFilter)) }, [stratFilter])
 
   const start = async () => {
     if (universe.length === 0) {
@@ -56,6 +110,7 @@ export default function IndicatorScanTab({
     setError(null)
     setRows([])
     setProgress({ done: 0, total: 0 })
+    setScannedAt(null)
     setScanning(true)
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -70,7 +125,18 @@ export default function IndicatorScanTab({
         setProgress,
         ctrl.signal,
       )
+      const completedAt = Date.now()
       setRows(result)
+      setScannedAt(completedAt)
+      // Persist so navigating away and back keeps the results.
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          rows: result,
+          progress: { done: result.length, total: result.length },
+          scannedAt: completedAt,
+        }),
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -84,7 +150,14 @@ export default function IndicatorScanTab({
     setScanning(false)
   }
 
-  // Filter + sort
+  const clearResults = () => {
+    sessionStorage.removeItem(STORAGE_KEY)
+    setRows([])
+    setProgress({ done: 0, total: 0 })
+    setScannedAt(null)
+  }
+
+  // Filter + sort + grade
   const visible = useMemo(() => {
     const filtered = rows.filter(
       (r) =>
@@ -94,10 +167,11 @@ export default function IndicatorScanTab({
     )
     const dir = sortDir === 'desc' ? -1 : 1
     filtered.sort((a, b) => (a[sortKey] - b[sortKey]) * dir)
-    return filtered
+    return filtered.map((r) => ({ row: r, verdict: gradeIndicatorRow(r) }))
   }, [rows, minTrades, tfFilter, stratFilter, sortKey, sortDir])
 
   const top3 = visible.slice(0, 3)
+  const bestPick = visible[0]
 
   const goToBacktest = (r: IndicatorScanRow) => {
     onPickSymbol(r.symbol)
@@ -169,6 +243,19 @@ export default function IndicatorScanTab({
 
         <div className="flex-1" />
 
+        {scannedAt && !scanning && (
+          <div className="text-[10px] text-dim font-mono">
+            Scanned {timeAgo(scannedAt)}
+            <button
+              type="button"
+              onClick={clearResults}
+              className="ml-2 text-dim hover:text-loss underline"
+            >
+              clear
+            </button>
+          </div>
+        )}
+
         {scanning ? (
           <button
             type="button"
@@ -186,7 +273,7 @@ export default function IndicatorScanTab({
             className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Play className="h-4 w-4" />
-            Scan
+            {rows.length > 0 ? 'Re-scan' : 'Scan'}
           </button>
         )}
       </div>
@@ -236,7 +323,7 @@ export default function IndicatorScanTab({
       </div>
 
       {/* ── Progress / errors ───────────────────────────────────────────── */}
-      {(scanning || progress.total > 0) && (
+      {(scanning || (progress.total > 0 && !scannedAt)) && (
         <div className="card p-3">
           <div className="flex items-center justify-between text-[11px] text-dim mb-2">
             <span>
@@ -266,24 +353,62 @@ export default function IndicatorScanTab({
         </div>
       )}
 
+      {/* ── Best pick hero ──────────────────────────────────────────────── */}
+      {bestPick && (
+        <button
+          type="button"
+          onClick={() => goToBacktest(bestPick.row)}
+          className={`card flex flex-col gap-2 p-4 text-left transition-colors hover:border-brand/40 ${gradeBg(bestPick.verdict.grade)}`}
+        >
+          <div className="flex items-center gap-2">
+            <Trophy className="h-4 w-4" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">
+              Best Pick · {bestPick.verdict.label}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="font-mono text-lg font-bold">
+              {bestPick.row.base} · {bestPick.row.timeframe} · {bestPick.row.strategyName}
+            </span>
+            <span
+              className={`font-mono text-base font-bold ${
+                bestPick.row.totalReturnPct >= 0 ? 'text-gain' : 'text-loss'
+              }`}
+            >
+              {bestPick.row.totalReturnPct >= 0 ? '+' : ''}
+              {bestPick.row.totalReturnPct.toFixed(2)}%
+            </span>
+          </div>
+          <p className="text-xs leading-relaxed opacity-90">
+            {bestPick.verdict.reason}
+            <span className="ml-2 text-[10px] opacity-70">→ click to open in Backtester</span>
+          </p>
+        </button>
+      )}
+
       {/* ── Top 3 highlight ─────────────────────────────────────────────── */}
-      {top3.length > 0 && (
+      {top3.length > 1 && (
         <div className="card p-4">
           <div className="mb-2 flex items-center gap-1.5">
             <Medal className="h-3.5 w-3.5 text-brand" />
             <span className="text-xs font-semibold text-text">Top 3</span>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
-            {top3.map((r, i) => (
+            {top3.map(({ row: r, verdict: v }, i) => (
               <button
                 key={`${r.symbol}-${r.timeframe}-${r.strategyId}`}
                 type="button"
                 onClick={() => goToBacktest(r)}
-                className="flex flex-col gap-1 rounded-lg border border-border bg-panel-2 p-3 text-left transition-colors hover:border-brand/40 hover:bg-brand/5"
+                className="flex flex-col gap-1.5 rounded-lg border border-border bg-panel-2 p-3 text-left transition-colors hover:border-brand/40 hover:bg-brand/5"
               >
-                <span className="text-[10px] text-dim">
-                  {['🥇', '🥈', '🥉'][i]} #{i + 1}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-dim">
+                    {['🥇', '🥈', '🥉'][i]} #{i + 1}
+                  </span>
+                  <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${gradeBg(v.grade)}`}>
+                    {v.label}
+                  </span>
+                </div>
                 <span className="font-mono text-sm text-text">
                   {r.base} · {r.timeframe} · {r.strategyName}
                 </span>
@@ -294,6 +419,9 @@ export default function IndicatorScanTab({
                 >
                   {r.totalReturnPct >= 0 ? '+' : ''}
                   {r.totalReturnPct.toFixed(2)}%
+                </span>
+                <span className="text-[10px] text-dim leading-snug line-clamp-2">
+                  {v.reason}
                 </span>
               </button>
             ))}
@@ -309,6 +437,7 @@ export default function IndicatorScanTab({
               <thead className="sticky top-0 bg-panel-2 text-[10px] uppercase tracking-wider text-muted">
                 <tr>
                   <th className="px-3 py-2 text-left">#</th>
+                  <th className="px-3 py-2 text-left">Pick</th>
                   <th className="px-3 py-2 text-left">Symbol</th>
                   <th className="px-3 py-2 text-left">TF</th>
                   <th className="px-3 py-2 text-left">Strategy</th>
@@ -346,12 +475,18 @@ export default function IndicatorScanTab({
                 </tr>
               </thead>
               <tbody>
-                {visible.map((r, i) => (
+                {visible.map(({ row: r, verdict: v }, i) => (
                   <tr
                     key={`${r.symbol}-${r.timeframe}-${r.strategyId}`}
                     className="border-t border-border hover:bg-panel-2/60"
+                    title={v.reason}
                   >
                     <td className="px-3 py-2 text-dim font-mono tabular-nums">{i + 1}</td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${gradeBg(v.grade)}`}>
+                        {v.label}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 font-mono text-text">{r.base}</td>
                     <td className="px-3 py-2 font-mono text-text">{r.timeframe}</td>
                     <td className="px-3 py-2 text-text">{r.strategyName}</td>
@@ -393,7 +528,7 @@ export default function IndicatorScanTab({
         </div>
       )}
 
-      {!scanning && progress.total > 0 && visible.length === 0 && (
+      {!scanning && rows.length > 0 && visible.length === 0 && (
         <div className="card p-6 text-center text-xs text-dim">
           No combos match the current filters.
         </div>

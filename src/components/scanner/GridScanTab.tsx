@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, Square, ArrowRight, LayoutGrid } from 'lucide-react'
+import { Play, Square, ArrowRight, LayoutGrid, Trophy } from 'lucide-react'
 import type { SymbolInfo } from '@/lib/binance'
 import { runGridScan, type GridScanRow } from '@/lib/scanner/gridScan'
 import type { ScanProgress } from '@/lib/scanner/indicatorScan'
+import { gradeBg, gradeGridRow, timeAgo } from '@/lib/scanner/verdict'
 
 interface Props {
   universe: SymbolInfo[]
@@ -20,6 +21,22 @@ type SortKey =
   | 'spacingMultiple'
 
 const GRID_TF = '4h'
+const STORAGE_KEY = 'scanner_grid_results_v1'
+
+interface PersistedState {
+  rows: GridScanRow[]
+  progress: ScanProgress
+  scannedAt: number
+}
+
+function loadPersisted(): PersistedState | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as PersistedState) : null
+  } catch {
+    return null
+  }
+}
 
 export default function GridScanTab({
   universe,
@@ -27,17 +44,39 @@ export default function GridScanTab({
   onPickTimeframe,
 }: Props) {
   const navigate = useNavigate()
-  const [rows, setRows] = useState<GridScanRow[]>([])
+  const persisted = loadPersisted()
+  const [rows, setRows] = useState<GridScanRow[]>(persisted?.rows ?? [])
   const [scanning, setScanning] = useState(false)
-  const [progress, setProgress] = useState<ScanProgress>({ done: 0, total: 0 })
+  const [progress, setProgress] = useState<ScanProgress>(
+    persisted?.progress ?? { done: 0, total: 0 },
+  )
+  const [scannedAt, setScannedAt] = useState<number | null>(
+    persisted?.scannedAt ?? null,
+  )
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
-  const [sidewaysOnly, setSidewaysOnly] = useState(true)
-  const [minSpacingX, setMinSpacingX] = useState(3)
-  const [minTradesPerDay, setMinTradesPerDay] = useState(1)
-  const [sortKey, setSortKey] = useState<SortKey>('score')
+  // Filters persist in localStorage.
+  const [sidewaysOnly, setSidewaysOnly] = useState(
+    () => localStorage.getItem('scn_grid_sidewaysOnly') !== 'false',
+  )
+  const [minSpacingX, setMinSpacingX] = useState(
+    () => Number(localStorage.getItem('scn_grid_minSpacingX') ?? 3),
+  )
+  const [minTradesPerDay, setMinTradesPerDay] = useState(
+    () => Number(localStorage.getItem('scn_grid_minTradesPerDay') ?? 1),
+  )
+  const [sortKey, setSortKey] = useState<SortKey>('totalReturnPct')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  useEffect(() => { localStorage.setItem('scn_grid_sidewaysOnly', String(sidewaysOnly)) }, [sidewaysOnly])
+  useEffect(() => { localStorage.setItem('scn_grid_minSpacingX', String(minSpacingX)) }, [minSpacingX])
+  useEffect(() => { localStorage.setItem('scn_grid_minTradesPerDay', String(minTradesPerDay)) }, [minTradesPerDay])
 
   const start = async () => {
     if (universe.length === 0) {
@@ -47,6 +86,7 @@ export default function GridScanTab({
     setError(null)
     setRows([])
     setProgress({ done: 0, total: universe.length })
+    setScannedAt(null)
     setScanning(true)
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -57,7 +97,17 @@ export default function GridScanTab({
         setProgress,
         ctrl.signal,
       )
+      const completedAt = Date.now()
       setRows(result)
+      setScannedAt(completedAt)
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          rows: result,
+          progress: { done: result.length, total: universe.length },
+          scannedAt: completedAt,
+        }),
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -71,6 +121,13 @@ export default function GridScanTab({
     setScanning(false)
   }
 
+  const clearResults = () => {
+    sessionStorage.removeItem(STORAGE_KEY)
+    setRows([])
+    setProgress({ done: 0, total: 0 })
+    setScannedAt(null)
+  }
+
   const visible = useMemo(() => {
     const filtered = rows.filter(
       (r) =>
@@ -80,8 +137,11 @@ export default function GridScanTab({
     )
     const dir = sortDir === 'desc' ? -1 : 1
     filtered.sort((a, b) => (a[sortKey] - b[sortKey]) * dir)
-    return filtered
+    return filtered.map((r) => ({ row: r, verdict: gradeGridRow(r) }))
   }, [rows, sidewaysOnly, minSpacingX, minTradesPerDay, sortKey, sortDir])
+
+  const top3 = visible.slice(0, 3)
+  const bestPick = visible[0]
 
   const goToGrid = (r: GridScanRow) => {
     onPickSymbol(r.symbol)
@@ -159,6 +219,19 @@ export default function GridScanTab({
           Lookback 30d · TF {GRID_TF}
         </div>
 
+        {scannedAt && !scanning && (
+          <div className="text-[10px] text-dim font-mono">
+            Scanned {timeAgo(scannedAt)}
+            <button
+              type="button"
+              onClick={clearResults}
+              className="ml-2 text-dim hover:text-loss underline"
+            >
+              clear
+            </button>
+          </div>
+        )}
+
         {scanning ? (
           <button
             type="button"
@@ -176,12 +249,12 @@ export default function GridScanTab({
             className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Play className="h-4 w-4" />
-            Scan
+            {rows.length > 0 ? 'Re-scan' : 'Scan'}
           </button>
         )}
       </div>
 
-      {(scanning || progress.total > 0) && (
+      {(scanning || (progress.total > 0 && !scannedAt)) && (
         <div className="card p-3">
           <div className="flex items-center justify-between text-[11px] text-dim mb-2">
             <span>
@@ -211,31 +284,80 @@ export default function GridScanTab({
         </div>
       )}
 
+      {/* ── Best pick hero ──────────────────────────────────────────────── */}
+      {bestPick && (
+        <button
+          type="button"
+          onClick={() => goToGrid(bestPick.row)}
+          className={`card flex flex-col gap-2 p-4 text-left transition-colors hover:border-brand/40 ${gradeBg(bestPick.verdict.grade)}`}
+        >
+          <div className="flex items-center gap-2">
+            <Trophy className="h-4 w-4" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">
+              Best Grid Pick · {bestPick.verdict.label}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="font-mono text-lg font-bold">
+              {bestPick.row.base} · {bestPick.row.timeframe}
+            </span>
+            <span
+              className={`font-mono text-base font-bold ${
+                bestPick.row.totalReturnPct >= 0 ? 'text-gain' : 'text-loss'
+              }`}
+            >
+              {bestPick.row.totalReturnPct >= 0 ? '+' : ''}
+              {bestPick.row.totalReturnPct.toFixed(2)}%
+            </span>
+            <span className={`font-mono text-xs ${regimeColor(bestPick.row.regime)}`}>
+              {bestPick.row.regime ?? '—'}
+            </span>
+          </div>
+          <p className="text-xs leading-relaxed opacity-90">
+            {bestPick.verdict.reason}
+            <span className="ml-2 text-[10px] opacity-70">→ click to open in Grid Optimizer</span>
+          </p>
+        </button>
+      )}
+
       {/* ── Top 3 highlight ─────────────────────────────────────────────── */}
-      {visible.length > 0 && (
+      {top3.length > 1 && (
         <div className="card p-4">
           <div className="mb-2 flex items-center gap-1.5">
             <LayoutGrid className="h-3.5 w-3.5 text-brand" />
             <span className="text-xs font-semibold text-text">Top 3 grid candidates</span>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
-            {visible.slice(0, 3).map((r, i) => (
+            {top3.map(({ row: r, verdict: v }, i) => (
               <button
                 key={r.symbol}
                 type="button"
                 onClick={() => goToGrid(r)}
-                className="flex flex-col gap-1 rounded-lg border border-border bg-panel-2 p-3 text-left transition-colors hover:border-brand/40 hover:bg-brand/5"
+                className="flex flex-col gap-1.5 rounded-lg border border-border bg-panel-2 p-3 text-left transition-colors hover:border-brand/40 hover:bg-brand/5"
               >
-                <span className="text-[10px] text-dim">
-                  {['🥇', '🥈', '🥉'][i]} #{i + 1}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-dim">
+                    {['🥇', '🥈', '🥉'][i]} #{i + 1}
+                  </span>
+                  <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${gradeBg(v.grade)}`}>
+                    {v.label}
+                  </span>
+                </div>
                 <span className="font-mono text-sm text-text">{r.base} · {r.timeframe}</span>
                 <div className="flex items-baseline justify-between gap-2 text-[11px]">
-                  <span className={`font-semibold ${verdictColor(r.verdict)}`}>
-                    {r.verdict} · {r.score}
+                  <span
+                    className={`font-mono font-semibold ${
+                      r.totalReturnPct >= 0 ? 'text-gain' : 'text-loss'
+                    }`}
+                  >
+                    {r.totalReturnPct >= 0 ? '+' : ''}
+                    {r.totalReturnPct.toFixed(2)}%
                   </span>
                   <span className={`font-mono ${regimeColor(r.regime)}`}>{r.regime ?? '—'}</span>
                 </div>
+                <span className="text-[10px] text-dim leading-snug line-clamp-2">
+                  {v.reason}
+                </span>
               </button>
             ))}
           </div>
@@ -250,6 +372,7 @@ export default function GridScanTab({
               <thead className="sticky top-0 bg-panel-2 text-[10px] uppercase tracking-wider text-muted">
                 <tr>
                   <th className="px-3 py-2 text-left">#</th>
+                  <th className="px-3 py-2 text-left">Pick</th>
                   <th className="px-3 py-2 text-left">Symbol</th>
                   <th
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
@@ -293,9 +416,18 @@ export default function GridScanTab({
                 </tr>
               </thead>
               <tbody>
-                {visible.map((r, i) => (
-                  <tr key={r.symbol} className="border-t border-border hover:bg-panel-2/60">
+                {visible.map(({ row: r, verdict: v }, i) => (
+                  <tr
+                    key={r.symbol}
+                    className="border-t border-border hover:bg-panel-2/60"
+                    title={v.reason}
+                  >
                     <td className="px-3 py-2 text-dim font-mono tabular-nums">{i + 1}</td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${gradeBg(v.grade)}`}>
+                        {v.label}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 font-mono text-text">{r.base}</td>
                     <td className="px-3 py-2 text-right font-mono text-text tabular-nums">
                       {r.score}
@@ -352,7 +484,7 @@ export default function GridScanTab({
         </div>
       )}
 
-      {!scanning && progress.total > 0 && visible.length === 0 && (
+      {!scanning && rows.length > 0 && visible.length === 0 && (
         <div className="card p-6 text-center text-xs text-dim">
           No symbols match the current filters. Try relaxing the regime or spacing filter.
         </div>
