@@ -61,10 +61,28 @@ export default function TradePage() {
   const [orderStatus, setOrderStatus] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // Position calculator
-  const [showCalc, setShowCalc] = useState(false)
-  const [riskUsd, setRiskUsd] = useState<number | ''>('')
-  const [slPct, setSlPct] = useState<number | ''>('')
+  // Sizing — Risk-based is the primary mode (matches Backtester / Signal Bots / Grid pages).
+  // Fixed USDC stays available for quick manual sizing.
+  type SizingMode = 'risk' | 'fixed'
+  const [sizingMode, setSizingMode] = useState<SizingMode>(
+    () => (localStorage.getItem('trade_sizingMode') as SizingMode) || 'risk',
+  )
+  const [riskUsd, setRiskUsd] = useState<number | ''>(
+    () => {
+      const v = localStorage.getItem('trade_riskUsd')
+      return v && v !== '' ? Number(v) : 50
+    },
+  )
+  const [slPct, setSlPct] = useState<number | ''>(
+    () => {
+      const v = localStorage.getItem('trade_slPct')
+      return v && v !== '' ? Number(v) : 2
+    },
+  )
+
+  useEffect(() => { localStorage.setItem('trade_sizingMode', sizingMode) }, [sizingMode])
+  useEffect(() => { localStorage.setItem('trade_riskUsd', String(riskUsd)) }, [riskUsd])
+  useEffect(() => { localStorage.setItem('trade_slPct', String(slPct)) }, [slPct])
 
   // ── Account fetch ──────────────────────────────────────────────────────────
 
@@ -124,10 +142,21 @@ export default function TradePage() {
 
   const placeOrder = async (side: 'buy' | 'sell') => {
     if (!selectedAsset) { setOrderStatus('Select an asset first'); return }
-    if (typeof usdcAmount !== 'number' || usdcAmount <= 0) { setOrderStatus('Enter USDC amount'); return }
     if (!assetInfo?.midPx) { setOrderStatus('Price not loaded yet'); return }
 
-    const size = +(usdcAmount / assetInfo.midPx).toFixed(6)
+    // Resolve the order size from the active sizing mode. Risk-mode derives
+    // qty from (riskUsd / SL%) so a fill that hits SL loses exactly the risk
+    // amount. Fixed-USDC mode lets the user type a notional directly.
+    let size: number
+    if (sizingMode === 'risk') {
+      if (!sizing) { setOrderStatus('Set Risk $ and SL % first'); return }
+      size = +sizing.qty.toFixed(6)
+    } else {
+      if (typeof usdcAmount !== 'number' || usdcAmount <= 0) { setOrderStatus('Enter USDC amount'); return }
+      size = +(usdcAmount / assetInfo.midPx).toFixed(6)
+    }
+    if (size <= 0) { setOrderStatus('Computed size is zero — check inputs'); return }
+
     setBusy(true); setOrderStatus('Placing order…')
     try {
       const res = await apiFetch('/api/order', {
@@ -420,81 +449,106 @@ export default function TradePage() {
               </Field>
             </div>
 
-            {/* USDC amount */}
-            <Field label="Amount (USDC)">
-              <input type="number" step="any" min="0" placeholder="e.g. 100"
-                value={usdcAmount}
-                onChange={e => setUsdcAmount(e.target.value === '' ? '' : +e.target.value)}
-                className={inputCls} />
-            </Field>
-
-            {/* Quick size buttons */}
-            <div className="grid grid-cols-4 gap-1">
-              {[25, 50, 75, 100].map(pct => (
-                <button key={pct} type="button"
-                  onClick={() => quickSize(pct)}
-                  disabled={!account}
-                  className="rounded-lg border border-border px-2 py-1.5 text-xs text-dim hover:border-brand/40 hover:text-text transition-colors disabled:opacity-40">
-                  {pct === 100 ? 'Max' : `${pct}%`}
+            {/* Sizing mode toggle — Risk-based primary, matches every other page */}
+            <div>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-dim">Sizing mode</span>
+              <div className="flex gap-1 rounded-lg border border-border bg-bg p-1">
+                <button
+                  type="button"
+                  onClick={() => setSizingMode('risk')}
+                  className={`flex-1 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                    sizingMode === 'risk' ? 'bg-brand/15 text-brand' : 'text-dim hover:text-text'
+                  }`}
+                >
+                  Risk-based
                 </button>
-              ))}
-            </div>
-
-            {/* Order preview */}
-            {selectedAsset && assetInfo?.midPx && typeof usdcAmount === 'number' && usdcAmount > 0 && (
-              <div className="rounded-xl border border-border bg-panel-2 px-3 py-2 text-[10px]">
-                <div className="flex justify-between"><span className="text-dim">Qty</span><span className="font-mono text-text">{(usdcAmount / assetInfo.midPx).toFixed(6)} {selectedAsset}</span></div>
-                <div className="flex justify-between mt-1"><span className="text-dim">Notional</span><span className="font-mono text-text">${usdcAmount.toFixed(2)}</span></div>
+                <button
+                  type="button"
+                  onClick={() => setSizingMode('fixed')}
+                  className={`flex-1 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                    sizingMode === 'fixed' ? 'bg-brand/15 text-brand' : 'text-dim hover:text-text'
+                  }`}
+                >
+                  Fixed USDC
+                </button>
               </div>
-            )}
-
-            {/* Position Calculator (collapsible) */}
-            <div className="border-t border-border pt-3">
-              <button
-                type="button"
-                onClick={() => setShowCalc(v => !v)}
-                className="flex w-full items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-dim hover:text-text transition-colors"
-              >
-                <span>📐 Position Calculator</span>
-                <span>{showCalc ? '▲' : '▼'}</span>
-              </button>
-
-              {showCalc && (
-                <div className="mt-2 flex flex-col gap-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Field label="Risk per trade ($)">
-                      <input type="number" min="1" step="any" placeholder="e.g. 50"
-                        value={riskUsd}
-                        onChange={e => setRiskUsd(e.target.value === '' ? '' : +e.target.value)}
-                        className={inputCls} />
-                    </Field>
-                    <Field label="Stop loss %">
-                      <input type="number" min="0.1" step="0.1" placeholder="e.g. 2"
-                        value={slPct}
-                        onChange={e => setSlPct(e.target.value === '' ? '' : +e.target.value)}
-                        className={inputCls} />
-                    </Field>
-                  </div>
-
-                  {sizing && (
-                    <div className="rounded-xl border border-brand/20 bg-brand/5 px-3 py-2 text-[10px] space-y-1">
-                      <div className="flex justify-between"><span className="text-dim">Position size</span><span className="font-mono text-text font-semibold">${sizing.positionUsd.toFixed(2)}</span></div>
-                      <div className="flex justify-between"><span className="text-dim">Order qty</span><span className="font-mono text-text">{sizing.qty.toFixed(6)} {selectedAsset}</span></div>
-                      <div className="flex justify-between"><span className="text-dim">Max leverage</span><span className="font-mono text-text">{sizing.maxLev}x</span></div>
-                      <div className="flex justify-between"><span className="text-dim">Margin @ max lev</span><span className="font-mono text-text">${sizing.margin.toFixed(2)}</span></div>
-                      <div className="flex justify-between"><span className="text-dim">SL long / short</span><span className="font-mono text-loss">${sizing.slLong.toFixed(4)} / ${sizing.slShort.toFixed(4)}</span></div>
-                      <button
-                        type="button"
-                        onClick={() => setUsdcAmount(+sizing.positionUsd.toFixed(2))}
-                        className="mt-1 w-full rounded-lg bg-brand/15 border border-brand/30 px-2 py-1.5 text-xs font-semibold text-brand hover:bg-brand/20 transition-colors"
-                      >
-                        ↑ Use ${sizing.positionUsd.toFixed(2)} as Amount
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
+
+            {sizingMode === 'risk' ? (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Risk per trade ($)">
+                    <input type="number" min="1" step="any" placeholder="e.g. 50"
+                      value={riskUsd}
+                      onChange={e => setRiskUsd(e.target.value === '' ? '' : +e.target.value)}
+                      className={inputCls} />
+                  </Field>
+                  <Field label="Stop loss %">
+                    <input type="number" min="0.1" step="0.1" placeholder="e.g. 2"
+                      value={slPct}
+                      onChange={e => setSlPct(e.target.value === '' ? '' : +e.target.value)}
+                      className={inputCls} />
+                  </Field>
+                </div>
+
+                {sizing ? (
+                  <div className="rounded-xl border border-brand/20 bg-brand/5 px-3 py-2 text-[11px] space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-dim">Position size</span>
+                      <span className="font-mono text-text font-semibold">${sizing.positionUsd.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-dim">Order qty</span>
+                      <span className="font-mono text-text">{sizing.qty.toFixed(6)} {selectedAsset || '—'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-dim">Margin @ max lev ({sizing.maxLev}x)</span>
+                      <span className="font-mono text-text">${sizing.margin.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-dim">SL long / short</span>
+                      <span className="font-mono text-loss">${sizing.slLong.toFixed(4)} / ${sizing.slShort.toFixed(4)}</span>
+                    </div>
+                    <p className="pt-1 text-[10px] text-dim leading-snug">
+                      A fill that hits the SL loses ~${typeof riskUsd === 'number' ? riskUsd.toFixed(2) : '—'} (the risk you set).
+                    </p>
+                  </div>
+                ) : (
+                  <p className="rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+                    {selectedAsset
+                      ? 'Set Risk $ and SL % to compute order size.'
+                      : 'Pick an asset to compute order size.'}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <Field label="Amount (USDC)">
+                  <input type="number" step="any" min="0" placeholder="e.g. 100"
+                    value={usdcAmount}
+                    onChange={e => setUsdcAmount(e.target.value === '' ? '' : +e.target.value)}
+                    className={inputCls} />
+                </Field>
+
+                <div className="grid grid-cols-4 gap-1">
+                  {[25, 50, 75, 100].map(pct => (
+                    <button key={pct} type="button"
+                      onClick={() => quickSize(pct)}
+                      disabled={!account}
+                      className="rounded-lg border border-border px-2 py-1.5 text-xs text-dim hover:border-brand/40 hover:text-text transition-colors disabled:opacity-40">
+                      {pct === 100 ? 'Max' : `${pct}%`}
+                    </button>
+                  ))}
+                </div>
+
+                {selectedAsset && assetInfo?.midPx && typeof usdcAmount === 'number' && usdcAmount > 0 && (
+                  <div className="rounded-xl border border-border bg-panel-2 px-3 py-2 text-[10px]">
+                    <div className="flex justify-between"><span className="text-dim">Qty</span><span className="font-mono text-text">{(usdcAmount / assetInfo.midPx).toFixed(6)} {selectedAsset}</span></div>
+                    <div className="flex justify-between mt-1"><span className="text-dim">Notional</span><span className="font-mono text-text">${usdcAmount.toFixed(2)}</span></div>
+                  </div>
+                )}
+              </>
+            )}
 
             {/* Buy / Sell buttons */}
             <div className="grid grid-cols-2 gap-2 mt-1">
