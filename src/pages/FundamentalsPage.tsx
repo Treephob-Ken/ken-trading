@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Brain, Minus, RefreshCw } from 'lucide-react'
+import { ArrowDown, ArrowUp, Brain, Maximize2, Minus, RefreshCw, X } from 'lucide-react'
 import {
   AreaSeries,
   CandlestickSeries,
@@ -8,6 +8,8 @@ import {
   LineStyle,
   createChart,
   type IChartApi,
+  type MouseEventParams,
+  type Time,
   type UTCTimestamp,
 } from 'lightweight-charts'
 import { apiFetch } from '@/contexts/AuthContext'
@@ -331,6 +333,185 @@ function TrendIcon({ dir }: { dir: 'up' | 'down' | 'flat' }) {
   return <Minus className="h-3 w-3 shrink-0" aria-label="trend flat" />
 }
 
+// ─── Chart tooltip helper ────────────────────────────────────────────────────
+// Creates an absolutely-positioned tooltip div inside the chart container and
+// wires it to the chart's crosshair-move event. The caller supplies a formatter
+// that receives the latest MouseEventParams and returns the tooltip's innerHTML
+// (or null to hide). The returned cleanup detaches the subscription + node.
+
+interface CrosshairSubscribe {
+  (handler: (param: MouseEventParams<Time>) => void): void
+  (handler: null): void
+}
+
+function attachTooltip(
+  el: HTMLElement,
+  chart: IChartApi,
+  formatter: (param: MouseEventParams<Time>) => string | null,
+): () => void {
+  const tip = document.createElement('div')
+  tip.className = 'chart-tooltip'
+  el.appendChild(tip)
+  const handler = (param: MouseEventParams<Time>) => {
+    if (!param.time || !param.point) {
+      tip.classList.remove('active')
+      return
+    }
+    const html = formatter(param)
+    if (!html) {
+      tip.classList.remove('active')
+      return
+    }
+    tip.innerHTML = html
+    tip.classList.add('active')
+  }
+  ;(chart.subscribeCrosshairMove as unknown as CrosshairSubscribe)(handler)
+  return () => {
+    ;(chart.unsubscribeCrosshairMove as unknown as CrosshairSubscribe)(handler)
+    tip.remove()
+  }
+}
+
+function tipRow(label: string, value: string, swatch?: string): string {
+  const dot = swatch ? `<span class="chart-tooltip-swatch" style="background:${swatch}"></span>` : ''
+  return `<div class="chart-tooltip-row"><span class="chart-tooltip-label">${dot}${label}</span><span class="chart-tooltip-value">${value}</span></div>`
+}
+
+function fmtDate(t: number): string {
+  const d = new Date(t * 1000)
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+function fmtDateTime(t: number): string {
+  const d = new Date(t * 1000)
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+function fmtUsd(v: number): string {
+  return v >= 1000 ? `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : `$${v.toFixed(2)}`
+}
+function nearest<T extends { time: number }>(arr: T[], time: number): T | null {
+  // Binary search by .time (ascending)
+  if (arr.length === 0) return null
+  let lo = 0, hi = arr.length - 1
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1
+    if (arr[m].time === time) return arr[m]
+    if (arr[m].time < time) lo = m + 1
+    else hi = m - 1
+  }
+  // Pick closer of lo/hi
+  const a = arr[Math.max(0, hi)]
+  const b = arr[Math.min(arr.length - 1, lo)]
+  if (!a) return b
+  if (!b) return a
+  return Math.abs(a.time - time) <= Math.abs(b.time - time) ? a : b
+}
+
+// ─── ExpandableQCard ─────────────────────────────────────────────────────────
+// One card chrome with an inline chart + a maximize button that opens a
+// <dialog> rendering the SAME chart (via the same setup fn) at 70vh. Uses
+// the native <dialog> element — ESC + backdrop click close it for free.
+
+interface ExpandableProps {
+  question: string
+  interpretation?: string
+  ariaSummary?: string
+  statHeader: React.ReactNode
+  setupChart: (el: HTMLElement) => () => void
+  inlineHeight: number
+}
+
+function ExpandableQCard({
+  question,
+  interpretation,
+  ariaSummary,
+  statHeader,
+  setupChart,
+  inlineHeight,
+}: ExpandableProps) {
+  const inlineRef = useRef<HTMLDivElement>(null)
+  const modalChartRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!inlineRef.current) return
+    return setupChart(inlineRef.current)
+  }, [setupChart])
+
+  useEffect(() => {
+    if (!open || !modalChartRef.current) return
+    return setupChart(modalChartRef.current)
+  }, [open, setupChart])
+
+  useEffect(() => {
+    const d = dialogRef.current
+    if (!d) return
+    if (open && !d.open) d.showModal()
+    if (!open && d.open) d.close()
+  }, [open])
+
+  return (
+    <>
+      <article
+        aria-label={ariaSummary ?? question}
+        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70"
+      >
+        <h2 className="text-[13px] font-semibold tracking-tight text-text">{question}</h2>
+        {statHeader}
+        <div className="relative">
+          <div ref={inlineRef} className="fund-well w-full overflow-hidden" style={{ height: inlineHeight }} />
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="Expand chart"
+            className="chart-expand-btn"
+          >
+            <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+        {interpretation && (
+          <p className="text-[11px] leading-relaxed text-muted">
+            <span className="text-dim">→ </span>{interpretation}
+          </p>
+        )}
+      </article>
+
+      <dialog
+        ref={dialogRef}
+        className="chart-modal"
+        aria-label={question}
+        onClose={() => setOpen(false)}
+        onClick={(e) => { if (e.target === dialogRef.current) setOpen(false) }}
+      >
+        <div className="flex flex-col gap-4 p-5">
+          <header className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-2">
+              <h2 className="text-base font-semibold text-text">{question}</h2>
+              {statHeader}
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close"
+              className="chart-expand-btn !relative !top-0 !right-0"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </header>
+          {open && (
+            <div ref={modalChartRef} className="fund-well w-full overflow-hidden" style={{ height: '70vh' }} />
+          )}
+          {interpretation && (
+            <p className="text-xs leading-relaxed text-muted">
+              <span className="text-dim">→ </span>{interpretation}
+            </p>
+          )}
+        </div>
+      </dialog>
+    </>
+  )
+}
+
 // ─── Card chrome ─────────────────────────────────────────────────────────────
 
 function QCard({
@@ -386,13 +567,10 @@ function StatHeader({
 // ─── Fear & Greed card ───────────────────────────────────────────────────────
 
 function FngCard({ fng }: { fng: FngResult }) {
-  const containerRef = useRef<HTMLDivElement>(null)
   const v = fng.current.value
   const tone: Tone = v <= 25 ? 'loss' : v <= 45 ? 'warn' : v < 55 ? 'neutral' : v < 75 ? 'warn' : 'gain'
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
+  const setupChart = useCallback((el: HTMLElement) => {
     const chart = makeChart(el)
     const series = chart.addSeries(AreaSeries, {
       lineColor: 'rgba(167,139,250,0.9)',
@@ -400,7 +578,16 @@ function FngCard({ fng }: { fng: FngResult }) {
       priceFormat: { type: 'price', precision: 0, minMove: 1 },
     })
     series.setData(fng.history.map((p) => ({ time: t(p.time), value: p.value })))
-    return attachReflow(chart, el)
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const p = nearest(fng.history, time)
+      if (!p) return null
+      return tipRow('Date', fmtDate(p.time)) +
+             tipRow('F&G',  String(p.value), '#a78bfa') +
+             tipRow('Mood', p.label)
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
   }, [fng])
 
   const interp = `${fng.current.label} (${v}/100). ` +
@@ -411,42 +598,51 @@ function FngCard({ fng }: { fng: FngResult }) {
     : 'Euphoria — historically a risky zone for fresh longs.')
 
   return (
-    <QCard
+    <ExpandableQCard
       question="Is the market greedy or fearful?"
       interpretation={interp}
       ariaSummary={`Fear and greed index at ${v} of 100 — ${fng.current.label}`}
-    >
-      <StatHeader tone={tone} value={String(v)} label={fng.current.label} hint="1Y history · 0 fear → 100 greed" />
-      <div ref={containerRef} className="fund-well h-[220px] w-full overflow-hidden" />
-    </QCard>
+      statHeader={<StatHeader tone={tone} value={String(v)} label={fng.current.label} hint="1Y history · 0 fear → 100 greed" />}
+      setupChart={setupChart}
+      inlineHeight={220}
+    />
   )
 }
 
 // ─── MVRV card ───────────────────────────────────────────────────────────────
 
 function MvrvCard({ mvrv }: { mvrv: MvrvResult }) {
-  const containerRef = useRef<HTMLDivElement>(null)
   const v = mvrv.current.value
   const mean = mvrv.mean
   const tone: Tone = v < 1 ? 'gain' : v < mean * 0.85 ? 'gain' : v < mean * 1.15 ? 'neutral' : v < 3.7 ? 'warn' : 'loss'
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
+  const setupChart = useCallback((el: HTMLElement) => {
     const chart = makeChart(el)
     const series = chart.addSeries(LineSeries, { color: '#a78bfa', lineWidth: 2 })
     series.setData(mvrv.history.map((p) => ({ time: t(p.time), value: p.value })))
-
     const meanLine = chart.addSeries(LineSeries, { color: '#5b6478', lineWidth: 1, lineStyle: LineStyle.Dashed })
     meanLine.setData(mvrv.history.map((p) => ({ time: t(p.time), value: mvrv.mean })))
-
     const topLine = chart.addSeries(LineSeries, { color: 'rgba(239,68,68,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted })
     topLine.setData(mvrv.history.map((p) => ({ time: t(p.time), value: 3.7 })))
-
     const botLine = chart.addSeries(LineSeries, { color: 'rgba(34,197,94,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted })
     botLine.setData(mvrv.history.map((p) => ({ time: t(p.time), value: 1.0 })))
 
-    return attachReflow(chart, el)
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const p = nearest(mvrv.history, time)
+      if (!p) return null
+      const diff = p.value - mvrv.mean
+      const zone = p.value < 1 ? 'Deep value'
+        : p.value < mvrv.mean * 0.85 ? 'Cheap'
+        : p.value < mvrv.mean * 1.15 ? 'Fair'
+        : p.value < 3.7 ? 'Rich' : 'Euphoric'
+      return tipRow('Date', fmtDate(p.time)) +
+             tipRow('MVRV', p.value.toFixed(3), '#a78bfa') +
+             tipRow('vs mean', `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}`) +
+             tipRow('Zone', zone)
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
   }, [mvrv])
 
   const interp = `MVRV at ${v.toFixed(2)} vs long-term mean ${mean.toFixed(2)}. ` +
@@ -457,30 +653,27 @@ function MvrvCard({ mvrv }: { mvrv: MvrvResult }) {
     : 'Above 3.7 — historical euphoria zone, prior cycle tops sit here.')
 
   return (
-    <QCard
+    <ExpandableQCard
       question="Is BTC overvalued vs its own history?"
       interpretation={interp}
       ariaSummary={`MVRV ratio ${v.toFixed(2)}, long-term mean ${mean.toFixed(2)}`}
-    >
-      <StatHeader tone={tone} value={v.toFixed(2)} label="MVRV" hint={`mean ${mean.toFixed(2)} · red dotted 3.7 = top zone · green dotted 1.0 = bottom`} />
-      <div ref={containerRef} className="fund-well h-[220px] w-full overflow-hidden" />
-    </QCard>
+      statHeader={<StatHeader tone={tone} value={v.toFixed(2)} label="MVRV" hint={`mean ${mean.toFixed(2)} · red dotted 3.7 = top · green dotted 1.0 = bottom`} />}
+      setupChart={setupChart}
+      inlineHeight={220}
+    />
   )
 }
 
 // ─── Regime card ─────────────────────────────────────────────────────────────
 
 function RegimeCard({ regime }: { regime: RegimeResult }) {
-  const containerRef = useRef<HTMLDivElement>(null)
   const toneByLabel: Record<RegimeLabel, Tone> = {
     Markup: 'gain', Accumulation: 'warn', Distribution: 'warn', Markdown: 'loss',
   }
   const tone = toneByLabel[regime.label]
   const conf = Math.round(regime.confidence * 100)
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
+  const setupChart = useCallback((el: HTMLElement) => {
     const chart = makeChart(el)
     const candles = chart.addSeries(CandlestickSeries, {
       upColor: '#10b981', downColor: '#ef4444', borderVisible: false,
@@ -497,7 +690,26 @@ function RegimeCard({ regime }: { regime: RegimeResult }) {
     e200.setData(regime.ema200.map((v, i) => v == null
       ? { time: t(regime.candles[i].time), value: NaN }
       : { time: t(regime.candles[i].time), value: v }).filter((p) => Number.isFinite(p.value)))
-    return attachReflow(chart, el)
+
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const idx = regime.candles.findIndex((c) => c.time === time)
+      const i = idx >= 0 ? idx : regime.candles.findIndex((c) => c.time >= time)
+      if (i < 0) return null
+      const c = regime.candles[i]
+      const e50v = regime.ema50[i]
+      const e200v = regime.ema200[i]
+      const dir = c.close >= c.open ? 'up' : 'down'
+      return tipRow('Date', fmtDate(c.time)) +
+             tipRow('Open',  fmtUsd(c.open)) +
+             tipRow('High',  fmtUsd(c.high)) +
+             tipRow('Low',   fmtUsd(c.low)) +
+             tipRow('Close', fmtUsd(c.close), dir === 'up' ? '#10b981' : '#ef4444') +
+             (e50v != null  ? tipRow('EMA50',  fmtUsd(e50v),  '#a78bfa') : '') +
+             (e200v != null ? tipRow('EMA200', fmtUsd(e200v), '#f59e0b') : '')
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
   }, [regime])
 
   const interpByLabel: Record<RegimeLabel, string> = {
@@ -508,45 +720,82 @@ function RegimeCard({ regime }: { regime: RegimeResult }) {
   }
 
   return (
-    <QCard
+    <ExpandableQCard
       question="Which Wyckoff phase are we in?"
       interpretation={`${interpByLabel[regime.label]} (${regime.reason})`}
       ariaSummary={`Regime ${regime.label} at ${conf} percent confidence`}
-    >
-      <StatHeader tone={tone} value={regime.label} label={`${conf}% conf`} hint="candles · EMA50 (violet) · EMA200 (amber)" />
-      <div ref={containerRef} className="fund-well h-[240px] w-full overflow-hidden" />
-    </QCard>
+      statHeader={<StatHeader tone={tone} value={regime.label} label={`${conf}% conf`} hint="candles · EMA50 (violet) · EMA200 (amber)" />}
+      setupChart={setupChart}
+      inlineHeight={240}
+    />
   )
 }
 
 // ─── Funding + OI card ───────────────────────────────────────────────────────
 
 function FundingOiCard({ funding, oi }: { funding: FundingResult; oi: OiResult }) {
-  const fRef = useRef<HTMLDivElement>(null)
-  const oRef = useRef<HTMLDivElement>(null)
+  const inlineFRef = useRef<HTMLDivElement>(null)
+  const inlineORef = useRef<HTMLDivElement>(null)
+  const modalFRef = useRef<HTMLDivElement>(null)
+  const modalORef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const [open, setOpen] = useState(false)
   const fundingApr = funding.annualizedPct
   const fundingTone: Tone =
     fundingApr > 30 ? 'loss' : fundingApr > 15 ? 'warn' : fundingApr > -10 ? 'neutral' : 'gain'
   const fundTC = toneClasses[fundingTone]
 
-  useEffect(() => {
-    const fel = fRef.current; const oel = oRef.current
-    if (!fel || !oel) return
-    const fChart = makeChart(fel)
-    const fSer = fChart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 })
-    fSer.setData(funding.history.map((p) => ({ time: t(p.time), value: p.rate * 100 })))
+  const setupFunding = useCallback((el: HTMLElement) => {
+    const chart = makeChart(el)
+    const series = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 })
+    series.setData(funding.history.map((p) => ({ time: t(p.time), value: p.rate * 100 })))
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const p = nearest(funding.history, time)
+      if (!p) return null
+      const ratePct = p.rate * 100
+      const apr = p.rate * 1095 * 100
+      return tipRow('Time', fmtDateTime(p.time)) +
+             tipRow('Rate', `${ratePct.toFixed(4)}% / 8h`, '#f59e0b') +
+             tipRow('APR',  `${apr.toFixed(1)}%`)
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
+  }, [funding])
 
-    const oChart = makeChart(oel)
-    const oSer = oChart.addSeries(AreaSeries, {
+  const setupOi = useCallback((el: HTMLElement) => {
+    const chart = makeChart(el)
+    const series = chart.addSeries(AreaSeries, {
       lineColor: 'rgba(96,165,250,0.9)',
       topColor: 'rgba(96,165,250,0.35)', bottomColor: 'rgba(96,165,250,0.02)',
     })
-    oSer.setData(oi.history.map((p) => ({ time: t(p.time), value: p.usd / 1e9 })))
+    series.setData(oi.history.map((p) => ({ time: t(p.time), value: p.usd / 1e9 })))
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const idx = oi.history.findIndex((p) => p.time === time)
+      const i = idx >= 0 ? idx : oi.history.findIndex((p) => p.time >= time)
+      if (i < 0) return null
+      const p = oi.history[i]
+      const prev = i > 0 ? oi.history[i - 1] : null
+      const delta = prev ? ((p.usd - prev.usd) / prev.usd) * 100 : 0
+      return tipRow('Time', fmtDateTime(p.time)) +
+             tipRow('OI',   `$${(p.usd / 1e9).toFixed(2)}B`, '#60a5fa') +
+             (prev ? tipRow('Δ vs prev', `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%`) : '')
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
+  }, [oi])
 
-    const cleanupF = attachReflow(fChart, fel)
-    const cleanupO = attachReflow(oChart, oel)
-    return () => { cleanupF(); cleanupO() }
-  }, [funding, oi])
+  useEffect(() => { if (inlineFRef.current) return setupFunding(inlineFRef.current) }, [setupFunding])
+  useEffect(() => { if (inlineORef.current) return setupOi(inlineORef.current) }, [setupOi])
+  useEffect(() => { if (open && modalFRef.current) return setupFunding(modalFRef.current) }, [open, setupFunding])
+  useEffect(() => { if (open && modalORef.current) return setupOi(modalORef.current) }, [open, setupOi])
+  useEffect(() => {
+    const d = dialogRef.current
+    if (!d) return
+    if (open && !d.open) d.showModal()
+    if (!open && d.open) d.close()
+  }, [open])
 
   const oiNote = oi.pct30d >= 0
     ? `OI is up ${oi.pct30d.toFixed(1)}% over 30 days — more leverage in the system.`
@@ -559,32 +808,69 @@ function FundingOiCard({ funding, oi }: { funding: FundingResult; oi: OiResult }
     : 'Funding is negative — shorts paying. Crowded short setups can squeeze higher.') +
     ` ${oiNote}`
 
+  const statHeader = (
+    <div className="fund-stat-row flex flex-wrap items-center gap-2">
+      <div className={`inline-flex items-baseline gap-2 rounded-lg border ${fundTC.ring} ${fundTC.bg} px-3 py-1.5`}>
+        <span className={`fund-num font-mono text-base font-semibold ${fundTC.text}`}>{fundingApr.toFixed(1)}%</span>
+        <span className={`text-[10px] font-semibold uppercase tracking-wider ${fundTC.text}`}>Funding APR</span>
+      </div>
+      <div className="inline-flex items-baseline gap-2 rounded-lg border border-border bg-panel-2 px-3 py-1.5">
+        <span className="fund-num font-mono text-base font-semibold text-text">${(oi.current.usd / 1e9).toFixed(2)}B</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Open Interest</span>
+      </div>
+      <span className="fund-stat-hint text-[10px] text-dim">80 days · 30d OI</span>
+    </div>
+  )
+
   return (
-    <QCard
-      question="Is leverage flashing a warning?"
-      interpretation={interp}
-      ariaSummary={`Funding rate ${fundingApr.toFixed(1)} percent annualized, open interest ${(oi.current.usd / 1e9).toFixed(2)} billion dollars`}
-    >
-      <div className="fund-stat-row flex flex-wrap items-center gap-2">
-        <div className={`inline-flex items-baseline gap-2 rounded-lg border ${fundTC.ring} ${fundTC.bg} px-3 py-1.5`}>
-          <span className={`fund-num font-mono text-base font-semibold ${fundTC.text}`}>{fundingApr.toFixed(1)}%</span>
-          <span className={`text-[10px] font-semibold uppercase tracking-wider ${fundTC.text}`}>Funding APR</span>
+    <>
+      <article
+        aria-label={`Funding rate ${fundingApr.toFixed(1)} percent annualized, open interest ${(oi.current.usd / 1e9).toFixed(2)} billion dollars`}
+        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70"
+      >
+        <h2 className="text-[13px] font-semibold tracking-tight text-text">Is leverage flashing a warning?</h2>
+        {statHeader}
+        <div className="relative">
+          <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Funding rate (% per 8h)</p>
+          <div ref={inlineFRef} className="fund-well h-[100px] w-full overflow-hidden" />
+          <button type="button" onClick={() => setOpen(true)} aria-label="Expand charts" className="chart-expand-btn" style={{ top: 22 }}>
+            <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </div>
-        <div className="inline-flex items-baseline gap-2 rounded-lg border border-border bg-panel-2 px-3 py-1.5">
-          <span className="fund-num font-mono text-base font-semibold text-text">${(oi.current.usd / 1e9).toFixed(2)}B</span>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Open Interest</span>
+        <div>
+          <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Open interest ($B)</p>
+          <div ref={inlineORef} className="fund-well h-[100px] w-full overflow-hidden" />
         </div>
-        <span className="fund-stat-hint text-[10px] text-dim">80 days · 30d OI</span>
-      </div>
-      <div>
-        <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Funding rate (% per 8h)</p>
-        <div ref={fRef} className="fund-well h-[100px] w-full overflow-hidden" />
-      </div>
-      <div>
-        <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Open interest ($B)</p>
-        <div ref={oRef} className="fund-well h-[100px] w-full overflow-hidden" />
-      </div>
-    </QCard>
+        <p className="text-[11px] leading-relaxed text-muted"><span className="text-dim">→ </span>{interp}</p>
+      </article>
+
+      <dialog ref={dialogRef} className="chart-modal" aria-label="Leverage detail" onClose={() => setOpen(false)} onClick={(e) => { if (e.target === dialogRef.current) setOpen(false) }}>
+        <div className="flex flex-col gap-4 p-5">
+          <header className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-2">
+              <h2 className="text-base font-semibold text-text">Is leverage flashing a warning?</h2>
+              {statHeader}
+            </div>
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="chart-expand-btn !relative !top-0 !right-0">
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </header>
+          {open && (
+            <>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Funding rate (% per 8h)</p>
+                <div ref={modalFRef} className="fund-well w-full overflow-hidden" style={{ height: '32vh' }} />
+              </div>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Open interest ($B)</p>
+                <div ref={modalORef} className="fund-well w-full overflow-hidden" style={{ height: '32vh' }} />
+              </div>
+            </>
+          )}
+          <p className="text-xs leading-relaxed text-muted"><span className="text-dim">→ </span>{interp}</p>
+        </div>
+      </dialog>
+    </>
   )
 }
 
@@ -638,16 +924,13 @@ function DominanceBar({ label, pct, color }: { label: string; pct: number; color
 // ─── Realized Volatility card ────────────────────────────────────────────────
 
 function VolatilityCard({ vol }: { vol: VolResult }) {
-  const containerRef = useRef<HTMLDivElement>(null)
   const { rv7, rv30, atrPct, zone } = vol.current
   const toneByZone: Record<VolZone, Tone> = {
     Calm: 'gain', Normal: 'neutral', Elevated: 'warn', Extreme: 'loss',
   }
   const tone = toneByZone[zone]
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
+  const setupChart = useCallback((el: HTMLElement) => {
     const chart = makeChart(el)
     const rv30Series = chart.addSeries(AreaSeries, {
       lineColor: 'rgba(167,139,250,0.9)',
@@ -655,22 +938,33 @@ function VolatilityCard({ vol }: { vol: VolResult }) {
       priceFormat: { type: 'price', precision: 1, minMove: 0.1 },
     })
     rv30Series.setData(
-      vol.history
-        .filter((p) => p.rv30 != null)
-        .map((p) => ({ time: t(p.time), value: p.rv30 as number })),
+      vol.history.filter((p) => p.rv30 != null).map((p) => ({ time: t(p.time), value: p.rv30 as number })),
     )
     const rv7Series = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 })
     rv7Series.setData(
-      vol.history
-        .filter((p) => p.rv7 != null)
-        .map((p) => ({ time: t(p.time), value: p.rv7 as number })),
+      vol.history.filter((p) => p.rv7 != null).map((p) => ({ time: t(p.time), value: p.rv7 as number })),
     )
-    // Zone bands at 25 / 50 / 80 %
     for (const [val, color] of [[25, 'rgba(34,197,94,0.4)'], [50, 'rgba(245,158,11,0.4)'], [80, 'rgba(239,68,68,0.4)']] as const) {
       const band = chart.addSeries(LineSeries, { color, lineWidth: 1, lineStyle: LineStyle.Dotted })
       band.setData(vol.history.map((p) => ({ time: t(p.time), value: val })))
     }
-    return attachReflow(chart, el)
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const p = nearest(vol.history, time)
+      if (!p) return null
+      const z = p.rv30 == null ? '—'
+        : p.rv30 < 25 ? 'Calm'
+        : p.rv30 < 50 ? 'Normal'
+        : p.rv30 < 80 ? 'Elevated'
+        : 'Extreme'
+      return tipRow('Date', fmtDate(p.time)) +
+             tipRow('30D RV', p.rv30 != null ? `${p.rv30.toFixed(1)}%` : '—', '#a78bfa') +
+             tipRow('7D RV',  p.rv7  != null ? `${p.rv7.toFixed(1)}%`  : '—', '#f59e0b') +
+             tipRow('ATR%',   p.atrPct != null ? `${p.atrPct.toFixed(2)}%` : '—') +
+             tipRow('Zone',   z)
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
   }, [vol])
 
   const interp = `30D annualized RV at ${rv30.toFixed(1)}% (zone: ${zone}); 7D at ${rv7.toFixed(1)}%; daily ATR ${atrPct.toFixed(2)}% of price. ` +
@@ -680,31 +974,27 @@ function VolatilityCard({ vol }: { vol: VolResult }) {
     : 'Extreme vol — protect capital. Avoid fresh entries, reduce leverage, expect overnight gaps.')
 
   return (
-    <QCard
+    <ExpandableQCard
       question="How violent is the market right now?"
       interpretation={interp}
       ariaSummary={`Realized volatility 30 day ${rv30.toFixed(1)} percent, zone ${zone}`}
-    >
-      <StatHeader tone={tone} value={`${rv30.toFixed(1)}%`} label={`30D RV · ${zone}`} hint={`7D RV ${rv7.toFixed(1)}% · daily ATR ${atrPct.toFixed(2)}%`} />
-      <div ref={containerRef} className="fund-well h-[220px] w-full overflow-hidden" />
-    </QCard>
+      statHeader={<StatHeader tone={tone} value={`${rv30.toFixed(1)}%`} label={`30D RV · ${zone}`} hint={`7D RV ${rv7.toFixed(1)}% · daily ATR ${atrPct.toFixed(2)}%`} />}
+      setupChart={setupChart}
+      inlineHeight={220}
+    />
   )
 }
 
 // ─── Cycle Position card (Mayer + Pi Cycle) ──────────────────────────────────
 
 function CycleCard({ cycle }: { cycle: CycleResult }) {
-  const containerRef = useRef<HTMLDivElement>(null)
   const { mayer, zone, piGapPct } = cycle.current
   const toneByZone: Record<MayerZone, Tone> = {
     Cheap: 'gain', Fair: 'neutral', Hot: 'warn', 'Cycle Top': 'loss',
   }
   const tone = toneByZone[zone]
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    // Log scale so a multi-year price series is readable.
+  const setupChart = useCallback((el: HTMLElement) => {
     const chart = createChart(el, {
       autoSize: true,
       layout: {
@@ -726,7 +1016,24 @@ function CycleCard({ cycle }: { cycle: CycleResult }) {
     ma111Ser.setData(cycle.history.filter((p) => p.ma111x2 != null).map((p) => ({ time: t(p.time), value: p.ma111x2 as number })))
     const ma350Ser = chart.addSeries(LineSeries, { color: '#ef4444', lineWidth: 1, lineStyle: LineStyle.Dotted })
     ma350Ser.setData(cycle.history.filter((p) => p.ma350 != null).map((p) => ({ time: t(p.time), value: p.ma350 as number })))
-    return attachReflow(chart, el)
+
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const p = nearest(cycle.history, time)
+      if (!p) return null
+      const myr = p.mayer != null ? p.mayer.toFixed(2) : '—'
+      const pi = p.ma111x2 != null && p.ma350 != null && p.ma350 > 0
+        ? `${(((p.ma111x2 - p.ma350) / p.ma350) * 100).toFixed(1)}%` : '—'
+      return tipRow('Date',   fmtDate(p.time)) +
+             tipRow('BTC',    fmtUsd(p.close), '#e8e8f2') +
+             tipRow('200DMA', p.ma200 != null ? fmtUsd(p.ma200) : '—', '#a78bfa') +
+             tipRow('Mayer',  myr) +
+             tipRow('111×2',  p.ma111x2 != null ? fmtUsd(p.ma111x2) : '—', '#10b981') +
+             tipRow('350DMA', p.ma350 != null ? fmtUsd(p.ma350) : '—', '#ef4444') +
+             tipRow('Pi gap', pi)
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
   }, [cycle])
 
   const piNote = piGapPct < 0
@@ -740,22 +1047,27 @@ function CycleCard({ cycle }: { cycle: CycleResult }) {
     : 'Above 2.4 — historical cycle-top zone, take risk off.')
 
   return (
-    <QCard
+    <ExpandableQCard
       question="Where are we in the macro cycle?"
       interpretation={interp}
       ariaSummary={`Mayer Multiple ${mayer.toFixed(2)}, zone ${zone}`}
-    >
-      <StatHeader tone={tone} value={mayer.toFixed(2)} label={`Mayer · ${zone}`} hint="log price · 200DMA (violet) · 111DMAx2 (green) · 350DMA (red)" />
-      <div ref={containerRef} className="fund-well h-[240px] w-full overflow-hidden" />
-    </QCard>
+      statHeader={<StatHeader tone={tone} value={mayer.toFixed(2)} label={`Mayer · ${zone}`} hint="log price · 200DMA (violet) · 111×2 (green) · 350DMA (red)" />}
+      setupChart={setupChart}
+      inlineHeight={240}
+    />
   )
 }
 
 // ─── Smart-money positioning card ────────────────────────────────────────────
 
 function SmartMoneyCard({ sm }: { sm: SmartMoneyResult }) {
-  const lsRef = useRef<HTMLDivElement>(null)
-  const prRef = useRef<HTMLDivElement>(null)
+  const inlineLsRef = useRef<HTMLDivElement>(null)
+  const inlinePrRef = useRef<HTMLDivElement>(null)
+  const modalLsRef = useRef<HTMLDivElement>(null)
+  const modalPrRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const [open, setOpen] = useState(false)
+
   const lsCurrent = sm.longShort.current
   const prCurrent = sm.premium.current
   const lsTone: Tone =
@@ -765,29 +1077,60 @@ function SmartMoneyCard({ sm }: { sm: SmartMoneyResult }) {
   const lsTC = toneClasses[lsTone]
   const prTC = toneClasses[prTone]
 
-  useEffect(() => {
-    const lel = lsRef.current; const pel = prRef.current
-    if (!lel || !pel) return
-    const lChart = makeChart(lel)
-    const lSer = lChart.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1 })
-    lSer.setData(sm.longShort.history.map((p) => ({ time: t(p.time), value: p.ratio })))
-    // Reference line at 1.0
-    const lRef = lChart.addSeries(LineSeries, { color: '#5b6478', lineWidth: 1, lineStyle: LineStyle.Dashed })
-    lRef.setData(sm.longShort.history.map((p) => ({ time: t(p.time), value: 1 })))
+  const setupLs = useCallback((el: HTMLElement) => {
+    const chart = makeChart(el)
+    const series = chart.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1 })
+    series.setData(sm.longShort.history.map((p) => ({ time: t(p.time), value: p.ratio })))
+    const ref = chart.addSeries(LineSeries, { color: '#5b6478', lineWidth: 1, lineStyle: LineStyle.Dashed })
+    ref.setData(sm.longShort.history.map((p) => ({ time: t(p.time), value: 1 })))
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const p = nearest(sm.longShort.history, time)
+      if (!p) return null
+      const reading = p.ratio > 1.6 ? 'crowded long'
+        : p.ratio > 1.2 ? 'lean long'
+        : p.ratio > 0.8 ? 'balanced'
+        : 'lean short'
+      return tipRow('Time', fmtDateTime(p.time)) +
+             tipRow('L/S',  p.ratio.toFixed(3), '#60a5fa') +
+             tipRow('Reading', reading)
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
+  }, [sm])
 
-    const pChart = makeChart(pel)
-    const pSer = pChart.addSeries(AreaSeries, {
+  const setupPr = useCallback((el: HTMLElement) => {
+    const chart = makeChart(el)
+    const series = chart.addSeries(AreaSeries, {
       lineColor: 'rgba(34,197,94,0.9)',
       topColor: 'rgba(34,197,94,0.30)', bottomColor: 'rgba(239,68,68,0.10)',
     })
-    pSer.setData(sm.premium.history.map((p) => ({ time: t(p.time), value: p.pct })))
-    const pRef = pChart.addSeries(LineSeries, { color: '#5b6478', lineWidth: 1, lineStyle: LineStyle.Dashed })
-    pRef.setData(sm.premium.history.map((p) => ({ time: t(p.time), value: 0 })))
-
-    const cleanupL = attachReflow(lChart, lel)
-    const cleanupP = attachReflow(pChart, pel)
-    return () => { cleanupL(); cleanupP() }
+    series.setData(sm.premium.history.map((p) => ({ time: t(p.time), value: p.pct })))
+    const ref = chart.addSeries(LineSeries, { color: '#5b6478', lineWidth: 1, lineStyle: LineStyle.Dashed })
+    ref.setData(sm.premium.history.map((p) => ({ time: t(p.time), value: 0 })))
+    const detachTip = attachTooltip(el, chart, (param) => {
+      const time = Number(param.time)
+      const p = nearest(sm.premium.history, time)
+      if (!p) return null
+      const dir = p.pct >= 0.05 ? 'US bidding up' : p.pct <= -0.05 ? 'US discount / Asia-led' : 'flat'
+      return tipRow('Date', fmtDate(p.time)) +
+             tipRow('Premium', `${p.pct >= 0 ? '+' : ''}${p.pct.toFixed(2)}%`, '#22c55e') +
+             tipRow('Reading', dir)
+    })
+    const detachReflow = attachReflow(chart, el)
+    return () => { detachTip(); detachReflow() }
   }, [sm])
+
+  useEffect(() => { if (inlineLsRef.current) return setupLs(inlineLsRef.current) }, [setupLs])
+  useEffect(() => { if (inlinePrRef.current) return setupPr(inlinePrRef.current) }, [setupPr])
+  useEffect(() => { if (open && modalLsRef.current) return setupLs(modalLsRef.current) }, [open, setupLs])
+  useEffect(() => { if (open && modalPrRef.current) return setupPr(modalPrRef.current) }, [open, setupPr])
+  useEffect(() => {
+    const d = dialogRef.current
+    if (!d) return
+    if (open && !d.open) d.showModal()
+    if (!open && d.open) d.close()
+  }, [open])
 
   const lsLabel =
     lsCurrent > 1.6 ? 'top traders crowded long' :
@@ -803,32 +1146,69 @@ function SmartMoneyCard({ sm }: { sm: SmartMoneyResult }) {
 
   const interp = `Top-trader L/S ratio at ${lsCurrent.toFixed(2)} (${lsLabel}). Coinbase Premium at ${prCurrent.toFixed(2)}% — ${prLabel}.`
 
+  const statHeader = (
+    <div className="fund-stat-row flex flex-wrap items-center gap-2">
+      <div className={`inline-flex items-baseline gap-2 rounded-lg border ${lsTC.ring} ${lsTC.bg} px-3 py-1.5`}>
+        <span className={`fund-num font-mono text-base font-semibold ${lsTC.text}`}>{lsCurrent.toFixed(2)}</span>
+        <span className={`text-[10px] font-semibold uppercase tracking-wider ${lsTC.text}`}>Top L/S</span>
+      </div>
+      <div className={`inline-flex items-baseline gap-2 rounded-lg border ${prTC.ring} ${prTC.bg} px-3 py-1.5`}>
+        <span className={`fund-num font-mono text-base font-semibold ${prTC.text}`}>{prCurrent >= 0 ? '+' : ''}{prCurrent.toFixed(2)}%</span>
+        <span className={`text-[10px] font-semibold uppercase tracking-wider ${prTC.text}`}>CB Premium</span>
+      </div>
+      <span className="fund-stat-hint text-[10px] text-dim">Binance top accts · Coinbase vs Binance spot</span>
+    </div>
+  )
+
   return (
-    <QCard
-      question="Where is the smart money positioned?"
-      interpretation={interp}
-      ariaSummary={`Long short ratio ${lsCurrent.toFixed(2)}, Coinbase premium ${prCurrent.toFixed(2)} percent`}
-    >
-      <div className="fund-stat-row flex flex-wrap items-center gap-2">
-        <div className={`inline-flex items-baseline gap-2 rounded-lg border ${lsTC.ring} ${lsTC.bg} px-3 py-1.5`}>
-          <span className={`fund-num font-mono text-base font-semibold ${lsTC.text}`}>{lsCurrent.toFixed(2)}</span>
-          <span className={`text-[10px] font-semibold uppercase tracking-wider ${lsTC.text}`}>Top L/S</span>
+    <>
+      <article
+        aria-label={`Long short ratio ${lsCurrent.toFixed(2)}, Coinbase premium ${prCurrent.toFixed(2)} percent`}
+        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70"
+      >
+        <h2 className="text-[13px] font-semibold tracking-tight text-text">Where is the smart money positioned?</h2>
+        {statHeader}
+        <div className="relative">
+          <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Top-trader long/short ratio</p>
+          <div ref={inlineLsRef} className="fund-well h-[100px] w-full overflow-hidden" />
+          <button type="button" onClick={() => setOpen(true)} aria-label="Expand charts" className="chart-expand-btn" style={{ top: 22 }}>
+            <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </div>
-        <div className={`inline-flex items-baseline gap-2 rounded-lg border ${prTC.ring} ${prTC.bg} px-3 py-1.5`}>
-          <span className={`fund-num font-mono text-base font-semibold ${prTC.text}`}>{prCurrent >= 0 ? '+' : ''}{prCurrent.toFixed(2)}%</span>
-          <span className={`text-[10px] font-semibold uppercase tracking-wider ${prTC.text}`}>CB Premium</span>
+        <div>
+          <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Coinbase premium gap (%)</p>
+          <div ref={inlinePrRef} className="fund-well h-[100px] w-full overflow-hidden" />
         </div>
-        <span className="fund-stat-hint text-[10px] text-dim">Binance top accts · Coinbase vs Binance spot</span>
-      </div>
-      <div>
-        <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Top-trader long/short ratio</p>
-        <div ref={lsRef} className="fund-well h-[100px] w-full overflow-hidden" />
-      </div>
-      <div>
-        <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Coinbase premium gap (%)</p>
-        <div ref={prRef} className="fund-well h-[100px] w-full overflow-hidden" />
-      </div>
-    </QCard>
+        <p className="text-[11px] leading-relaxed text-muted"><span className="text-dim">→ </span>{interp}</p>
+      </article>
+
+      <dialog ref={dialogRef} className="chart-modal" aria-label="Smart money detail" onClose={() => setOpen(false)} onClick={(e) => { if (e.target === dialogRef.current) setOpen(false) }}>
+        <div className="flex flex-col gap-4 p-5">
+          <header className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-2">
+              <h2 className="text-base font-semibold text-text">Where is the smart money positioned?</h2>
+              {statHeader}
+            </div>
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="chart-expand-btn !relative !top-0 !right-0">
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </header>
+          {open && (
+            <>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Top-trader long/short ratio</p>
+                <div ref={modalLsRef} className="fund-well w-full overflow-hidden" style={{ height: '32vh' }} />
+              </div>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-dim">Coinbase premium gap (%)</p>
+                <div ref={modalPrRef} className="fund-well w-full overflow-hidden" style={{ height: '32vh' }} />
+              </div>
+            </>
+          )}
+          <p className="text-xs leading-relaxed text-muted"><span className="text-dim">→ </span>{interp}</p>
+        </div>
+      </dialog>
+    </>
   )
 }
 

@@ -1434,3 +1434,63 @@ positioning, and breadth — each presented as a question the card answers.
   certain regions; same risk profile as the existing funding/OI endpoints.
 - CoinMetrics community MVRV and now Coinbase Exchange API are both rate-limited — our cache
   TTLs (6h MVRV, 5m smart-money) stay well under the limits.
+
+---
+
+## 2026-05-25 — Fundamentals: chart tooltips + expand-to-modal
+
+### What changed
+- Every chart now has a **hover tooltip** anchored in the top-left corner of the
+  chart area, showing the values for each series at the hovered timestamp.
+- Every chart card now has a **maximize button** in the top-right that opens a
+  native `<dialog>` rendering the same chart at 70vh height. ESC and backdrop
+  click close it; focus is trapped natively.
+
+### Tooltip content per chart
+- **Fear & Greed**: Date · F&G value · Mood classification
+- **MVRV**: Date · MVRV · ± vs long-term mean · Zone
+- **Wyckoff Regime**: Date · O H L C · EMA50 · EMA200
+- **Funding rate**: Time · % per 8h · Annualized APR
+- **Open Interest**: Time · $B · Δ vs previous bar
+- **Volatility**: Date · 30D RV · 7D RV · ATR% · Zone
+- **Cycle (price + 200/111×2/350)**: Date · BTC · 200DMA · Mayer · 111×2 · 350DMA · Pi gap
+- **Top-trader L/S**: Time · Ratio · Reading (crowded long/balanced/lean short)
+- **Coinbase Premium**: Date · Premium % · Reading (US bidding / Asia-led / flat)
+
+Dominance card stays as bars — no chart, no tooltip (bars already show exact %).
+
+### Implementation
+- New `attachTooltip(el, chart, formatter)` helper in `FundamentalsPage.tsx`
+  creates an absolutely-positioned `.chart-tooltip` div inside the chart
+  container and subscribes to `subscribeCrosshairMove`. The formatter receives
+  the LWC param and returns the tooltip HTML (or null to hide). Returns a
+  cleanup that unsubscribes and removes the DOM node.
+- Each card extracts its chart-building logic into a `setupChart(el)` callback
+  via `useCallback`. The same setup runs once for the inline chart and again
+  inside the dialog when opened — two independent LWC instances share the
+  same data + tooltip behaviour with zero duplication.
+- New `<ExpandableQCard>` component handles the inline+modal pattern for
+  single-chart cards (Fng/MVRV/Regime/Vol/Cycle). Multi-chart cards
+  (FundingOi + SmartMoney) inline their own dialog because they have two
+  charts in the body that both need to render twice.
+- Tooltip uses `nearest(history, time)` binary search to find the closest
+  data point — works on every series shape we have.
+
+### Decisions worth remembering
+- Used the **native `<dialog>`** element instead of a portal modal. ESC, focus
+  trap, scroll lock, `::backdrop` all come for free. Wired via
+  `dialog.showModal()` / `dialog.close()` in a side-effect that mirrors the
+  `open` React state.
+- Tooltips are **anchored top-left** (not cursor-following). Less jittery,
+  doesn't occlude what the user is hovering, and matches the dashboard
+  aesthetic. Trade-off: slightly less precise about which bar the readings
+  correspond to, but the date row makes that explicit.
+- `reduced-motion` already disables the tooltip's opacity transition via the
+  global rule in `index.css`.
+
+### Gotchas
+- LWC v5 `subscribeCrosshairMove` types are a bit awkward — cast through
+  `unknown as CrosshairSubscribe` for both subscribe and unsubscribe.
+- The dialog's modal chart needs `if (open && ref.current)` in the effect so
+  the setup only runs after the dialog is actually mounted; otherwise the
+  container is `null` on the first open.
