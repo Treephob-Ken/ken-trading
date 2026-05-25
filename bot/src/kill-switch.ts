@@ -23,6 +23,12 @@ const DATA_DIR = join(__dirname, '..', 'data')
 
 const POLL_MS = 30_000
 
+// EnvConfig stores network as `isTestnet`. Convert to the snapshot tag.
+function netFromCreds(creds: EnvConfig | null): 'testnet' | 'mainnet' | undefined {
+  if (!creds) return undefined
+  return creds.isTestnet ? 'testnet' : 'mainnet'
+}
+
 export interface KillSwitchState {
   // Reference equity for today (UTC). Snapshot is re-taken at the first poll
   // of each new UTC day (unless tripped — then the snapshot is frozen until unlock).
@@ -34,6 +40,11 @@ export interface KillSwitchState {
   trippedAt: number | null
   trippedAtEquity: number | null
   reason: string | null
+  // Network the snapshot was taken on. Testnet and mainnet have wildly
+  // different equity, so comparing across them produces phantom drawdowns
+  // (e.g. testnet $1100 → mainnet $5 = -99% trip). When the stored network
+  // doesn't match the current one, the state is treated as fresh.
+  network?: 'testnet' | 'mainnet'
 }
 
 function statePath(userId: string): string {
@@ -45,20 +56,36 @@ function ensureDir(userId: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 
-export function readState(userId: string): KillSwitchState {
+function freshState(network?: 'testnet' | 'mainnet'): KillSwitchState {
+  return {
+    snapshotEquity: null,
+    snapshotAt: 0,
+    currentEquity: null,
+    drawdownPct: 0,
+    tripped: false,
+    trippedAt: null,
+    trippedAtEquity: null,
+    reason: null,
+    network,
+  }
+}
+
+// Reads the persisted state. If `currentNetwork` is provided AND the stored
+// network differs, the snapshot is dropped — preventing cross-network phantom
+// drawdowns. Untagged legacy state (no `network` field) is accepted to keep
+// existing users unaffected on first read after deploy.
+export function readState(
+  userId: string,
+  currentNetwork?: 'testnet' | 'mainnet',
+): KillSwitchState {
   try {
-    return JSON.parse(readFileSync(statePath(userId), 'utf8')) as KillSwitchState
-  } catch {
-    return {
-      snapshotEquity: null,
-      snapshotAt: 0,
-      currentEquity: null,
-      drawdownPct: 0,
-      tripped: false,
-      trippedAt: null,
-      trippedAtEquity: null,
-      reason: null,
+    const raw = JSON.parse(readFileSync(statePath(userId), 'utf8')) as KillSwitchState
+    if (currentNetwork && raw.network && raw.network !== currentNetwork) {
+      return freshState(currentNetwork)
     }
+    return raw
+  } catch {
+    return freshState(currentNetwork)
   }
 }
 
@@ -99,9 +126,24 @@ export async function unlock(
     trippedAt: null,
     trippedAtEquity: null,
     reason: null,
+    network: netFromCreds(creds),
   }
   writeState(userId, fresh)
   log.ok(`Kill switch unlocked for user ${userId}`)
+  return fresh
+}
+
+// Called when the user switches HL network (testnet ↔ mainnet). Drops the
+// existing snapshot + tripped flag and rewrites with the new network tag, so
+// the next watcher tick takes a fresh snapshot on the new network instead of
+// computing drawdown against the old network's equity.
+export function resetForNetworkChange(
+  userId: string,
+  newNetwork: 'testnet' | 'mainnet',
+): KillSwitchState {
+  const fresh = freshState(newNetwork)
+  writeState(userId, fresh)
+  log.info(`Kill switch reset for user ${userId.slice(0, 8)} — network now ${newNetwork}`)
   return fresh
 }
 
@@ -137,25 +179,27 @@ export function startKillSwitchWatcher(userId: string, hooks: KillSwitchHooks): 
     if (!cfg.enabled) return
     const creds = hooks.credsProvider()
     if (!creds) return
-    const state = readState(userId)
+    // Pass currentNetwork so stale cross-network state is dropped on read.
+    const currentNet = netFromCreds(creds)
+    const state = readState(userId, currentNet)
     const equity = await safeEquity(creds)
     if (equity === null) return
     const now = Date.now()
 
     // Take or refresh the daily snapshot.
     if (state.snapshotEquity === null || state.snapshotAt === 0) {
-      writeState(userId, { ...state, snapshotEquity: equity, snapshotAt: now, currentEquity: equity, drawdownPct: 0 })
-      log.info(`Kill switch [${userId.slice(0, 8)}]: snapshot set at $${equity.toFixed(2)}`)
+      writeState(userId, { ...state, snapshotEquity: equity, snapshotAt: now, currentEquity: equity, drawdownPct: 0, network: currentNet })
+      log.info(`Kill switch [${userId.slice(0, 8)}]: snapshot set at $${equity.toFixed(2)} (${currentNet})`)
       return
     }
     if (!state.tripped && utcDay(now) !== utcDay(state.snapshotAt)) {
-      writeState(userId, { ...state, snapshotEquity: equity, snapshotAt: now, currentEquity: equity, drawdownPct: 0 })
-      log.info(`Kill switch [${userId.slice(0, 8)}]: daily snapshot reset at $${equity.toFixed(2)}`)
+      writeState(userId, { ...state, snapshotEquity: equity, snapshotAt: now, currentEquity: equity, drawdownPct: 0, network: currentNet })
+      log.info(`Kill switch [${userId.slice(0, 8)}]: daily snapshot reset at $${equity.toFixed(2)} (${currentNet})`)
       return
     }
 
     const dd = state.snapshotEquity > 0 ? ((equity - state.snapshotEquity) / state.snapshotEquity) * 100 : 0
-    const next: KillSwitchState = { ...state, currentEquity: equity, drawdownPct: dd }
+    const next: KillSwitchState = { ...state, currentEquity: equity, drawdownPct: dd, network: currentNet }
 
     if (!state.tripped && dd <= -cfg.pct) {
       next.tripped = true

@@ -60,6 +60,7 @@ import {
 import {
   getKillSwitchStatus,
   isTripped,
+  resetForNetworkChange as resetKillSwitchForNetworkChange,
   startKillSwitchWatcher,
   unlock as unlockKillSwitch,
 } from './kill-switch.js'
@@ -410,15 +411,28 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
     }
 
     // 3) Persist + propagate to running bots.
+    // Detect network change BEFORE writing so we can reset network-tagged state.
+    const prevUser = findUserById(uid)
+    const networkChanged = !!prevUser && prevUser.hlNetwork !== network
     saveHLCredentials(uid, agentKeyRaw, hlUser, network)
     evictClientCache(hlUser)
     const newCreds = (() => { try { return loadUserCreds(uid) } catch { return null } })()
     if (newCreds) {
       for (const sum of listSignalBots(uid)) {
-        try { getSignalBot(sum.id, uid).updateCreds(newCreds) } catch { /* best effort */ }
+        try {
+          const bot = getSignalBot(sum.id, uid)
+          bot.updateCreds(newCreds)
+          // Account values (kill-switch snapshot, daily-PnL baseline) are
+          // network-specific. Drop them so the bot re-snapshots on the new
+          // network instead of comparing testnet equity against mainnet.
+          if (networkChanged) bot.resetDailyBaseline()
+        } catch { /* best effort */ }
       }
     }
-    log.ok(`User ${req.user!.email} updated HL credentials${derivedAgent ? ` (agent ${derivedAgent.slice(0, 10)}…)` : ' (address/network only)'}`)
+    if (networkChanged) {
+      resetKillSwitchForNetworkChange(uid, network)
+    }
+    log.ok(`User ${req.user!.email} updated HL credentials${derivedAgent ? ` (agent ${derivedAgent.slice(0, 10)}…)` : ' (address/network only)'}${networkChanged ? ` — network changed to ${network}, account-value baselines reset` : ''}`)
     res.json({ ok: true, derivedAgent })
   } catch (e) {
     res.status(400).json({ error: (e as Error).message })

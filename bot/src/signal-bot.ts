@@ -380,6 +380,16 @@ class SignalBot {
     this.creds = creds
   }
 
+  // Forget today's equity baseline. Called when the user switches HL network
+  // — the old baseline was taken on a different account, so re-snapshot at
+  // the next poll instead of computing daily PnL against the wrong reference.
+  resetDailyBaseline(): void {
+    this.dailyDate = ''
+    this.dailyStartEquity = null
+    this.dailyPaused = false
+    this.dailyPnlPct = null
+  }
+
   start(): void {
     if (this.running) return
     this.running = true
