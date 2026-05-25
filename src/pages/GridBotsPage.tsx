@@ -20,6 +20,7 @@ import { apiFetch } from '@/contexts/AuthContext'
 import { useHLAssets } from '@/lib/hlAssets'
 import { fetchKlines } from '@/lib/binance'
 import LiveBotHeader from '@/components/LiveBotHeader'
+import GridActivityCard from '@/components/gridbot/GridActivityCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ interface GridConfig {
 }
 
 interface GridStats {
+  asset: string
   currentPrice: number; realizedPnl: number; roundtrips: number; unrealizedPnl: number
   netPosition: number; totalPnl: number; aprPct: number; openOrders: number; fills: number
   feesPaid: number; orderSize: number; effectiveBudget: number; state: string | null
@@ -43,6 +45,14 @@ interface GridStats {
   slArmedOnExchange?: boolean; tpArmedOnExchange?: boolean
   liquidationPrice?: number; liquidationDistancePct?: number; leverage: number
   slUnreachable?: boolean
+  // Activity diagnostics (added with GridActivityCard)
+  lastFillAt?: number | null
+  lastRoundtripAt?: number | null
+  fillsPerHour?: number
+  roundtripsPerHour?: number
+  gridPositionPct?: number | null
+  nearestLineIdx?: number | null
+  distanceToNearestLinePct?: number | null
 }
 
 interface LogLine { ts: string; level: string; msg: string; botId?: string }
@@ -794,6 +804,26 @@ export default function GridBotsPage() {
           </div>
         )}
 
+        {/* Activity diagnostics — answers "is this grid working hard enough?" */}
+        {stats && cfg?.asset && (
+          <GridActivityCard stats={{
+            asset: cfg.asset,
+            startedAt: stats.startedAt,
+            state: stats.state ?? 'init',
+            currentPrice: stats.currentPrice,
+            fills: stats.fills,
+            roundtrips: stats.roundtrips,
+            lines: stats.lines ?? [],
+            lastFillAt: stats.lastFillAt,
+            lastRoundtripAt: stats.lastRoundtripAt,
+            fillsPerHour: stats.fillsPerHour,
+            roundtripsPerHour: stats.roundtripsPerHour,
+            gridPositionPct: stats.gridPositionPct,
+            nearestLineIdx: stats.nearestLineIdx,
+            distanceToNearestLinePct: stats.distanceToNearestLinePct,
+          }} />
+        )}
+
         {/* Safety panel */}
         {stats && (
           <div className="card p-4">
@@ -861,11 +891,17 @@ export default function GridBotsPage() {
           </div>
         )}
 
-        {/* Activity log */}
+        {/* Activity log — collapsed by default. Useful for debugging but not at-a-glance. */}
         {logs.length > 0 && (
-          <div className="card p-4">
-            <h3 className="mb-3 text-sm font-semibold text-text">Activity Log</h3>
-            <div className="h-52 overflow-y-auto rounded-xl border border-border bg-bg p-3 font-mono text-[10px] leading-relaxed">
+          <details className="card p-4 group">
+            <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-text">
+              <span className="flex items-center gap-2">
+                <span className="text-dim transition-transform group-open:rotate-90">▶</span>
+                Activity log
+              </span>
+              <span className="font-mono text-[11px] font-normal text-dim tabular-nums">{logs.length} lines</span>
+            </summary>
+            <div className="mt-3 h-52 overflow-y-auto rounded-xl border border-border bg-bg p-3 font-mono text-[10px] leading-relaxed">
               {[...logs].reverse().slice(0, 200).map((l, i) => (
                 <div key={i} className="mb-1 last:mb-0 break-words">
                   <span className="text-dim">[{l.ts.slice(11, 19)}]</span>{' '}
@@ -878,7 +914,7 @@ export default function GridBotsPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </details>
         )}
 
         {/* Empty state */}

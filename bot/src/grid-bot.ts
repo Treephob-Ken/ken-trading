@@ -60,6 +60,14 @@ export interface BotStats {
   // True when SL is BEYOND the liquidation distance — i.e. exchange would
   // liquidate before SL ever fires. Most common at high leverage.
   slUnreachable: boolean
+  // Activity diagnostics — let the UI answer "is this grid working hard enough?"
+  lastFillAt: number | null            // ms epoch of most recent fill, null if none yet
+  lastRoundtripAt: number | null       // ms epoch of most recent roundtrip
+  fillsPerHour: number                 // rolling rate over last 1h (or scaled-up for younger bots)
+  roundtripsPerHour: number            // rolling rate over last 1h
+  gridPositionPct: number | null       // where price sits in [lower, upper] as 0-100%; null if outside or no price yet
+  nearestLineIdx: number | null        // index of the grid line closest to current price
+  distanceToNearestLinePct: number | null  // % distance from price to that nearest line
 }
 
 // Live grid bot. Strategy: at every grid LINE we keep exactly one resting
@@ -86,6 +94,10 @@ export class GridBot {
   private totalFills = 0
   private completedRoundtrips = 0
   private netPosition = 0
+  // Rolling fill/roundtrip timestamps (ms) — capped so memory stays bounded.
+  // Used to compute fills-per-hour and roundtrips-per-hour for the UI.
+  private fillTimes: number[] = []
+  private roundtripTimes: number[] = []
 
   private currentPrice = 0
   private startedAt = 0
@@ -440,6 +452,14 @@ export class GridBot {
     this.realizedPnl += closedPnl
     if (closedPnl !== 0) this.completedRoundtrips++
 
+    const nowMs = Date.now()
+    this.fillTimes.push(nowMs)
+    if (this.fillTimes.length > 500) this.fillTimes.shift()
+    if (closedPnl !== 0) {
+      this.roundtripTimes.push(nowMs)
+      if (this.roundtripTimes.length > 500) this.roundtripTimes.shift()
+    }
+
     if (tracked.side === 'buy') this.netPosition += size
     else this.netPosition -= size
 
@@ -517,6 +537,44 @@ export class GridBot {
       this.netPosition > 0 &&
       liquidationPrice > sl
 
+    // ── Activity diagnostics ────────────────────────────────────────────────
+    const nowMs = Date.now()
+    const oneHourMs = 3_600_000
+    const lookbackMs = Math.min(oneHourMs, runtimeMs || oneHourMs)
+    const cutoff = nowMs - lookbackMs
+    const recentFills = this.fillTimes.filter((t) => t >= cutoff).length
+    const recentRoundtrips = this.roundtripTimes.filter((t) => t >= cutoff).length
+    // Normalize to an hourly rate even if we only have a few minutes of data.
+    const scale = lookbackMs > 0 ? oneHourMs / lookbackMs : 0
+    const fillsPerHour = recentFills * scale
+    const roundtripsPerHour = recentRoundtrips * scale
+
+    const lastFillAt = this.fillTimes.length > 0 ? this.fillTimes[this.fillTimes.length - 1] : null
+    const lastRoundtripAt = this.roundtripTimes.length > 0
+      ? this.roundtripTimes[this.roundtripTimes.length - 1]
+      : null
+
+    // Grid position — where price sits between the configured lower and upper.
+    let gridPositionPct: number | null = null
+    if (px > 0 && this.cfg.upper > this.cfg.lower) {
+      const raw = ((px - this.cfg.lower) / (this.cfg.upper - this.cfg.lower)) * 100
+      gridPositionPct = Math.max(0, Math.min(100, raw))
+    }
+
+    // Nearest grid line to current price — useful "next fill is X% away" hint.
+    let nearestLineIdx: number | null = null
+    let distanceToNearestLinePct: number | null = null
+    if (px > 0 && this.lines.length > 0) {
+      let best = 0
+      let bestDist = Math.abs(this.lines[0] - px)
+      for (let i = 1; i < this.lines.length; i++) {
+        const d = Math.abs(this.lines[i] - px)
+        if (d < bestDist) { best = i; bestDist = d }
+      }
+      nearestLineIdx = best
+      distanceToNearestLinePct = (bestDist / px) * 100
+    }
+
     return {
       asset: this.cfg.asset,
       startedAt: this.startedAt,
@@ -545,6 +603,13 @@ export class GridBot {
       liquidationPrice,
       liquidationDistancePct,
       slUnreachable,
+      lastFillAt,
+      lastRoundtripAt,
+      fillsPerHour,
+      roundtripsPerHour,
+      gridPositionPct,
+      nearestLineIdx,
+      distanceToNearestLinePct,
     }
   }
 
