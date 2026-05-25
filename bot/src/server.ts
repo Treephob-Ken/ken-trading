@@ -8,6 +8,7 @@ import {
   deleteConfig,
   listConfigs,
   loadConfig,
+  loadConfigUnsafe,
   loadEnv,
   saveConfig,
   type EnvConfig,
@@ -429,7 +430,11 @@ app.get('/api/bots', requireAuth, (req: Request, res: Response) => {
 
 app.get('/api/bots/:id/config', requireAuth, (req: Request, res: Response) => {
   try {
-    res.json(loadConfig(req.params.id, userId(req)))
+    // Use the unsafe variant so a corrupted config (missing/invalid lower or
+    // upper) still loads into the form and the user can fix it. The strict
+    // loadConfig is still used by /start and /save so a bad config can't be
+    // run, just edited.
+    res.json(loadConfigUnsafe(req.params.id, userId(req)))
   } catch (e) {
     res.status(404).json({ error: (e as Error).message })
   }

@@ -761,13 +761,43 @@ export default function GridBotsPage() {
           <div className={`card flex flex-wrap items-center justify-between gap-3 p-3 text-xs ${notice.ok ? 'border-gain/30 bg-gain/5 text-gain' : 'border-loss/30 bg-loss/5 text-loss'}`}>
             <span>{notice.text}</span>
             {!notice.ok && selectedId && !isNew && (
-              <button
-                type="button"
-                onClick={() => { setNotice(null); void loadBot(selectedId) }}
-                className="rounded-md border border-loss/40 bg-loss/10 px-2.5 py-1 text-[11px] font-semibold text-loss hover:bg-loss/20"
-              >
-                Retry
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setNotice(null); void loadBot(selectedId) }}
+                  className="rounded-md border border-loss/40 bg-loss/10 px-2.5 py-1 text-[11px] font-semibold text-loss hover:bg-loss/20"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // Escape hatch for stranded bots — config file corrupted
+                    // beyond what loadConfigUnsafe can salvage, server bug, etc.
+                    // Confirms first because this is destructive.
+                    if (!confirm(`Delete this bot config permanently? This cannot be undone.`)) return
+                    try {
+                      const res = await apiFetch(`/api/bots/${selectedId}`, { method: 'DELETE' })
+                      if (!res.ok) {
+                        const text = await res.text().catch(() => '')
+                        setNotice({ text: `Delete failed (${res.status}): ${text || 'no response body'}`, ok: false })
+                        return
+                      }
+                      // Refresh the list and clear selection so the user lands on a clean state.
+                      setSelectedId(null); setCfg(null); setStats(null); setLogs([])
+                      setNotice({ text: 'Bot deleted.', ok: true })
+                      const listRes = await apiFetch('/api/bots')
+                      if (listRes.ok) setBots(await listRes.json())
+                    } catch (e) {
+                      setNotice({ text: `Delete failed: ${(e as Error).message}`, ok: false })
+                    }
+                  }}
+                  className="rounded-md border border-loss/60 bg-loss/20 px-2.5 py-1 text-[11px] font-semibold text-loss hover:bg-loss/30"
+                  title="Permanently delete this bot's saved config"
+                >
+                  Delete bot
+                </button>
+              </div>
             )}
           </div>
         )}

@@ -145,6 +145,18 @@ export function loadConfig(id: string, userId?: string): GridConfig {
   return cfg
 }
 
+// Same as loadConfig but skips validation. Used by the dashboard's GET
+// /api/bots/:id/config so a corrupted config (e.g. lower=null) can still be
+// surfaced in the form and fixed by the user — instead of stranding them
+// with a 404 they can't recover from. Start/save endpoints continue to use
+// the strict loadConfig so an invalid config can never be run.
+export function loadConfigUnsafe(id: string, userId?: string): GridConfig {
+  const dir = configsDirForUser(userId)
+  const cfg = JSON.parse(readFileSync(configPath(id, dir), 'utf8')) as GridConfig
+  cfg.id = id
+  return cfg
+}
+
 export function saveConfig(cfg: GridConfig, existingId?: string, userId?: string): GridConfig {
   validateConfig(cfg)
   const dir = configsDirForUser(userId)
