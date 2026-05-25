@@ -35,13 +35,20 @@ export default function SymbolSearch({ value, symbols, onChange }: Props) {
     setQuery('')
   }
 
+  // The Backtester stores the raw Binance symbol (e.g. ETHUSDT) so candles can
+  // be fetched, but the user sees Hyperliquid's settlement currency (USDC).
+  // Render the formatted pair in the closed input; fall back to the raw value
+  // if we don't have a SymbolInfo match yet (e.g. before the asset list loads).
+  const selected = symbols.find((s) => s.symbol === value)
+  const displayValue = selected ? `${selected.base}/${selected.quote}` : value
+
   return (
     <div ref={wrapRef} className="relative">
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-dim" />
         <input
           className="field pl-8"
-          value={open ? query : value}
+          value={open ? query : displayValue}
           placeholder={symbols.length ? 'Search any pair…' : 'Loading pairs…'}
           onFocus={() => setOpen(true)}
           onChange={(e) => {
@@ -70,7 +77,7 @@ export default function SymbolSearch({ value, symbols, onChange }: Props) {
                   {s.base}
                   <span className="text-dim">/{s.quote}</span>
                 </span>
-                <span className="font-mono text-[11px] text-dim">{s.symbol}</span>
+                <span className="font-mono text-[11px] text-dim">{s.base}</span>
               </button>
             ))
           )}
