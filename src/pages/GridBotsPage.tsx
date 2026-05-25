@@ -374,9 +374,23 @@ export default function GridBotsPage() {
         setCfg(c)
         setDirty(false)
         fetchAssetInfo(c.asset)
+      } else {
+        // Surface the error so the user isn't staring at an empty right pane
+        // wondering why nothing loaded. Common causes: stale bot id (404),
+        // expired session (401), or a backend hiccup (5xx).
+        const text = await cfgRes.text().catch(() => '')
+        setNotice({
+          text: `Couldn't load bot config (${cfgRes.status}): ${text || 'no response body'}. Click the bot again to retry.`,
+          ok: false,
+        })
       }
       if (logRes.ok) setLogs(await logRes.json())
-    } catch { /* server may be restarting */ }
+    } catch (e) {
+      setNotice({
+        text: `Couldn't reach the bot server: ${(e as Error).message}. Click the bot again to retry.`,
+        ok: false,
+      })
+    }
   }, [fetchAssetInfo])
 
   const refresh = useCallback(async () => {
@@ -741,6 +755,27 @@ export default function GridBotsPage() {
         {notice && (
           <div className={`card p-3 text-xs ${notice.ok ? 'border-gain/30 bg-gain/5 text-gain' : 'border-loss/30 bg-loss/5 text-loss'}`}>
             {notice.text}
+          </div>
+        )}
+
+        {/* Loading placeholder — selected a bot but config isn't loaded yet.
+            Without this, the right pane was completely empty during the fetch
+            (or forever, if the fetch silently failed). */}
+        {selectedId && !isNew && !cfg && !notice && (
+          <div className="card flex items-center gap-3 p-4 animate-pulse">
+            <Activity className="h-5 w-5 shrink-0 text-dim" />
+            <div className="text-sm text-dim">Loading bot config…</div>
+          </div>
+        )}
+
+        {/* Config missing required range fields — explain instead of hiding silently. */}
+        {cfg && (!cfg.asset || !cfg.lower || !cfg.upper || !cfg.gridCount) && (
+          <div className="card flex items-center gap-3 p-4">
+            <Activity className="h-5 w-5 shrink-0 text-warn" />
+            <div className="text-sm text-text">
+              This bot's config is missing one of: asset, lower bound, upper bound, or grid count.
+              Fill in the form on the left and save to enable the chart.
+            </div>
           </div>
         )}
 
