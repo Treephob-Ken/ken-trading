@@ -715,9 +715,33 @@ app.get('/api/positions/:asset/brackets', requireAuth, async (req: Request, res:
 //
 // Returns { [asset]: SourceInfo[] }. An asset can have multiple sources when
 // two bots are configured for the same asset (e.g. signal + grid).
-app.get('/api/positions/sources', requireAuth, (req: Request, res: Response) => {
+//
+// Each source is annotated with `stranded: true` when the bot is stopped
+// but an open position exists on the exchange for that asset. When stranded,
+// a `position` summary is included so the UI can render a banner with
+// Resume / Close actions without a second HL roundtrip.
+app.get('/api/positions/sources', requireAuth, async (req: Request, res: Response) => {
   const uid = userId(req)
-  const sources: Record<string, Array<{ kind: 'signal' | 'grid'; botId: string; botName: string; running: boolean; strategyId?: string; gridCount?: number }>> = {}
+
+  interface PositionSummary {
+    side: 'long' | 'short'
+    size: number
+    entryPx: number | null
+    unrealizedPnl: number
+    markPx: number | null
+  }
+  interface SourceEntry {
+    kind: 'signal' | 'grid'
+    botId: string
+    botName: string
+    running: boolean
+    strategyId?: string
+    gridCount?: number
+    stranded?: boolean
+    position?: PositionSummary
+  }
+
+  const sources: Record<string, SourceEntry[]> = {}
 
   // Signal bots
   for (const sum of listSignalBots(uid)) {
@@ -747,6 +771,39 @@ app.get('/api/positions/sources', requireAuth, (req: Request, res: Response) => 
       running: entry?.running ?? false,
       gridCount: cfg.gridCount,
     })
+  }
+
+  // Annotate stranded entries with the live position summary. Only fetch HL
+  // state when there's at least one stopped bot — otherwise no banner could
+  // appear anyway, so the extra roundtrip is wasted.
+  const hasStopped = Object.values(sources).some((arr) => arr.some((s) => !s.running))
+  if (hasStopped) {
+    try {
+      const creds = userCreds(req)
+      const acct = await getAccountState(undefined, creds)
+      const posByAsset = new Map<string, PositionSummary>()
+      for (const p of acct.allPositions) {
+        posByAsset.set(p.asset.toUpperCase(), {
+          side: p.side,
+          size: p.size,
+          entryPx: p.entryPx,
+          unrealizedPnl: p.unrealizedPnl,
+          markPx: p.markPx ?? null,
+        })
+      }
+      for (const [asset, arr] of Object.entries(sources)) {
+        const pos = posByAsset.get(asset)
+        if (!pos) continue
+        for (const s of arr) {
+          if (!s.running) {
+            s.stranded = true
+            s.position = pos
+          }
+        }
+      }
+    } catch (e) {
+      log.warn(`positions/sources: HL state fetch failed (${(e as Error).message}); stranded flags skipped`)
+    }
   }
 
   res.json(sources)

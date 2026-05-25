@@ -26,6 +26,7 @@ import { generateSignals } from '@/lib/strategies'
 import type { StrategyOutput } from '@/lib/strategies'
 import type { Candle, StrategyId } from '@/types'
 import LiveBotHeader from '@/components/LiveBotHeader'
+import StrandedBanner, { type StrandedPosition } from '@/components/StrandedBanner'
 import LiveStatusCard from '@/components/signalbot/LiveStatusCard'
 import SignalFunnelCard from '@/components/signalbot/SignalFunnelCard'
 import EnsembleVotesCard from '@/components/signalbot/EnsembleVotesCard'
@@ -392,6 +393,27 @@ export default function SignalBotsPage() {
   const [assetPrice, setAssetPrice] = useState<number | null>(null)
   const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
 
+  // Position-source map (keyed by asset, e.g. ETH) — used to detect stranded
+  // positions (stopped bot + open exchange position on same asset).
+  interface SourceEntry {
+    kind: 'signal' | 'grid'
+    botId: string
+    botName: string
+    running: boolean
+    strategyId?: string
+    gridCount?: number
+    stranded?: boolean
+    position?: StrandedPosition
+  }
+  const [sources, setSources] = useState<Record<string, SourceEntry[]>>({})
+
+  const refreshSources = useCallback(() => {
+    apiFetch('/api/positions/sources')
+      .then((r) => r.ok ? r.json() : {})
+      .then((d: Record<string, SourceEntry[]>) => setSources(d))
+      .catch(() => { /* tolerate */ })
+  }, [])
+
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
   const dirtyRef = useRef(dirty)
@@ -585,6 +607,14 @@ export default function SignalBotsPage() {
     return () => clearInterval(id)
   }, [selectedId, refresh])
 
+  // Poll the sources map on the same cadence so stranded banners react when
+  // a position is closed externally or a bot's running flag changes.
+  useEffect(() => {
+    refreshSources()
+    const id = setInterval(refreshSources, POLL_MS)
+    return () => clearInterval(id)
+  }, [refreshSources])
+
   // Fetch price + max leverage for the selected asset so the sizing card can render
   useEffect(() => {
     const asset = cfg?.asset
@@ -672,22 +702,38 @@ export default function SignalBotsPage() {
           {bots.length === 0 && !isNew && (
             <p className="px-4 py-3 text-xs text-dim">No bots yet. Click New to create one.</p>
           )}
-          {bots.map(b => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => selectBot(b.id)}
-              className={`flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
-                selectedId === b.id && !isNew ? 'bg-brand/10 text-text' : 'text-dim hover:text-text hover:bg-panel-2'
-              }`}
-            >
-              <span className={`h-2 w-2 shrink-0 rounded-full ${b.running ? 'bg-gain animate-pulse' : 'bg-border'}`} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-semibold">{b.name}</div>
-                <div className="truncate text-[10px] text-dim">{b.symbol} · {b.timeframe}</div>
-              </div>
-            </button>
-          ))}
+          {bots.map(b => {
+            const asset = b.symbol.replace(/USDT$/i, '').toUpperCase()
+            const stranded = (sources[asset] ?? []).some(
+              (s) => s.botId === b.id && s.kind === 'signal' && s.stranded,
+            )
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => selectBot(b.id)}
+                className={`flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
+                  selectedId === b.id && !isNew ? 'bg-brand/10 text-text' : 'text-dim hover:text-text hover:bg-panel-2'
+                }`}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${b.running ? 'bg-gain animate-pulse' : 'bg-border'}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-semibold">{b.name}</span>
+                    {stranded && (
+                      <span
+                        title="Bot stopped but a position is still open on this asset"
+                        className="shrink-0 rounded-sm border border-warn/40 bg-warn/10 px-1 py-px text-[8px] font-bold uppercase tracking-wider text-warn"
+                      >
+                        Stranded
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate text-[10px] text-dim">{b.symbol} · {b.timeframe}</div>
+                </div>
+              </button>
+            )
+          })}
           {isNew && (
             <div className="flex items-center gap-2.5 bg-brand/10 px-4 py-2.5 text-text">
               <span className="h-2 w-2 shrink-0 rounded-full bg-brand" />
@@ -703,6 +749,27 @@ export default function SignalBotsPage() {
         {cfg && (
           <div className="flex-1 overflow-y-auto p-4">
             <div className="flex flex-col gap-3">
+              {/* Stranded position banner — selected bot is stopped but its
+                  asset still has an open position on the exchange. */}
+              {selectedId && !isNew && cfg.asset && (() => {
+                const arr = sources[cfg.asset.toUpperCase()] ?? []
+                const mine = arr.find((s) => s.botId === selectedId && s.kind === 'signal')
+                if (!mine?.stranded || !mine.position) return null
+                return (
+                  <StrandedBanner
+                    asset={cfg.asset.toUpperCase()}
+                    botName={bots.find((b) => b.id === selectedId)?.name ?? cfg.asset}
+                    botKind="signal"
+                    position={mine.position}
+                    resumeEndpoint={`/api/signal/bots/${selectedId}/start`}
+                    onAfterAction={() => {
+                      refresh()
+                      refreshSources()
+                    }}
+                  />
+                )
+              })()}
+
               {running && (
                 <p className="rounded-lg border border-warn/30 bg-warn/5 px-3 py-1.5 text-[10px] text-warn">
                   Stop the bot to edit its configuration.

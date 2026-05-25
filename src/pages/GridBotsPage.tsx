@@ -20,6 +20,7 @@ import { apiFetch } from '@/contexts/AuthContext'
 import { useHLAssets } from '@/lib/hlAssets'
 import { fetchKlines } from '@/lib/binance'
 import LiveBotHeader from '@/components/LiveBotHeader'
+import StrandedBanner, { type StrandedPosition } from '@/components/StrandedBanner'
 import GridActivityCard from '@/components/gridbot/GridActivityCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -218,6 +219,26 @@ export default function GridBotsPage() {
   const [stats, setStats] = useState<GridStats | null>(null)
   const [logs, setLogs] = useState<LogLine[]>([])
   const [assetInfo, setAssetInfo] = useState<{ maxLeverage?: number; midPx?: number } | null>(null)
+
+  // Position-source map for stranded-bot detection.
+  interface SourceEntry {
+    kind: 'signal' | 'grid'
+    botId: string
+    botName: string
+    running: boolean
+    strategyId?: string
+    gridCount?: number
+    stranded?: boolean
+    position?: StrandedPosition
+  }
+  const [sources, setSources] = useState<Record<string, SourceEntry[]>>({})
+
+  const refreshSources = useCallback(() => {
+    apiFetch('/api/positions/sources')
+      .then((r) => r.ok ? r.json() : {})
+      .then((d: Record<string, SourceEntry[]>) => setSources(d))
+      .catch(() => { /* tolerate */ })
+  }, [])
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null)
@@ -445,6 +466,13 @@ export default function GridBotsPage() {
     return () => clearInterval(id)
   }, [selectedId, isNew, refresh])
 
+  // Poll the sources map so stranded banners react to external changes.
+  useEffect(() => {
+    refreshSources()
+    const id = setInterval(refreshSources, POLL_MS)
+    return () => clearInterval(id)
+  }, [refreshSources])
+
   // ── Selection helpers ────────────────────────────────────────────────────────
 
   const selectBot = (id: string) => {
@@ -491,24 +519,39 @@ export default function GridBotsPage() {
           {bots.length === 0 && !isNew && (
             <p className="px-4 py-3 text-xs text-dim">No bots yet. Click New to create one.</p>
           )}
-          {bots.map(b => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => selectBot(b.id)}
-              className={`flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
-                selectedId === b.id && !isNew ? 'bg-brand/10 text-text' : 'text-dim hover:text-text hover:bg-panel-2'
-              }`}
-            >
-              <span className={`h-2 w-2 shrink-0 rounded-full ${b.running ? 'bg-gain animate-pulse' : 'bg-border'}`} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-semibold">{b.name || b.asset}</div>
-                <div className="truncate text-[10px] text-dim">
-                  {b.asset} · {b.gridCount} grids · {(+b.lower).toFixed(2)}–{(+b.upper).toFixed(2)}
+          {bots.map(b => {
+            const stranded = (sources[(b.asset || '').toUpperCase()] ?? []).some(
+              (s) => s.botId === b.id && s.kind === 'grid' && s.stranded,
+            )
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => selectBot(b.id)}
+                className={`flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
+                  selectedId === b.id && !isNew ? 'bg-brand/10 text-text' : 'text-dim hover:text-text hover:bg-panel-2'
+                }`}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${b.running ? 'bg-gain animate-pulse' : 'bg-border'}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-semibold">{b.name || b.asset}</span>
+                    {stranded && (
+                      <span
+                        title="Bot stopped but a position is still open on this asset"
+                        className="shrink-0 rounded-sm border border-warn/40 bg-warn/10 px-1 py-px text-[8px] font-bold uppercase tracking-wider text-warn"
+                      >
+                        Stranded
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate text-[10px] text-dim">
+                    {b.asset} · {b.gridCount} grids · {(+b.lower).toFixed(2)}–{(+b.upper).toFixed(2)}
+                  </div>
                 </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            )
+          })}
           {isNew && (
             <div className="flex items-center gap-2.5 bg-brand/10 px-4 py-2.5 text-text">
               <span className="h-2 w-2 shrink-0 rounded-full bg-brand" />
@@ -524,6 +567,26 @@ export default function GridBotsPage() {
         {cfg !== null && (
           <div className="flex-1 overflow-y-auto p-4">
             <div className="flex flex-col gap-3">
+              {/* Stranded position banner */}
+              {selectedId && !isNew && cfg.asset && (() => {
+                const arr = sources[cfg.asset.toUpperCase()] ?? []
+                const mine = arr.find((s) => s.botId === selectedId && s.kind === 'grid')
+                if (!mine?.stranded || !mine.position) return null
+                return (
+                  <StrandedBanner
+                    asset={cfg.asset.toUpperCase()}
+                    botName={bots.find((b) => b.id === selectedId)?.name ?? cfg.asset}
+                    botKind="grid"
+                    position={mine.position}
+                    resumeEndpoint={`/api/bots/${selectedId}/start`}
+                    onAfterAction={() => {
+                      refresh()
+                      refreshSources()
+                    }}
+                  />
+                )
+              })()}
+
               {running && (
                 <p className="rounded-lg border border-warn/30 bg-warn/5 px-3 py-1.5 text-[10px] text-warn">
                   Stop the bot to edit its configuration.

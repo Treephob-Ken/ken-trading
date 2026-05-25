@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ArrowDownCircle, ArrowUpCircle, RefreshCw, Bot, Grid3x3, Hand } from 'lucide-react'
 import {
   CandlestickSeries,
@@ -37,6 +38,7 @@ interface PositionSource {
   running: boolean
   strategyId?: string
   gridCount?: number
+  stranded?: boolean
 }
 
 interface PositionBrackets {
@@ -859,6 +861,7 @@ export default function TradePage() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SourceChips({ sources }: { sources: PositionSource[] }) {
+  const navigate = useNavigate()
   if (sources.length === 0) {
     return (
       <span className="inline-flex items-center gap-1 rounded-md border border-border bg-panel-2 px-1.5 py-0.5 text-[10px] text-muted">
@@ -871,24 +874,31 @@ function SourceChips({ sources }: { sources: PositionSource[] }) {
     <>
       {sources.map((s) => {
         const live = s.running
+        const stranded = s.stranded === true
         const label =
           s.kind === 'signal'
             ? `Signal · ${s.strategyId?.toUpperCase() ?? '?'}`
             : `Grid · ${s.gridCount ?? '?'}`
         const Icon = s.kind === 'signal' ? Bot : Grid3x3
+        const tone = stranded
+          ? 'border-warn/40 bg-warn/10 text-warn hover:bg-warn/15'
+          : live
+            ? 'border-gain/40 bg-gain/10 text-gain hover:bg-gain/15'
+            : 'border-border bg-panel-2 text-muted hover:text-text'
+        const dest = s.kind === 'signal' ? '/signal' : '/bots'
         return (
-          <span
+          <button
             key={s.botId}
-            title={`${s.botName}${live ? ' (running)' : ' (stopped)'}`}
-            className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
-              live
-                ? 'border-gain/40 bg-gain/10 text-gain'
-                : 'border-border bg-panel-2 text-muted'
-            }`}
+            type="button"
+            // Stop click from bubbling to the parent row's selection handler.
+            onClick={(e) => { e.stopPropagation(); navigate(dest) }}
+            title={`${s.botName} — ${stranded ? 'stranded (stopped + position open)' : live ? 'running' : 'stopped'}. Click to open in ${s.kind === 'signal' ? 'Signal Bots' : 'Grid Bots'}.`}
+            className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${tone}`}
           >
             <Icon className="h-2.5 w-2.5" />
             {label}
-          </span>
+            {stranded && <span className="ml-0.5 font-bold uppercase">· stranded</span>}
+          </button>
         )
       })}
     </>
