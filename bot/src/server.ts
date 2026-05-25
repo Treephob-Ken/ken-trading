@@ -54,6 +54,7 @@ import {
   verifyPassword,
 } from './users.js'
 import { runMigrationIfNeeded } from './migrate.js'
+import { fundamentalsRouter } from './fundamentals.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -177,6 +178,9 @@ if (API_TOKEN && !MULTI_USER) {
 }
 
 app.use(express.json())
+
+// ─── Fundamentals (sentiment + valuation + regime + verdict) ──────────────────
+app.use('/api/fundamentals', fundamentalsRouter)
 
 // ─── React SPA (static files) ─────────────────────────────────────────────────
 // Serves the Vite build output (react app) before any API routes.

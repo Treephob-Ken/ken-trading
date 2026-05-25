@@ -10,6 +10,7 @@ import GridBotsPage from '@/pages/GridBotsPage'
 import TradePage from '@/pages/TradePage'
 import LogsPage from '@/pages/LogsPage'
 import SettingsPage from '@/pages/SettingsPage'
+import FundamentalsPage from '@/pages/FundamentalsPage'
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -82,6 +83,9 @@ export default function App() {
 
           {/* Phase 5 — Logs */}
           <Route path="logs" element={<LogsPage />} />
+
+          {/* Fundamentals — sentiment, valuation, regime, verdict */}
+          <Route path="fundamentals" element={<FundamentalsPage />} />
 
           {/* Settings */}
           <Route path="settings" element={<SettingsPage />} />

@@ -1306,3 +1306,71 @@ ConfidenceStrip tile and overlay the band on the equity chart in Results.
 ### Gotchas
 - `positionMode` and related state are still persisted in BacktesterPage so existing users don't lose their settings. The backtest itself still runs all three modes correctly.
 - `deployPayload` is a `useMemo` that recomputes whenever any relevant value changes — no stale deploy data.
+
+---
+
+## 2026-05-25 — Fundamentals page (new)
+
+### What changed
+A new "Fundamentals" page at `bot.garlic-trading.net/fundamentals`, framed
+as an institutional analyst would frame BTC: sentiment, valuation, regime,
+positioning, and breadth — each presented as a question the card answers.
+
+**Server (`bot/src/fundamentals.ts`, new file)**
+- In-memory `cachedFetch` per endpoint (1h–6h TTLs) so we stay polite to the
+  free public APIs and never hammer them on rapid UI refreshes.
+- Six data sources, all FREE / no key required:
+  - **Fear & Greed Index** — alternative.me `/fng/?limit=365`
+  - **MVRV** — CoinMetrics community API `CapMVRVCur` metric (chose this over
+    Bitcoin Magazine Pro to avoid the API-key dependency)
+  - **BTC Dominance** — CoinGecko `/api/v3/global`
+  - **Funding rates** — Binance `fapi/v1/fundingRate?symbol=BTCUSDT` (240 = 80d)
+  - **Open interest** — Binance `futures/data/openInterestHist?period=4h` (180 = 30d)
+  - **Wyckoff-style regime** — computed locally from Binance daily klines via
+    a 4-state heuristic scorer (EMA50/200 stack + 30D return + Donchian
+    position + Bollinger bandwidth quantile). Returns label + confidence %.
+- **Verdict aggregator** — fans out all calls in parallel, scores each
+  dimension into a bias in [-1, +1], blends with hand-tuned weights
+  (valuation 30, regime 30, sentiment 20, leverage 15, breadth 5), maps the
+  composite to one of 5 stances (Bullish / Cautiously Bullish / Neutral /
+  Cautiously Bearish / Bearish) and writes a 2-3 sentence analyst paragraph.
+- Router mounted at `/api/fundamentals/*` with `requireAuth` on every route,
+  so multi-user mode keeps everyone gated.
+
+**Frontend (`src/pages/FundamentalsPage.tsx`, new file)**
+- Single React page using existing Tailwind tokens + Lightweight Charts v5.
+- Top: Overall Verdict card (stance pill + analyst paragraph).
+- Then: 5-chip summary row (Sentiment / Valuation / Regime / Leverage / Breadth)
+  with tone-coded colors (gain / loss / warn / neutral).
+- Then: 5 Q-cards, each titled as a question:
+  1. *"Is the market greedy or fearful?"* — F&G gauge + 1Y history area chart
+  2. *"Is BTC overvalued vs its own history?"* — MVRV line with mean band and
+     1.0 / 3.7 reference zones
+  3. *"Which Wyckoff phase are we in?"* — candles + EMA50/200 with phase label
+  4. *"Is leverage flashing a warning?"* — funding rate + OI dual mini-chart
+  5. *"Risk-on or risk-off across crypto?"* — BTC dominance bars
+- Each card ends with a one-line interpretation rendered from the latest data
+  (no static copy — the text changes with the readings).
+- Wired in `src/App.tsx` and `src/components/Sidebar.tsx` (new Brain icon entry
+  between Grid Bots and Trade).
+
+### Decisions worth remembering
+- Picked **CoinMetrics community API** for MVRV over Bitcoin Magazine Pro
+  because it needs no API key and has been stable as a free tier for years.
+- Wyckoff classification is **not** the full 11-event schematic; it's an
+  honest 4-state regime ("Accumulation/Markup/Distribution/Markdown") with a
+  confidence %. Trying to detect the full schematic algorithmically produces
+  unreliable labels even on the same chart pros disagree on.
+- All API caching is in-memory only (`Map<string, { ts, data }>`). Survives
+  any number of dashboard refreshes but resets on pm2 restart — acceptable
+  since cold-start fetches finish in <2s.
+- No CSP changes needed: browser only talks to same-origin `/api/fundamentals/*`;
+  Node has no CSP, so outbound calls to alternative.me / coinmetrics / coingecko
+  / binance just work.
+
+### Gotchas
+- Binance `fapi` endpoints occasionally rate-block specific cloud IPs.
+  If `/api/fundamentals/funding` or `/oi` returns 502 from the VPS, it's
+  upstream — increase cache TTL or switch to a CDN-fronted Binance mirror.
+- `bollinger()` from `bot/src/strategy/indicators.ts` returns `{ mid, upper, lower }`
+  (not `middle`) — caught this on the first build.
