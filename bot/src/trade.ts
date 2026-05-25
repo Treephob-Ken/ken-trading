@@ -368,6 +368,13 @@ export interface PositionInfo {
   side: 'long' | 'short'
   entryPx: number | null
   unrealizedPnl: number
+  // Pro-trader metrics — populated by getAccountState when meta is available.
+  // Optional so existing single-tenant callers don't break.
+  liquidationPx?: number | null
+  leverage?: number          // current effective leverage on this position
+  marginUsed?: number         // USDC posted as collateral for this position
+  positionValue?: number      // current notional value in USDC (size × markPx)
+  markPx?: number             // current HL mark price for the asset
 }
 
 export interface AccountState {
@@ -387,41 +394,61 @@ export async function getAccountState(
   const c = getClients(creds)
   const state = await c.info.clearinghouseState({ user: c.user })
 
+  // Fetch the meta + price context once; needed for markPx on every position.
+  // One extra HL roundtrip but it returns the whole universe so we can read
+  // every asset's mark price without N more calls.
+  let markPxByAsset = new Map<string, number>()
+  try {
+    const [meta, ctxs] = await c.info.metaAndAssetCtxs()
+    meta.universe.forEach((u, i) => {
+      const ctx = ctxs[i]
+      if (ctx) markPxByAsset.set(u.name, Number(ctx.markPx ?? ctx.midPx ?? 0))
+    })
+  } catch { /* if this fails, mark prices stay empty — positions still render with entryPx only */ }
+
+  function enrich(ap: typeof state.assetPositions[number]): PositionInfo {
+    const szi = Number(ap.position.szi)
+    const p = ap.position as typeof ap.position & {
+      liquidationPx?: string | null
+      marginUsed?: string | null
+      positionValue?: string | null
+      leverage?: { type: string; value: number }
+    }
+    const markPx = markPxByAsset.get(p.coin) ?? null
+    return {
+      asset: p.coin,
+      size: Math.abs(szi),
+      side: szi > 0 ? 'long' : 'short',
+      entryPx: p.entryPx ? Number(p.entryPx) : null,
+      unrealizedPnl: Number(p.unrealizedPnl),
+      liquidationPx: p.liquidationPx ? Number(p.liquidationPx) : null,
+      leverage: p.leverage?.value,
+      marginUsed: p.marginUsed ? Number(p.marginUsed) : undefined,
+      positionValue: p.positionValue ? Number(p.positionValue) : (markPx ? Math.abs(szi) * markPx : undefined),
+      markPx: markPx ?? undefined,
+    }
+  }
+
   let currentPrice: number | null = null
   let position: AccountState['position'] = null
   if (asset) {
     const want = asset.trim().toUpperCase()
-    try {
-      const priceMeta = await getAssetMeta(c.info, want)
-      currentPrice = priceMeta.midPx
-    } catch { /* skip if asset not found */ }
+    currentPrice = markPxByAsset.get(want) ?? null
+    if (currentPrice === null) {
+      try {
+        const priceMeta = await getAssetMeta(c.info, want)
+        currentPrice = priceMeta.midPx
+      } catch { /* skip if asset not found */ }
+    }
     const ap = state.assetPositions.find((p) => p.position.coin === want)
-    if (ap) {
-      const szi = Number(ap.position.szi)
-      if (szi !== 0) {
-        position = {
-          asset: want,
-          size: Math.abs(szi),
-          side: szi > 0 ? 'long' : 'short',
-          entryPx: ap.position.entryPx ? Number(ap.position.entryPx) : null,
-          unrealizedPnl: Number(ap.position.unrealizedPnl),
-        }
-      }
+    if (ap && Number(ap.position.szi) !== 0) {
+      position = enrich(ap)
     }
   }
 
   const allPositions: PositionInfo[] = state.assetPositions
     .filter((ap) => Number(ap.position.szi) !== 0)
-    .map((ap) => {
-      const szi = Number(ap.position.szi)
-      return {
-        asset: ap.position.coin,
-        size: Math.abs(szi),
-        side: szi > 0 ? 'long' : 'short',
-        entryPx: ap.position.entryPx ? Number(ap.position.entryPx) : null,
-        unrealizedPnl: Number(ap.position.unrealizedPnl),
-      }
-    })
+    .map(enrich)
 
   return {
     network: c.isTestnet ? 'testnet' : 'mainnet',
@@ -446,6 +473,75 @@ export async function cancelAssetOrders(
   await exchange.cancel({ cancels: mine.map((o) => ({ a: meta.index, o: o.oid })) })
   log.info(`Cancelled ${mine.length} open order(s) for ${asset}`)
   return mine.length
+}
+
+export interface PositionBrackets {
+  slPx: number | null  // stop-loss trigger price (lower for longs, higher for shorts)
+  tpPx: number | null  // take-profit trigger price
+}
+
+/**
+ * Walks the user's open orders looking for reduce-only trigger (stop) orders
+ * for `asset`. The Hyperliquid SDK marks bracket orders with `triggerCondition`
+ * and `isTrigger`. Returns the SL and TP trigger prices if found.
+ *
+ * Heuristic for distinguishing SL from TP when only `triggerPx` is exposed:
+ * compare the trigger price to the position's entry/mark — for a long, a
+ * trigger below mark = SL, above = TP. The caller passes the position side.
+ */
+export async function getPositionBrackets(
+  asset: string,
+  side: 'long' | 'short' | null,
+  creds?: EnvConfig | null,
+): Promise<PositionBrackets> {
+  const { info, user } = getClients(creds)
+  const want = asset.trim().toUpperCase()
+  const open = (await info.openOrders({ user })) as Array<{
+    coin: string
+    oid: number
+    triggerPx?: string | null
+    triggerCondition?: string | null
+    isTrigger?: boolean
+    reduceOnly?: boolean
+    isPositionTpsl?: boolean
+  }>
+  const triggers = open.filter(
+    (o) =>
+      o.coin === want &&
+      (o.isTrigger === true || o.isPositionTpsl === true) &&
+      o.reduceOnly === true &&
+      o.triggerPx,
+  )
+  if (triggers.length === 0 || !side) return { slPx: null, tpPx: null }
+
+  // Need a reference price to classify trigger as SL vs TP when the SDK doesn't
+  // expose the tpsl tag directly. We use mark price as the reference.
+  let refPx: number | null = null
+  try {
+    const meta = await getAssetMeta(info, want)
+    refPx = meta.midPx
+  } catch { /* fine, we'll fall back to price comparison */ }
+
+  let sl: number | null = null
+  let tp: number | null = null
+  for (const t of triggers) {
+    const px = Number(t.triggerPx)
+    if (!Number.isFinite(px)) continue
+    if (side === 'long') {
+      // For a long: SL is below current price, TP is above.
+      if (refPx !== null) {
+        if (px < refPx) sl = sl === null ? px : Math.max(sl, px)  // closest SL below
+        else tp = tp === null ? px : Math.min(tp, px)             // closest TP above
+      }
+    } else {
+      // For a short: SL is above current price, TP is below.
+      if (refPx !== null) {
+        if (px > refPx) sl = sl === null ? px : Math.min(sl, px)
+        else tp = tp === null ? px : Math.max(tp, px)
+      }
+    }
+  }
+  return { slPx: sl, tpPx: tp }
 }
 
 export async function closePosition(

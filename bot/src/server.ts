@@ -22,6 +22,7 @@ import {
   evictClientCache,
   getAccountState,
   getAssetInfo,
+  getPositionBrackets,
   listAssets,
   parseTradeRequest,
   placeOrder,
@@ -517,6 +518,62 @@ app.get('/api/account', requireAuth, async (req: Request, res: Response) => {
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }
+})
+
+// Bracket order lookup for one position — returns SL/TP trigger prices if any
+// reduce-only trigger orders are open for this asset.
+app.get('/api/positions/:asset/brackets', requireAuth, async (req: Request, res: Response) => {
+  const asset = String(req.params.asset || '').trim().toUpperCase()
+  const sideRaw = typeof req.query.side === 'string' ? req.query.side : ''
+  const side: 'long' | 'short' | null = sideRaw === 'long' || sideRaw === 'short' ? sideRaw : null
+  if (!asset) { res.status(400).json({ error: 'asset is required' }); return }
+  try {
+    res.json(await getPositionBrackets(asset, side, userCreds(req)))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Resolve which bot (if any) owns each open position. Heuristic match by
+// configured asset — exact only, no fuzzy. Manual = nothing matches.
+//
+// Returns { [asset]: SourceInfo[] }. An asset can have multiple sources when
+// two bots are configured for the same asset (e.g. signal + grid).
+app.get('/api/positions/sources', requireAuth, (req: Request, res: Response) => {
+  const uid = userId(req)
+  const sources: Record<string, Array<{ kind: 'signal' | 'grid'; botId: string; botName: string; running: boolean; strategyId?: string; gridCount?: number }>> = {}
+
+  // Signal bots
+  for (const sum of listSignalBots(uid)) {
+    const asset = sum.symbol.replace(/USDT$/i, '').toUpperCase()
+    if (!asset) continue
+    if (!sources[asset]) sources[asset] = []
+    sources[asset].push({
+      kind: 'signal',
+      botId: sum.id,
+      botName: sum.name,
+      running: sum.running,
+      strategyId: sum.strategyId,
+    })
+  }
+
+  // Grid bots
+  const gridMap = gridBotsForUser(uid)
+  for (const cfg of listConfigs(uid)) {
+    const asset = (cfg.asset || '').toUpperCase()
+    if (!asset) continue
+    const entry = gridMap.get(cfg.id || '')
+    if (!sources[asset]) sources[asset] = []
+    sources[asset].push({
+      kind: 'grid',
+      botId: cfg.id || '',
+      botName: cfg.name || `${asset}-GRID`,
+      running: entry?.running ?? false,
+      gridCount: cfg.gridCount,
+    })
+  }
+
+  res.json(sources)
 })
 
 app.post('/api/trade', requireAuth, async (req: Request, res: Response) => {
