@@ -414,6 +414,35 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
     // Detect network change BEFORE writing so we can reset network-tagged state.
     const prevUser = findUserById(uid)
     const networkChanged = !!prevUser && prevUser.hlNetwork !== network
+    // Switching INTO mainnet exposes real money — stop every running bot so
+    // they don't silently start trading the new network with state captured
+    // on the old one. Switching to testnet is safe (no real funds), so we
+    // leave bots running and just swap their credentials.
+    const stoppingForMainnet = networkChanged && network === 'mainnet'
+    let stoppedSignalCount = 0
+    let stoppedGridCount = 0
+    if (stoppingForMainnet) {
+      for (const sum of listSignalBots(uid)) {
+        try {
+          const bot = getSignalBot(sum.id, uid)
+          if (sum.running) {
+            bot.stop()
+            stoppedSignalCount++
+          }
+        } catch { /* best effort */ }
+      }
+      const gMap = gridBotsForUser(uid)
+      for (const entry of gMap.values()) {
+        if (entry.running) {
+          try { await entry.bot.shutdown() } catch (e) {
+            log.err(`Network switch: grid shutdown failed for ${entry.id}: ${(e as Error).message}`)
+          }
+          entry.running = false
+          writeGridRuntime(uid, entry.id, false)
+          stoppedGridCount++
+        }
+      }
+    }
     saveHLCredentials(uid, agentKeyRaw, hlUser, network)
     evictClientCache(hlUser)
     const newCreds = (() => { try { return loadUserCreds(uid) } catch { return null } })()
@@ -432,8 +461,19 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
     if (networkChanged) {
       resetKillSwitchForNetworkChange(uid, network)
     }
-    log.ok(`User ${req.user!.email} updated HL credentials${derivedAgent ? ` (agent ${derivedAgent.slice(0, 10)}…)` : ' (address/network only)'}${networkChanged ? ` — network changed to ${network}, account-value baselines reset` : ''}`)
-    res.json({ ok: true, derivedAgent })
+    const switchNote = networkChanged
+      ? ` — network changed to ${network}, account-value baselines reset` +
+        (stoppingForMainnet ? `, stopped ${stoppedSignalCount} signal + ${stoppedGridCount} grid bot(s) for safety` : ' (testnet — bots kept running)')
+      : ''
+    log.ok(`User ${req.user!.email} updated HL credentials${derivedAgent ? ` (agent ${derivedAgent.slice(0, 10)}…)` : ' (address/network only)'}${switchNote}`)
+    res.json({
+      ok: true,
+      derivedAgent,
+      networkChanged,
+      stoppedForMainnet: stoppingForMainnet
+        ? { signalBots: stoppedSignalCount, gridBots: stoppedGridCount }
+        : null,
+    })
   } catch (e) {
     res.status(400).json({ error: (e as Error).message })
   }

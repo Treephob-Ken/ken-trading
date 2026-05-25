@@ -43,14 +43,31 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentKey, hlUser, network }),
       })
-      const data = (await res.json()) as { ok?: boolean; error?: string }
+      const data = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        networkChanged?: boolean
+        stoppedForMainnet?: { signalBots: number; gridBots: number } | null
+      }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
       setCreds(prev => prev
         ? { ...prev, hlUser, hlNetwork: network, hlConfigured: Boolean(agentKey || prev.hlConfigured) }
         : { hlUser, hlNetwork: network, hlConfigured: Boolean(agentKey) }
       )
       setAgentKey('')       // clear after save — don't persist key in state
-      setNotice({ text: 'Credentials saved', ok: true })
+      let msg = 'Credentials saved'
+      if (data.stoppedForMainnet) {
+        const { signalBots, gridBots } = data.stoppedForMainnet
+        const total = signalBots + gridBots
+        if (total > 0) {
+          msg = `Saved. Stopped ${total} bot${total === 1 ? '' : 's'} (${signalBots} signal + ${gridBots} grid) — switched to mainnet, start them manually after reviewing.`
+        } else {
+          msg = 'Saved. Switched to mainnet — no bots were running.'
+        }
+      } else if (data.networkChanged) {
+        msg = 'Saved. Switched to testnet — bots kept running.'
+      }
+      setNotice({ text: msg, ok: true })
     } catch (e) {
       setNotice({ text: `Save failed: ${(e as Error).message}`, ok: false })
     } finally { setBusy(false) }
