@@ -291,11 +291,11 @@ export default function GridPage({
                   <NumberInput step={1} min={1} max={50} value={leverage} onChange={setLeverage} className="field font-mono text-sm" />
                 </div>
                 <div>
-                  <label className="label">Stop Loss %</label>
+                  <label className="label" title="SL price = Range Low × (1 − this %). Sits BELOW the grid so it only fires if the range completely breaks down.">SL % below range</label>
                   <NumberInput step={0.5} min={0.1} value={slPct} onChange={setSlPct} className="field font-mono text-sm" />
                 </div>
                 <div>
-                  <label className="label">Take Profit %</label>
+                  <label className="label" title="TP price = Range High × (1 + this %). Sits ABOVE the grid; closes everything if price runs away to the upside.">TP % above range</label>
                   <NumberInput step={0.5} min={0.1} value={tpPct} onChange={setTpPct} className="field font-mono text-sm" />
                 </div>
                 <div>

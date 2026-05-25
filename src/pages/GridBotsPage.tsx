@@ -280,21 +280,25 @@ export default function GridBotsPage() {
     }
   }
 
-  // Compute sizing from risk inputs
+  // Compute sizing from risk inputs.
+  // SL/TP are anchored to the grid lower/upper bounds (NOT midPx) so the stop
+  // sits OUTSIDE the grid range — only fires if the range completely breaks.
+  // Anchoring to midPx would put SL inside the range and trigger on normal
+  // grid drawdown. Matches the Deploy-from-Grid-Optimizer behaviour.
   const computeSizing = () => {
     if (typeof riskUsd !== 'number' || typeof slPct !== 'number') return null
     if (riskUsd <= 0 || slPct <= 0) return null
     const positionUsd = riskUsd / (slPct / 100)
     const maxLev = assetInfo?.maxLeverage ?? 1
     const margin = positionUsd / maxLev
-    const midPx = assetInfo?.midPx ?? 0
+    const lower = cfg?.lower ?? 0
     const upper = cfg?.upper ?? 0
     const count = cfg?.gridCount ?? 0
     const orderSize = (upper > 0 && count > 0)
       ? (margin * maxLev * 0.5) / (count * upper)
       : null
-    const slPrice = midPx ? +(midPx * (1 - slPct / 100)).toFixed(4) : null
-    const tpPrice = midPx ? +(midPx * (1 + slPct / 100)).toFixed(4) : null
+    const slPrice = lower > 0 ? +(lower * (1 - slPct / 100)).toFixed(6) : null
+    const tpPrice = upper > 0 ? +(upper * (1 + slPct / 100)).toFixed(6) : null
     return { margin, maxLev, positionUsd, orderSize, slPrice, tpPrice }
   }
 
@@ -308,17 +312,10 @@ export default function GridBotsPage() {
       setNotice({ text: 'Fill in asset, lower, upper, grid count', ok: false }); return
     }
 
-    // Apply risk-mode sizing if active
-    let finalCfg = { ...cfg }
-    if (sizing) {
-      finalCfg = {
-        ...finalCfg,
-        investment: +sizing.margin.toFixed(6),
-        leverage: sizing.maxLev,
-        stopLossPrice: sizing.slPrice ?? undefined,
-        takeProfitPrice: sizing.tpPrice ?? undefined,
-      }
-    }
+    // The Risk Calculator no longer auto-applies — it shows a suggestion the
+    // user has to confirm via the "Apply to Budget + SL/TP" button. This means
+    // the config the user sees in the form is exactly what gets saved.
+    const finalCfg = { ...cfg }
 
     if (!finalCfg.investment && !finalCfg.orderSize) {
       setNotice({ text: 'Provide either Budget or Order Size', ok: false }); return
@@ -669,7 +666,10 @@ export default function GridBotsPage() {
               </Field>
 
               <div className="my-1 h-px bg-border" />
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Sizing</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Sizing — Budget mode <span className="text-[9px] font-normal text-brand">(recommended for grids)</span></p>
+              <p className="text-[10px] text-dim leading-snug">
+                Type how much capital to commit. The bot divides it across all grid cells.
+              </p>
 
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Budget (USDC)">
@@ -694,7 +694,10 @@ export default function GridBotsPage() {
               </Field>
 
               <div className="my-1 h-px bg-border" />
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Risk mode (auto-sizes)</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Risk Calculator <span className="text-[9px] font-normal text-dim">(optional)</span></p>
+              <p className="text-[10px] text-dim leading-snug">
+                Helper — suggests a Budget given "how much I'm willing to lose if SL hits". Caveat: grid bots scale into a position, so actual loss can exceed Risk USD if the grid filled deeply. Use as a guide, not a guarantee.
+              </p>
 
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Risk USD">
@@ -703,7 +706,7 @@ export default function GridBotsPage() {
                     onChange={e => setRiskUsd(e.target.value === '' ? '' : +e.target.value)}
                     className={inputCls} />
                 </Field>
-                <Field label="SL %">
+                <Field label="SL % below lower">
                   <input type="number" disabled={running} step="0.1" min="0" placeholder="e.g. 5"
                     value={slPct}
                     onChange={e => setSlPct(e.target.value === '' ? '' : +e.target.value)}
@@ -714,25 +717,54 @@ export default function GridBotsPage() {
               {sizing && (
                 <div className="rounded-lg border border-brand/20 bg-brand/5 px-3 py-2 text-[10px] space-y-1">
                   <div className="flex justify-between"><span className="text-dim">Notional</span><span className="font-mono text-text">${sizing.positionUsd.toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span className="text-dim">Margin (USDC)</span><span className="font-mono text-text">${sizing.margin.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-dim">Suggested Budget</span><span className="font-mono text-brand font-semibold">${sizing.margin.toFixed(2)}</span></div>
                   <div className="flex justify-between"><span className="text-dim">Leverage</span><span className="font-mono text-text">{sizing.maxLev}x</span></div>
                   {sizing.orderSize && <div className="flex justify-between"><span className="text-dim">Order size</span><span className="font-mono text-text">{sizing.orderSize.toFixed(5)} {cfg.asset}</span></div>}
-                  {sizing.slPrice && <div className="flex justify-between"><span className="text-dim">SL/TP</span><span className="font-mono text-text">${sizing.slPrice} / ${sizing.tpPrice}</span></div>}
+                  {sizing.slPrice
+                    ? (
+                      <div className="flex justify-between"><span className="text-dim">SL / TP price</span><span className="font-mono text-text">${sizing.slPrice} / ${sizing.tpPrice}</span></div>
+                    )
+                    : (
+                      <p className="text-[10px] text-warn">Set Range Low/High above to compute SL/TP anchored to the grid bounds.</p>
+                    )
+                  }
+                  {sizing.slPrice && (
+                    <button
+                      type="button"
+                      disabled={running}
+                      onClick={() => {
+                        patch({
+                          investment: +sizing.margin.toFixed(6),
+                          leverage: sizing.maxLev,
+                          stopLossPrice: sizing.slPrice ?? undefined,
+                          takeProfitPrice: sizing.tpPrice ?? undefined,
+                        })
+                      }}
+                      className="mt-1 w-full rounded-md border border-brand/40 bg-brand/10 px-2 py-1 text-[10px] font-semibold text-brand transition-colors hover:bg-brand/20 disabled:opacity-40"
+                    >
+                      Apply to Budget + SL/TP
+                    </button>
+                  )}
                 </div>
               )}
 
               <div className="my-1 h-px bg-border" />
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Safety (optional)</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Safety (manual prices)</p>
+              <p className="text-[10px] text-dim leading-snug">
+                Best practice: set SL <strong>below</strong> the grid lower bound (and TP <strong>above</strong> upper) so the grid runs normally inside its range and the stop only fires if the range completely breaks down.
+              </p>
 
               <div className="grid grid-cols-2 gap-2">
                 <Field label="SL price">
-                  <input type="number" disabled={running} step="any" min="0" placeholder="off"
+                  <input type="number" disabled={running} step="any" min="0"
+                    placeholder={cfg.lower ? (cfg.lower * 0.95).toFixed(4) : 'off'}
                     value={cfg.stopLossPrice ?? ''}
                     onChange={e => patch({ stopLossPrice: e.target.value === '' ? undefined : +e.target.value })}
                     className={inputCls} />
                 </Field>
                 <Field label="TP price">
-                  <input type="number" disabled={running} step="any" min="0" placeholder="off"
+                  <input type="number" disabled={running} step="any" min="0"
+                    placeholder={cfg.upper ? (cfg.upper * 1.05).toFixed(4) : 'off'}
                     value={cfg.takeProfitPrice ?? ''}
                     onChange={e => patch({ takeProfitPrice: e.target.value === '' ? undefined : +e.target.value })}
                     className={inputCls} />
@@ -744,6 +776,23 @@ export default function GridBotsPage() {
                     className={inputCls} />
                 </Field>
               </div>
+
+              {/* Quick-fill suggestion when grid bounds are set and SL is empty */}
+              {cfg.lower && cfg.upper && (!cfg.stopLossPrice || !cfg.takeProfitPrice) && (
+                <button
+                  type="button"
+                  disabled={running}
+                  onClick={() => {
+                    patch({
+                      stopLossPrice: cfg.stopLossPrice ?? +(cfg.lower! * 0.95).toFixed(6),
+                      takeProfitPrice: cfg.takeProfitPrice ?? +(cfg.upper! * 1.05).toFixed(6),
+                    })
+                  }}
+                  className="rounded-md border border-border bg-panel-2 px-2 py-1 text-[10px] text-dim transition-colors hover:text-text disabled:opacity-40"
+                >
+                  Suggest SL = ${(cfg.lower * 0.95).toFixed(4)} (5% below lower) · TP = ${(cfg.upper * 1.05).toFixed(4)} (5% above upper)
+                </button>
+              )}
 
               <Field label="Bot name">
                 <input type="text" disabled={running}
