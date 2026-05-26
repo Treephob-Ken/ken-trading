@@ -128,12 +128,6 @@ export default function TradeSetupCard({ status, strategies, lastPrice }: Props)
           v={cfg.mtfEnabled ? `on · ${cfg.mtfTimeframe ?? '—'}` : 'off'}
           cls={cfg.mtfEnabled ? 'text-brand' : 'text-dim'}
         />
-        <Row
-          k="Daily loss cap"
-          info="If today's loss exceeds this %, the bot pauses new entries until UTC midnight."
-          v={cfg.dailyLossLimitPct ? `${cfg.dailyLossLimitPct}%` : 'off'}
-          cls={cfg.dailyLossLimitPct ? 'text-warn' : 'text-dim'}
-        />
         {cfg.ensembleMode && (
           <Row
             k="Ensemble"
