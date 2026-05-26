@@ -29,6 +29,8 @@ import LiveBotHeader from '@/components/LiveBotHeader'
 import StrandedBanner, { type StrandedPosition } from '@/components/StrandedBanner'
 import MultiBotConflictBanner from '@/components/MultiBotConflictBanner'
 import LiveStatusCard from '@/components/signalbot/LiveStatusCard'
+import LivePositionCard from '@/components/signalbot/LivePositionCard'
+import TradeSetupCard from '@/components/signalbot/TradeSetupCard'
 import SignalFunnelCard from '@/components/signalbot/SignalFunnelCard'
 import EnsembleVotesCard from '@/components/signalbot/EnsembleVotesCard'
 import ChartHoverPanel, {
@@ -394,6 +396,8 @@ export default function SignalBotsPage() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null)
   const [assetPrice, setAssetPrice] = useState<number | null>(null)
+  // Live mark price surfaced by LivePositionCard; used by LiveStatusCard for $ size.
+  const [livePrice, setLivePrice] = useState<number | null>(null)
   const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
 
   // Position-source map (keyed by asset, e.g. ETH) — used to detect stranded
@@ -1072,8 +1076,19 @@ export default function SignalBotsPage() {
         {selectedId && !isNew && status && (
           <>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <LiveStatusCard status={status} lastPrice={null} />
+              <LiveStatusCard status={status} lastPrice={livePrice} />
               <SignalFunnelCard status={status} />
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <LivePositionCard
+                asset={status.config.asset}
+                onMarkPrice={setLivePrice}
+              />
+              <TradeSetupCard
+                status={status}
+                strategies={strategies}
+                lastPrice={livePrice}
+              />
             </div>
             {status.config.ensembleMode && (
               <EnsembleVotesCard status={status} strategies={strategies} />
