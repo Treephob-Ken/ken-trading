@@ -286,8 +286,8 @@ function combineTones(...tones: Tone[]): Tone {
   return 'neutral'
 }
 
-function scrollToCard(id: string): void {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+function openCard(id: string): void {
+  window.dispatchEvent(new CustomEvent<string>('open-fund-modal', { detail: id }))
 }
 
 function SummaryCard({ bundle }: { bundle: Bundle }) {
@@ -455,8 +455,8 @@ function SummaryCard({ bundle }: { bundle: Bundle }) {
             <li key={step.n}>
               <button
                 type="button"
-                onClick={() => scrollToCard(step.target as string)}
-                aria-label={`${step.name}: ${step.reading}. Scroll to detail card.`}
+                onClick={() => openCard(step.target as string)}
+                aria-label={`${step.name}: ${step.reading}. Open detail chart.`}
                 className="flex w-full items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border-strong/60 hover:bg-panel/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
               >
                 {rowContent}
@@ -664,6 +664,17 @@ function ExpandableQCard({
     if (open && !d.open) d.showModal()
     if (!open && d.open) d.close()
   }, [open])
+
+  // Summary card dispatches `open-fund-modal` with the card's anchorId to
+  // pop this card's existing modal open from outside.
+  useEffect(() => {
+    if (!anchorId) return
+    const handler = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === anchorId) setOpen(true)
+    }
+    window.addEventListener('open-fund-modal', handler)
+    return () => window.removeEventListener('open-fund-modal', handler)
+  }, [anchorId])
 
   return (
     <>
@@ -1015,6 +1026,13 @@ function FundingOiCard({ funding, oi }: { funding: FundingResult; oi: OiResult }
     if (open && !d.open) d.showModal()
     if (!open && d.open) d.close()
   }, [open])
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === 'fund-leverage') setOpen(true)
+    }
+    window.addEventListener('open-fund-modal', handler)
+    return () => window.removeEventListener('open-fund-modal', handler)
+  }, [])
 
   const oiNote = oi.pct30d >= 0
     ? `OI is up ${oi.pct30d.toFixed(1)}% over 30 days — more leverage in the system.`
@@ -1353,6 +1371,13 @@ function SmartMoneyCard({ sm }: { sm: SmartMoneyResult }) {
     if (open && !d.open) d.showModal()
     if (!open && d.open) d.close()
   }, [open])
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === 'fund-smartmoney') setOpen(true)
+    }
+    window.addEventListener('open-fund-modal', handler)
+    return () => window.removeEventListener('open-fund-modal', handler)
+  }, [])
 
   const lsLabel =
     lsCurrent > 1.6 ? 'top traders crowded long' :
