@@ -151,7 +151,8 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
   const signalMarkersRef = useRef<SeriesMarker<Time>[]>([])
   const tradeMarkersRef = useRef<SeriesMarker<Time>[]>([])
 
-  const [showSignals, setShowSignals] = useState(true)
+  // Markers off by default — live chart stays clean; click Show Buy/Sell to reveal.
+  const [showSignals, setShowSignals] = useState(false)
   const [showIndicator, setShowIndicator] = useState(true)
 
   // Live Markov regime labels for the hover overlay. Cheap — same logic the
