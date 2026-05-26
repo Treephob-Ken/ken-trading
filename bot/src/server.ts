@@ -1102,9 +1102,34 @@ app.get('/api/signal/bots/:id/logs', requireAuth, (req: Request, res: Response) 
   res.json(getLogBuffer('signal-' + req.params.id))
 })
 
-app.get('/api/signal/bots/:id/trades', requireAuth, (req: Request, res: Response) => {
+// Returns the bot's trade history for chart marker rendering. Reads from HL's
+// fill history (so it survives bot restarts / deploys), filtered to this bot's
+// asset. Falls back to the in-memory list if creds aren't set.
+app.get('/api/signal/bots/:id/trades', requireAuth, async (req: Request, res: Response) => {
   try {
-    res.json(listSignalBotTrades(req.params.id, userId(req)))
+    const bot = getSignalBot(req.params.id, userId(req))
+    const cfg = bot.getStatus().config as { asset?: string; symbol?: string }
+    const asset = (cfg.asset || (cfg.symbol ?? '').replace(/USDT$/i, '') || '').toUpperCase()
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds || !asset) {
+      res.json(listSignalBotTrades(req.params.id, userId(req)))
+      return
+    }
+    const to = Date.now()
+    const from = to - 365 * 24 * 60 * 60 * 1000
+    const srcMap = buildAssetSourceMap(userId(req))
+    const fills = await fetchFillsFromHL(creds, from, to, srcMap)
+    const trades = fills
+      .filter((f) => f.asset === asset)
+      .map((f) => ({
+        time: f.time,
+        side: f.side,
+        asset: f.asset,
+        size: f.size,
+        price: f.price,
+        filled: true,
+      }))
+    res.json(trades)
   } catch (e) {
     res.status(404).json({ error: (e as Error).message })
   }
