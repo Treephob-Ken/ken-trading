@@ -241,7 +241,7 @@ export class GridBot {
       const limitMul = side === 'sell' ? 0.95 : 1.05
       const res = await this.clients.exchange.order({
         orders: [{
-          a: this.meta.index,
+          a: this.meta.assetId,
           b: side === 'buy',
           p: roundPrice(triggerPrice * limitMul, this.meta),
           s: roundSize(size, this.meta),
@@ -296,7 +296,7 @@ export class GridBot {
       return
     }
     await this.clients.exchange.cancel({
-      cancels: mine.map((o) => ({ a: this.meta.index, o: o.oid })),
+      cancels: mine.map((o) => ({ a: this.meta.assetId, o: o.oid })),
     })
     this.log.ok(`Cancelled ${mine.length} pre-existing ${this.cfg.asset} orders.`)
   }
@@ -350,7 +350,7 @@ export class GridBot {
           continue
         }
         // Orphan: doesn't match any line, or two HL orders mapped to the same line.
-        orphanCancels.push({ a: this.meta.index, o: o.oid })
+        orphanCancels.push({ a: this.meta.assetId, o: o.oid })
         continue
       }
 
@@ -405,7 +405,7 @@ export class GridBot {
       const res = await this.clients.exchange.order({
         orders: [
           {
-            a: this.meta.index,
+            a: this.meta.assetId,
             b: side === 'buy',
             p: px,
             s: sz,
@@ -497,7 +497,7 @@ export class GridBot {
       const mine = open.filter((o) => o.coin === this.cfg.asset)
       if (mine.length > 0) {
         await this.clients.exchange.cancel({
-          cancels: mine.map((o) => ({ a: this.meta.index, o: o.oid })),
+          cancels: mine.map((o) => ({ a: this.meta.assetId, o: o.oid })),
         })
         this.log.ok(`Cancelled ${mine.length} open orders.`)
       }
@@ -513,7 +513,7 @@ export class GridBot {
         const closePx = roundPrice(this.currentPrice * slip, this.meta)
         await this.clients.exchange.order({
           orders: [{
-            a: this.meta.index,
+            a: this.meta.assetId,
             b: closeSide === 'buy',
             p: closePx,
             s: closeSz,
@@ -724,7 +724,7 @@ export class GridBot {
       return
     }
     await this.clients.exchange.cancel({
-      cancels: mine.map((o) => ({ a: this.meta.index, o: o.oid })),
+      cancels: mine.map((o) => ({ a: this.meta.assetId, o: o.oid })),
     })
     this.log.ok(`Cancelled ${mine.length} orders.`)
   }

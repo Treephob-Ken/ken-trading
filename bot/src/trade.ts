@@ -149,7 +149,7 @@ export async function executeMarketTrade(
   const orderRes = await exchange.order({
     orders: [
       {
-        a: meta.index,
+        a: meta.assetId,
         b: req.side === 'buy',
         p: limitPx,
         s: sizeStr,
@@ -298,7 +298,7 @@ export async function placeOrder(
   )
 
   const orderRes = await exchange.order({
-    orders: [{ a: meta.index, b: side === 'buy', p: pxStr, s: sizeStr, r: reduceOnly, t: { limit: { tif } } }],
+    orders: [{ a: meta.assetId, b: side === 'buy', p: pxStr, s: sizeStr, r: reduceOnly, t: { limit: { tif } } }],
     grouping: 'na',
   })
 
@@ -347,7 +347,7 @@ export async function placeOrder(
           const triggerPx = roundPrice(effectiveTp, meta)
           const limitPx = roundPrice(effectiveTp * limitMul, meta)
           await exchange.order({
-            orders: [{ a: meta.index, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'tp' } } }],
+            orders: [{ a: meta.assetId, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'tp' } } }],
             grouping: 'positionTpsl',
           })
           result.tpPlaced = true
@@ -365,7 +365,7 @@ export async function placeOrder(
           const triggerPx = roundPrice(effectiveSl, meta)
           const limitPx = roundPrice(effectiveSl * limitMul, meta)
           await exchange.order({
-            orders: [{ a: meta.index, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'sl' } } }],
+            orders: [{ a: meta.assetId, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'sl' } } }],
             grouping: 'positionTpsl',
           })
           result.slPlaced = true
@@ -544,7 +544,7 @@ export async function cancelAssetOrders(
   const open = await info.openOrders({ user })
   const mine = (open as Array<{ coin: string; oid: number }>).filter((o) => o.coin === asset)
   if (mine.length === 0) return 0
-  await exchange.cancel({ cancels: mine.map((o) => ({ a: meta.index, o: o.oid })) })
+  await exchange.cancel({ cancels: mine.map((o) => ({ a: meta.assetId, o: o.oid })) })
   log.info(`Cancelled ${mine.length} open order(s) for ${asset}`)
   return mine.length
 }

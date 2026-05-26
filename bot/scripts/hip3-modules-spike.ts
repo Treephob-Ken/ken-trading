@@ -24,7 +24,9 @@ async function main() {
   console.log({
     name: goldMeta.name,
     dex: goldMeta.dex,
+    perpDexIndex: goldMeta.perpDexIndex,
     index: goldMeta.index,
+    assetId: goldMeta.assetId,
     szDecimals: goldMeta.szDecimals,
     maxLeverage: goldMeta.maxLeverage,
     markPx: goldMeta.ctx.markPx,
@@ -36,7 +38,9 @@ async function main() {
   console.log({
     name: btcMeta.name,
     dex: btcMeta.dex,
+    perpDexIndex: btcMeta.perpDexIndex,
     index: btcMeta.index,
+    assetId: btcMeta.assetId,
     markPx: btcMeta.ctx.markPx,
   })
 

@@ -34,13 +34,19 @@ export function createClients(env: EnvConfig): HLClients {
 }
 
 export interface AssetMeta {
+  // Index within this dex's universe (used for meta lookups, not order routing).
   index: number
+  // The Hyperliquid asset ID for order placement. For main-perp assets this
+  // equals `index`; for HIP-3 it's a high number (100000+) per the asset-ID
+  // formula. ALWAYS pass this — not `index` — to `exchange.order({ a: ... })`.
+  assetId: number
   name: string
   szDecimals: number
   pxDecimals: number
   markPx: number
   midPx: number
   maxLeverage: number
+  dex: string | null
 }
 
 // Look up the asset's index, size decimals, and current price. Routes through
@@ -53,12 +59,14 @@ export async function getAssetMeta(
   const pxDecimals = Math.max(0, 6 - m.szDecimals)
   return {
     index: m.index,
+    assetId: m.assetId,
     name: m.name,
     szDecimals: m.szDecimals,
     pxDecimals,
     markPx: m.ctx.markPx,
     midPx: m.ctx.midPx,
     maxLeverage: m.maxLeverage,
+    dex: m.dex,
   }
 }
 

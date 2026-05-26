@@ -14,6 +14,8 @@ export interface DexUniverseEntry {
   maxLeverage: number
   isDelisted?: boolean
   dex: string | null
+  // perpDexs() array index for this dex (0 = main, 1+ = HIP-3).
+  perpDexIndex: number
 }
 
 export interface AssetCtxLite {
@@ -27,7 +29,11 @@ export interface AssetCtxLite {
 }
 
 export interface FullAssetMeta extends DexUniverseEntry {
+  // Index within this dex's universe (used for resolving meta + ctx locally).
   index: number
+  // Hyperliquid asset ID — what `exchange.order({ a: ... })` actually wants.
+  // Main perps: assetId === index. HIP-3: 100000 + perpDexIndex * 10000 + index.
+  assetId: number
   ctx: AssetCtxLite
 }
 
@@ -52,9 +58,30 @@ interface CachedDex {
   universe: { name: string; szDecimals: number; maxLeverage: number; isDelisted?: boolean }[]
   ctxs: unknown[]
   fetchedAt: number
+  perpDexIndex: number
 }
 
 const cache = new Map<string, CachedDex>()
+let perpDexIndexMap: { fetchedAt: number; map: Map<string, number> } | null = null
+
+// Map each HIP-3 dex name to its perpDexs array index. Index 0 is the main
+// (null) dex; HIP-3 dexes start at 1. The asset-ID formula depends on this.
+async function getPerpDexIndex(info: InfoClient, dex: string): Promise<number> {
+  if (perpDexIndexMap && Date.now() - perpDexIndexMap.fetchedAt < TTL_MS) {
+    const i = perpDexIndexMap.map.get(dex)
+    if (i !== undefined) return i
+  }
+  const dexes = await info.perpDexs()
+  const map = new Map<string, number>()
+  for (let i = 0; i < dexes.length; i++) {
+    const d = dexes[i]
+    if (d) map.set(d.name, i)
+  }
+  perpDexIndexMap = { fetchedAt: Date.now(), map }
+  const i = map.get(dex)
+  if (i === undefined) throw new Error(`Perp dex "${dex}" not present in perpDexs response`)
+  return i
+}
 
 async function fetchDex(info: InfoClient, dex: string | null): Promise<CachedDex> {
   const key = dex ?? ''
@@ -63,17 +90,26 @@ async function fetchDex(info: InfoClient, dex: string | null): Promise<CachedDex
   const result = dex
     ? await info.metaAndAssetCtxs({ dex })
     : await info.metaAndAssetCtxs()
+  const perpDexIndex = dex === null ? 0 : await getPerpDexIndex(info, dex)
   const fresh: CachedDex = {
     universe: result[0].universe,
     ctxs: result[1] as unknown[],
     fetchedAt: Date.now(),
+    perpDexIndex,
   }
   cache.set(key, fresh)
   return fresh
 }
 
+// Compute the Hyperliquid asset ID used in order placement.
+export function computeAssetId(perpDexIndex: number, indexInUniverse: number): number {
+  if (perpDexIndex === 0) return indexInUniverse
+  return 100000 + perpDexIndex * 10000 + indexInUniverse
+}
+
 export function clearHip3Cache(): void {
   cache.clear()
+  perpDexIndexMap = null
 }
 
 // Allow-list of HIP-3 dexes to surface in the dashboard. Hyperliquid has dozens
@@ -112,13 +148,16 @@ export async function resolveAssetMeta(info: InfoClient, asset: string): Promise
   }
   const u = c.universe[index]
   const ctxRaw = c.ctxs[index] as Record<string, string | undefined>
+  const assetId = computeAssetId(c.perpDexIndex, index)
   return {
     name: u.name,
     szDecimals: u.szDecimals,
     maxLeverage: u.maxLeverage,
     isDelisted: u.isDelisted,
     dex,
+    perpDexIndex: c.perpDexIndex,
     index,
+    assetId,
     ctx: {
       markPx: Number(ctxRaw.markPx),
       midPx: Number(ctxRaw.midPx ?? ctxRaw.markPx),
@@ -140,13 +179,13 @@ export async function listAllAssets(info: InfoClient): Promise<DexUniverseEntry[
   const main = await fetchDex(info, null)
   for (const u of main.universe) {
     if (u.isDelisted) continue
-    all.push({ name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex: null })
+    all.push({ name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex: null, perpDexIndex: 0 })
   }
   for (const dex of hip3) {
     const c = await fetchDex(info, dex)
     for (const u of c.universe) {
       if (u.isDelisted) continue
-      all.push({ name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex })
+      all.push({ name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex, perpDexIndex: c.perpDexIndex })
     }
   }
   return all
@@ -174,7 +213,7 @@ export async function listAllAssetsWithCtx(
   main.universe.forEach((u, i) => {
     if (u.isDelisted) return
     out.push({
-      entry: { name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex: null },
+      entry: { name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex: null, perpDexIndex: 0 },
       ctx: buildCtx(main.ctxs[i] as Record<string, string | undefined>),
     })
   })
@@ -183,7 +222,7 @@ export async function listAllAssetsWithCtx(
     c.universe.forEach((u, i) => {
       if (u.isDelisted) return
       out.push({
-        entry: { name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex },
+        entry: { name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, dex, perpDexIndex: c.perpDexIndex },
         ctx: buildCtx(c.ctxs[i] as Record<string, string | undefined>),
       })
     })
