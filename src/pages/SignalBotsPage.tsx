@@ -18,6 +18,7 @@ import {
   createChart,
   createSeriesMarkers,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
   type SeriesMarker,
@@ -143,6 +144,9 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
   const chartRef = useRef<IChartApi | null>(null)
   const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const indicatorLinesRef = useRef<ISeriesApi<'Line'>[]>([])
+  // Horizontal Fibonacci price lines from the strategy (Elliott W2/W3/W4/W5,
+  // ABC retracements). Kept so the indicator toggle can hide/show them.
+  const fibLinesRef = useRef<IPriceLine[]>([])
   const waveMarkersRef = useRef<SeriesMarker<Time>[]>([])
   const signalMarkersRef = useRef<SeriesMarker<Time>[]>([])
   const tradeMarkersRef = useRef<SeriesMarker<Time>[]>([])
@@ -234,16 +238,19 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
 
     // Horizontal price lines (Elliott Fibonacci retracements, etc.) — same
     // rendering as the Backtester's ChartPanel so live charts match what the
-    // backtest shows.
+    // backtest shows. Captured so the Hide Indicator toggle can hide them too.
+    fibLinesRef.current = []
     for (const pl of strategyOutput.priceLines ?? []) {
-      candleSeries.createPriceLine({
+      const handle = candleSeries.createPriceLine({
         price: pl.price,
         color: pl.color,
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
+        axisLabelVisible: showIndicator,
+        lineVisible: showIndicator,
         title: pl.label,
       })
+      fibLinesRef.current.push(handle)
     }
 
     // Wave-number annotations (Elliott ① ② ③ ④ ⑤) — pinned to the chart, not
@@ -458,6 +465,7 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       chartRef.current = null
       markersApiRef.current = null
       indicatorLinesRef.current = []
+      fibLinesRef.current = []
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, strategyOutput, trades])
@@ -476,10 +484,14 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
     api.setMarkers(list)
   }, [showSignals, candles, strategyOutput, trades])
 
-  // Toggle indicator line visibility without rebuilding the chart.
+  // Toggle indicator visibility (main-chart lines + Fibonacci price lines)
+  // without rebuilding the chart. Sub-pane chart is hidden via CSS below.
   useEffect(() => {
     for (const s of indicatorLinesRef.current) {
       try { s.applyOptions({ visible: showIndicator }) } catch {}
+    }
+    for (const pl of fibLinesRef.current) {
+      try { pl.applyOptions({ lineVisible: showIndicator, axisLabelVisible: showIndicator }) } catch {}
     }
   }, [showIndicator])
 

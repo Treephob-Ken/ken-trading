@@ -53,6 +53,9 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
   // Sub-pane indicator series (oscillators like RSI, MACD, Stoch). MACD also
   // adds a HistogramSeries — both kinds end up here.
   const subPaneSeriesRef = useRef<ISeriesApi<'Line' | 'Histogram'>[]>([])
+  // Horizontal Fibonacci price lines (Elliott W2/W3/W4/W5/ABC retracements).
+  // Kept so the Hide Indicator toggle can hide them too.
+  const fibLinesRef = useRef<IPriceLine[]>([])
 
   const [showSignals, setShowSignals] = useState(true)
   const [showIndicator, setShowIndicator] = useState(true)
@@ -143,15 +146,18 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
     tradeMarkersRef.current = tradeMarkerList
     markersApiRef.current = createSeriesMarkers(candleSeries, [])
 
+    fibLinesRef.current = []
     for (const pl of output?.priceLines ?? []) {
-      candleSeries.createPriceLine({
+      const handle = candleSeries.createPriceLine({
         price: pl.price,
         color: pl.color,
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
+        axisLabelVisible: showIndicator,
+        lineVisible: showIndicator,
         title: pl.label,
       })
+      fibLinesRef.current.push(handle)
     }
 
     const sub = output?.subPane
@@ -225,6 +231,7 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
       tradePriceLinesRef.current = []
       indicatorLinesRef.current = []
       subPaneSeriesRef.current = []
+      fibLinesRef.current = []
     }
   }, [candles, output, trades])
 
@@ -241,14 +248,17 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
     api.setMarkers(list)
   }, [showSignals, candles, output, trades])
 
-  // Toggle indicator visibility (main-chart lines + sub-pane oscillators like
-  // MACD/RSI/Stoch) without rebuilding the chart.
+  // Toggle indicator visibility (main-chart lines + sub-pane oscillators +
+  // Fibonacci price lines) without rebuilding the chart.
   useEffect(() => {
     for (const s of indicatorLinesRef.current) {
       try { s.applyOptions({ visible: showIndicator }) } catch {}
     }
     for (const s of subPaneSeriesRef.current) {
       try { s.applyOptions({ visible: showIndicator }) } catch {}
+    }
+    for (const pl of fibLinesRef.current) {
+      try { pl.applyOptions({ lineVisible: showIndicator, axisLabelVisible: showIndicator }) } catch {}
     }
   }, [showIndicator])
 
