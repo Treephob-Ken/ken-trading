@@ -267,17 +267,39 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
     // We intentionally do NOT render hindsight strategy B/S markers — only the
     // bot's actual fills, walked chronologically and paired into open/close
     // events with realized PnL. Style mirrors the Trade Log detail chart.
+    //
+    // Partial fills: a single market order on HL often returns as 3-5 fills
+    // back-to-back. Without aggregation each one becomes its own marker and
+    // the chart turns into a wall of stacked text. So we first roll same-side
+    // fills within a 60-second window into one logical event before walking
+    // the pair state.
     signalMarkersRef.current = []
     tradeMarkersRef.current = []
-    const sortedTrades = [...trades]
+    const FILL_GROUP_MS = 60_000
+    const rawSorted = [...trades]
       .filter(tr => tr.price != null && tr.price > 0)
       .sort((a, b) => a.time - b.time)
+    type AggFill = { time: number; side: 'buy' | 'sell'; size: number; price: number }
+    const sortedTrades: AggFill[] = []
+    for (const tr of rawSorted) {
+      const last = sortedTrades[sortedTrades.length - 1]
+      const px = tr.price as number
+      if (last && last.side === tr.side && tr.time - last.time < FILL_GROUP_MS) {
+        // Merge into the prior logical fill — size-weighted price average.
+        const totalSize = last.size + tr.size
+        last.price = (last.price * last.size + px * tr.size) / totalSize
+        last.size = totalSize
+        last.time = tr.time   // anchor to the most recent partial
+      } else {
+        sortedTrades.push({ time: tr.time, side: tr.side, size: tr.size, price: px })
+      }
+    }
 
     let posSize = 0           // signed: + long, − short
     let entryPx = 0           // size-weighted average entry price
     let entrySide: 'long' | 'short' | null = null
     for (const tr of sortedTrades) {
-      const px = tr.price as number
+      const px = tr.price
       const time = t(Math.floor(tr.time / 1000)) as Time
       const signed = tr.side === 'buy' ? tr.size : -tr.size
 
@@ -291,26 +313,18 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
           position: signed > 0 ? 'belowBar' : 'aboveBar',
           color: signed > 0 ? '#26a69a' : '#ef5350',
           shape: signed > 0 ? 'arrowUp' : 'arrowDown',
-          text: signed > 0 ? 'Open long' : 'Open short',
-          size: 2,
+          text: signed > 0 ? 'BUY' : 'SELL',
+          size: 1,
         })
         continue
       }
 
       const sameSide = (posSize > 0 && signed > 0) || (posSize < 0 && signed < 0)
       if (sameSide) {
-        // ADD — average up/down. Rare for this bot but handled.
+        // Position scaling — average price, no marker (avoids "Add long" clutter).
         const newSize = posSize + signed
         entryPx = (entryPx * Math.abs(posSize) + px * Math.abs(signed)) / Math.abs(newSize)
         posSize = newSize
-        tradeMarkersRef.current.push({
-          time,
-          position: signed > 0 ? 'belowBar' : 'aboveBar',
-          color: signed > 0 ? '#26a69a' : '#ef5350',
-          shape: signed > 0 ? 'arrowUp' : 'arrowDown',
-          text: signed > 0 ? 'Add long' : 'Add short',
-          size: 2,
-        })
         continue
       }
 
@@ -319,14 +333,13 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       const pnl = entrySide === 'long'
         ? (px - entryPx) * closeSize
         : (entryPx - px) * closeSize
-      const pnlText = `Close ${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(2)}`
       tradeMarkersRef.current.push({
         time,
         position: posSize > 0 ? 'aboveBar' : 'belowBar',
         color: pnl >= 0 ? '#26a69a' : '#ef5350',
         shape: posSize > 0 ? 'arrowDown' : 'arrowUp',
-        text: pnlText,
-        size: 2,
+        text: `${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(2)}`,
+        size: 1,
       })
 
       const remainder = Math.abs(signed) - closeSize
@@ -340,8 +353,8 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
           position: signed > 0 ? 'belowBar' : 'aboveBar',
           color: signed > 0 ? '#26a69a' : '#ef5350',
           shape: signed > 0 ? 'arrowUp' : 'arrowDown',
-          text: signed > 0 ? 'Open long' : 'Open short',
-          size: 2,
+          text: signed > 0 ? 'BUY' : 'SELL',
+          size: 1,
         })
       } else {
         posSize = 0
@@ -363,20 +376,20 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
         const signed = tr.side === 'buy' ? tr.size : -tr.size
         if (scanPos === 0) {
           scanPos = signed
-          scanEntryPx = tr.price as number
+          scanEntryPx = tr.price
           scanSide = signed > 0 ? 'long' : 'short'
         } else {
           const sameSide = (scanPos > 0 && signed > 0) || (scanPos < 0 && signed < 0)
           if (sameSide) {
             const newSize = scanPos + signed
-            scanEntryPx = (scanEntryPx * Math.abs(scanPos) + (tr.price as number) * Math.abs(signed)) / Math.abs(newSize)
+            scanEntryPx = (scanEntryPx * Math.abs(scanPos) + tr.price * Math.abs(signed)) / Math.abs(newSize)
             scanPos = newSize
           } else {
             const closeSize = Math.min(Math.abs(scanPos), Math.abs(signed))
             const remainder = Math.abs(signed) - closeSize
             if (remainder === 0) {
               lastEntry = { px: scanEntryPx, side: scanSide as 'long' | 'short' }
-              lastExitPx = tr.price as number
+              lastExitPx = tr.price
               scanPos = 0
               scanSide = null
             }
