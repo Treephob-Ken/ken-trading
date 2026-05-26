@@ -61,11 +61,13 @@ export function AuthProvider({ children }: Props) {
   const [state, setState] = useState<AuthState>('loading')
 
   useEffect(() => {
+    // Always ping /auth/me first — single-tenant servers reply 404 and we let
+    // the user in without a JWT. We only fall through to /login when the server
+    // is in multi-user mode (200/401) AND we have no valid session.
     const jwt = getJwt()
-    if (!jwt) { setState(null); return }
-    fetch('/auth/me', { headers: { Authorization: `Bearer ${jwt}` } })
+    const headers: Record<string, string> = jwt ? { Authorization: `Bearer ${jwt}` } : {}
+    fetch('/auth/me', { headers })
       .then(async (r) => {
-        // 404 = single-tenant mode — no auth required; treat as local session
         if (r.status === 404) {
           return { sub: 'local', email: 'local', isAdmin: true } satisfies AuthUser
         }

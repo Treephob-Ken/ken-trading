@@ -1012,12 +1012,58 @@ app.get('/api/assets', requireAuth, async (req: Request, res: Response) => {
 })
 
 app.get('/api/asset-info', requireAuth, async (req: Request, res: Response) => {
-  const asset = typeof req.query.asset === 'string' ? req.query.asset.trim().toUpperCase() : ''
+  const raw = typeof req.query.asset === 'string' ? req.query.asset.trim() : ''
+  // Preserve colon-prefix dex names; only uppercase plain crypto tickers.
+  const asset = raw.includes(':') ? raw : raw.toUpperCase()
   if (!asset) { res.status(400).json({ error: 'asset query param required' }); return }
   try {
     res.json(await getAssetInfo(asset, userCreds(req)))
   } catch (e) {
     res.status(404).json({ error: (e as Error).message })
+  }
+})
+
+// HIP-3 scanner universe — returns the top-N HIP-3 assets ranked by HL open
+// interest. Used by the Scanner's "Stocks & Commodities" tab (HIP-3 markets
+// have no Binance volume to rank against). No auth — universe data is public.
+app.get('/api/scanner-universe', async (req: Request, res: Response) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100)
+  try {
+    const { listAllAssetsWithCtx } = await import('./hyperliquid-hip3.js')
+    const { getClients } = await import('./trade.js')
+    const { info } = getClients(userCreds(req))
+    const all = await listAllAssetsWithCtx(info)
+    const hip3 = all
+      .filter((a) => a.entry.dex !== null)
+      .map((a) => ({
+        name: a.entry.name,
+        dex: a.entry.dex,
+        markPx: a.ctx.markPx,
+        openInterest: a.ctx.openInterest,
+        dayNtlVlm: a.ctx.dayNtlVlm,
+        notionalOI: a.ctx.openInterest * a.ctx.markPx,
+      }))
+      .sort((a, b) => b.notionalOI - a.notionalOI)
+      .slice(0, limit)
+    res.json(hip3)
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Public candle proxy — same routing logic the signal bot uses (Binance for
+// plain crypto tickers, Hyperliquid candleSnapshot for HIP-3 colon-prefixed
+// symbols like xyz:GOLD). No auth: candle data is public anyway.
+app.get('/api/candles', async (req: Request, res: Response) => {
+  const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.trim() : ''
+  const interval = typeof req.query.interval === 'string' ? req.query.interval.trim() : '1h'
+  const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000)
+  if (!symbol) { res.status(400).json({ error: 'symbol query param required' }); return }
+  try {
+    const candles = await fetchKlines(symbol, interval, limit)
+    res.json(candles)
+  } catch (e) {
+    res.status(502).json({ error: (e as Error).message })
   }
 })
 

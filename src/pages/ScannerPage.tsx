@@ -4,6 +4,7 @@ import type { SymbolInfo } from '@/lib/binance'
 import {
   getScannerUniverse,
   clearUniverseCache,
+  type UniverseKind,
 } from '@/lib/scanner/universe'
 import IndicatorScanTab from '@/components/scanner/IndicatorScanTab'
 import GridScanTab from '@/components/scanner/GridScanTab'
@@ -19,6 +20,9 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
   const [tab, setTab] = useState<TabId>(
     () => (localStorage.getItem('scanner_tab') as TabId) || 'indicator',
   )
+  const [kind, setKind] = useState<UniverseKind>(
+    () => (localStorage.getItem('scanner_kind') as UniverseKind) || 'crypto',
+  )
   const [universe, setUniverse] = useState<SymbolInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -27,10 +31,14 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
     localStorage.setItem('scanner_tab', tab)
   }, [tab])
 
+  useEffect(() => {
+    localStorage.setItem('scanner_kind', kind)
+  }, [kind])
+
   const loadUniverse = () => {
     setLoading(true)
     setError(null)
-    getScannerUniverse(30)
+    getScannerUniverse(30, kind)
       .then((u) => {
         setUniverse(u)
         setLoading(false)
@@ -41,7 +49,7 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
       })
   }
 
-  useEffect(loadUniverse, [])
+  useEffect(loadUniverse, [kind])
 
   const refresh = () => {
     clearUniverseCache()
@@ -81,6 +89,31 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
           Could not load symbol universe: {error}
         </div>
       )}
+
+      {/* ── Market kind toggle ──────────────────────────────────────────── */}
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-dim">Universe</span>
+        <div className="flex overflow-hidden rounded-md border border-border">
+          <button
+            type="button"
+            onClick={() => setKind('crypto')}
+            className={`px-3 py-1 text-xs font-semibold ${
+              kind === 'crypto' ? 'bg-brand text-bg' : 'bg-panel-2 text-dim hover:text-text'
+            }`}
+          >
+            Crypto (Binance-ranked)
+          </button>
+          <button
+            type="button"
+            onClick={() => setKind('hip3')}
+            className={`px-3 py-1 text-xs font-semibold ${
+              kind === 'hip3' ? 'bg-brand text-bg' : 'bg-panel-2 text-dim hover:text-text'
+            }`}
+          >
+            Stocks & Commodities (HL-only)
+          </button>
+        </div>
+      </div>
 
       {/* ── Tabs ────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 border-b border-border">

@@ -7,6 +7,7 @@ import {
 } from '@nktkas/hyperliquid'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { EnvConfig } from './config.js'
+import { resolveAssetMeta } from './hyperliquid-hip3.js'
 
 export interface HLClients {
   info: InfoClient
@@ -42,25 +43,23 @@ export interface AssetMeta {
   maxLeverage: number
 }
 
-// Look up the asset's index, size decimals, and current price. The grid bot
-// places all orders using these numbers, so this is the only place we touch
-// Hyperliquid's metadata APIs.
+// Look up the asset's index, size decimals, and current price. Routes through
+// the HIP-3 resolver so colon-prefixed names like "xyz:GOLD" hit the right dex.
 export async function getAssetMeta(
   info: InfoClient,
   asset: string,
 ): Promise<AssetMeta> {
-  const result = await info.metaAndAssetCtxs()
-  const meta = result[0]
-  const ctxs = result[1]
-  const index = meta.universe.findIndex((u) => u.name === asset)
-  if (index < 0) throw new Error(`Asset ${asset} not found on Hyperliquid`)
-  const u = meta.universe[index]
-  const ctx = ctxs[index]
-  const markPx = Number(ctx.markPx)
-  const midPx = Number(ctx.midPx ?? ctx.markPx)
-  // Perp price precision: up to (6 - szDecimals) decimals AND max 5 sig figs.
-  const pxDecimals = Math.max(0, 6 - u.szDecimals)
-  return { index, name: asset, szDecimals: u.szDecimals, pxDecimals, markPx, midPx, maxLeverage: u.maxLeverage }
+  const m = await resolveAssetMeta(info, asset)
+  const pxDecimals = Math.max(0, 6 - m.szDecimals)
+  return {
+    index: m.index,
+    name: m.name,
+    szDecimals: m.szDecimals,
+    pxDecimals,
+    markPx: m.ctx.markPx,
+    midPx: m.ctx.midPx,
+    maxLeverage: m.maxLeverage,
+  }
 }
 
 // Round a price to satisfy Hyperliquid's 5-sig-fig + decimal-place limits.

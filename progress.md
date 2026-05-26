@@ -4,7 +4,7 @@
 > Max ~200 lines. When something changes, **edit the relevant section** —
 > don't append a dated entry. Git history is the changelog.
 
-Last reviewed: 2026-05-25 (pre-mainnet bug audit pass)
+Last reviewed: 2026-05-26 (Phase A: HIP-3 read-only support — gold, stocks, forex, commodities)
 
 ---
 
@@ -59,6 +59,8 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Strategy Backtester (Binance candles, MTF, regime, walk-forward) | ✅ |
 | Grid Optimizer (sweep + deploy-to-bot) | ✅ |
 | Currency Scanner (Indicator + Grid tabs, batch-rank top 30 HL coins, persisted results + colored verdicts) | ✅ |
+| Scanner — "Stocks & Commodities" universe toggle (HIP-3 ranked by HL open interest) | ✅ Phase A read-only |
+| HIP-3 markets (Gold, S&P 500, US stocks, forex, oil) in Backtester + Symbol picker | ✅ Phase A — backtest only, no live orders yet |
 | Live SSE log tail across all bots | ✅ Logs page |
 | Login page redesign (dot-grid, framer-motion) | ✅ |
 
@@ -66,6 +68,10 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 
 ## What's still pending
 
+- [ ] HIP-3 Phase B: enable live trading for `xyz:GOLD` end-to-end on testnet
+      first, then mainnet (add to `ALLOWED_ASSETS`, wire Signal Bot creation,
+      verify TP/SL brackets land on HIP-3 asset IDs).
+- [ ] HIP-3 Phase C: rollout to TSLA / NVDA / S&P 500 + Scanner stocks tab live.
 - [ ] Per-user audit log: `limits.ts:recordTrade` accepts `userId` but
       `trade.ts` doesn't thread it through, so all entries still land in the
       global `bot/trade-audit.log`.
@@ -161,6 +167,14 @@ pm2 restart cloudflare-tunnel    # if tunnel drops
   top-30 24h `quoteVolume`. If `/api/assets` 401s in multi-user mode,
   `hlAssets.ts` falls back to a hardcoded BTC/ETH/SOL/BNB/XRP list so the
   page still renders something.
+- **HIP-3 asset names use a `dex:coin` shape** (e.g. `xyz:GOLD`, `xyz:TSLA`).
+  The dex prefix must be lowercase, coin uppercase — `normalizeAssetName()` in
+  `bot/src/hyperliquid-hip3.ts` enforces both. The same module wraps
+  `metaAndAssetCtxs({ dex })` so `getAssetMeta()` resolves stocks/commodities.
+  Candles for HIP-3 come from HL's `candleSnapshot` endpoint, not Binance —
+  see `bot/src/strategy/hl-market-data.ts` and the `/api/candles` proxy in
+  `server.ts`. The web's `binance.ts` and the bot's `market-data.ts` both
+  branch on `symbol.includes(':')`.
 - **Grid bot reconcile order matters.** `start({ reconcile: true })` now
   places SL/TP triggers BEFORE adopting the pre-existing grid orders, and the
   orphan-cancel sweep skips our own fresh `slTriggerOid`/`tpTriggerOid`.

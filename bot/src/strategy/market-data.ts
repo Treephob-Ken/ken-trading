@@ -1,7 +1,9 @@
-// Binance public market data — REST only (no API key, no WebSocket). The
-// signal bot polls candles on an interval rather than streaming.
+// Public market data. Most symbols come from Binance (no API key, no WS — the
+// signal bot polls). HIP-3 symbols (colon-prefixed, e.g. "xyz:GOLD") have no
+// Binance pair, so they route to Hyperliquid's public candleSnapshot endpoint.
 
 import type { Candle } from './strategies.js'
+import { fetchKlinesHL } from './hl-market-data.js'
 
 const REST = 'https://data-api.binance.vision/api/v3'
 
@@ -23,6 +25,9 @@ export async function fetchKlines(
   interval: string,
   limit = 500,
 ): Promise<Candle[]> {
+  if (symbol.includes(':')) {
+    return fetchKlinesHL(symbol, interval, limit)
+  }
   const url = `${REST}/klines?symbol=${encodeURIComponent(symbol)}` +
     `&interval=${encodeURIComponent(interval)}&limit=${Math.min(limit, 1000)}`
   const res = await fetch(url)

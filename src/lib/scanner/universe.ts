@@ -1,6 +1,8 @@
 // Builds the symbol universe shared by both scanners.
-// Intersects the HL-tradeable coin list with Binance USDT pairs ranked by
-// 24h volume, then keeps the top N (default 30) most liquid combos.
+// Crypto path: intersects HL-tradeable coin list with Binance USDT pairs ranked
+// by 24h volume.
+// HIP-3 path: pulls stocks/commodities/forex from the bot's /api/scanner-universe,
+// ranked by Hyperliquid open interest (no Binance equivalent).
 
 import type { SymbolInfo } from '@/lib/binance'
 import { fetchHLAssets } from '@/lib/hlAssets'
@@ -12,10 +14,13 @@ interface Binance24h {
   quoteVolume: string
 }
 
-let _cache: SymbolInfo[] | null = null
+export type UniverseKind = 'crypto' | 'hip3'
 
-export async function getScannerUniverse(limit = 30): Promise<SymbolInfo[]> {
-  if (_cache && _cache.length >= limit) return _cache.slice(0, limit)
+let _cryptoCache: SymbolInfo[] | null = null
+let _hip3Cache: SymbolInfo[] | null = null
+
+async function getCryptoUniverse(limit: number): Promise<SymbolInfo[]> {
+  if (_cryptoCache && _cryptoCache.length >= limit) return _cryptoCache.slice(0, limit)
 
   const [hlAssets, tickers] = await Promise.all([
     fetchHLAssets(),
@@ -25,7 +30,6 @@ export async function getScannerUniverse(limit = 30): Promise<SymbolInfo[]> {
     }),
   ])
 
-  // Index Binance USDT tickers by base asset → quote volume.
   const binanceVol = new Map<string, number>()
   for (const t of tickers) {
     if (!t.symbol.endsWith('USDT')) continue
@@ -33,16 +37,52 @@ export async function getScannerUniverse(limit = 30): Promise<SymbolInfo[]> {
     binanceVol.set(base, Number(t.quoteVolume))
   }
 
+  // Only consider non-HIP-3 (plain) HL assets — HIP-3 has no Binance pair.
   const ranked = hlAssets
+    .filter((a) => !a.symbol.includes(':'))
     .map((a) => ({ ...a, vol: binanceVol.get(a.base) ?? 0 }))
     .filter((a) => a.vol > 0)
     .sort((a, b) => b.vol - a.vol)
     .map(({ symbol, base, quote }) => ({ symbol, base, quote }))
 
-  _cache = ranked
+  _cryptoCache = ranked
   return ranked.slice(0, limit)
 }
 
+interface Hip3UniverseRow {
+  name: string
+  dex: string | null
+  markPx: number
+  openInterest: number
+  dayNtlVlm: number
+  notionalOI: number
+}
+
+async function getHip3Universe(limit: number): Promise<SymbolInfo[]> {
+  if (_hip3Cache && _hip3Cache.length >= limit) return _hip3Cache.slice(0, limit)
+  const jwt = localStorage.getItem('auth_jwt') ?? ''
+  const res = await fetch(`/api/scanner-universe?limit=${limit}`, {
+    headers: jwt ? { Authorization: `Bearer ${jwt}` } : {},
+  })
+  if (!res.ok) throw new Error(`/api/scanner-universe returned ${res.status}`)
+  const rows = (await res.json()) as Hip3UniverseRow[]
+  const ranked: SymbolInfo[] = rows.map((r) => ({
+    symbol: r.name,
+    base: r.name,
+    quote: 'USDC',
+  }))
+  _hip3Cache = ranked
+  return ranked.slice(0, limit)
+}
+
+export async function getScannerUniverse(
+  limit = 30,
+  kind: UniverseKind = 'crypto',
+): Promise<SymbolInfo[]> {
+  return kind === 'hip3' ? getHip3Universe(limit) : getCryptoUniverse(limit)
+}
+
 export function clearUniverseCache() {
-  _cache = null
+  _cryptoCache = null
+  _hip3Cache = null
 }

@@ -6,6 +6,11 @@ import {
   roundSize,
   type HLClients,
 } from './hyperliquid.js'
+import {
+  listAllAssets,
+  normalizeAssetName,
+  resolveAssetMeta,
+} from './hyperliquid-hip3.js'
 import { log } from './logger.js'
 import {
   assertAssetAllowed,
@@ -392,40 +397,43 @@ export async function getAssetInfo(
   oraclePx: number         // oracle price
 }> {
   const { info } = getClients(creds)
-  const upper = asset.trim().toUpperCase()
-  const result = await info.metaAndAssetCtxs()
-  const meta = result[0]
-  const ctxs = result[1]
-  const index = meta.universe.findIndex((u) => u.name === upper)
-  if (index < 0) throw new Error(`Asset ${upper} not found on Hyperliquid`)
-  const u = meta.universe[index]
-  const ctx = ctxs[index]
-  const markPx = Number(ctx.markPx)
-  const midPx = Number(ctx.midPx ?? ctx.markPx)
-  const minSz = Math.pow(10, -u.szDecimals)
+  const normalized = normalizeAssetName(asset)
+  const m = await resolveAssetMeta(info, normalized)
+  const minSz = Math.pow(10, -m.szDecimals)
   return {
-    asset: upper,
-    midPx,
-    markPx,
-    szDecimals: u.szDecimals,
+    asset: normalized,
+    midPx: m.ctx.midPx,
+    markPx: m.ctx.markPx,
+    szDecimals: m.szDecimals,
     minSz,
-    minNotional: minSz * midPx,
-    maxLeverage: u.maxLeverage,
-    funding: Number(ctx.funding),
-    openInterest: Number(ctx.openInterest),
-    prevDayPx: Number(ctx.prevDayPx),
-    dayNtlVlm: Number(ctx.dayNtlVlm),
-    oraclePx: Number(ctx.oraclePx),
+    minNotional: minSz * m.ctx.midPx,
+    maxLeverage: m.maxLeverage,
+    funding: m.ctx.funding,
+    openInterest: m.ctx.openInterest,
+    prevDayPx: m.ctx.prevDayPx,
+    dayNtlVlm: m.ctx.dayNtlVlm,
+    oraclePx: m.ctx.oraclePx,
   }
 }
 
 export async function listAssets(creds?: EnvConfig | null): Promise<string[]> {
   const { info } = getClients(creds)
-  const [meta] = await info.metaAndAssetCtxs()
-  return meta.universe
-    .filter((u) => !u.isDelisted)
-    .map((u) => u.name)
-    .sort()
+  const all = await listAllAssets(info)
+  return all.map((u) => u.name).sort()
+}
+
+// Same as listAssets but tagged with the dex name (null = main perp dex).
+// The web app uses this to classify symbols into crypto vs stocks vs commodities.
+export interface ListedAsset {
+  name: string
+  dex: string | null
+}
+export async function listAssetsTagged(creds?: EnvConfig | null): Promise<ListedAsset[]> {
+  const { info } = getClients(creds)
+  const all = await listAllAssets(info)
+  return all
+    .map((u) => ({ name: u.name, dex: u.dex }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export interface PositionInfo {

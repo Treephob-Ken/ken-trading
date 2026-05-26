@@ -61,10 +61,35 @@ export interface KlineQuery {
   endTime?: number // ms epoch
 }
 
+// HIP-3 symbols (colon-prefixed, e.g. "xyz:GOLD") have no Binance pair. The
+// bot server's `/api/candles` proxy routes them to Hyperliquid's candleSnapshot
+// endpoint and returns the same Candle shape.
+async function fetchKlinesHL(q: KlineQuery): Promise<Candle[]> {
+  // Hyperliquid candleSnapshot caps at 5000 bars per response. Approximate
+  // limit from the requested range; if no range, return the most recent 1000.
+  const limit = 1000
+  const url = `/api/candles?symbol=${encodeURIComponent(q.symbol)}&interval=${encodeURIComponent(q.interval)}&limit=${limit}`
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error(`/api/candles returned ${res.status} for ${q.symbol} ${q.interval}`)
+  }
+  const data = (await res.json()) as Candle[]
+  if (q.startTime != null) {
+    return data.filter((c) => c.time * 1000 >= q.startTime!)
+  }
+  if (q.endTime != null) {
+    return data.filter((c) => c.time * 1000 <= q.endTime!)
+  }
+  return data
+}
+
 // Fetches candles. With no startTime, returns the most recent 1000 bars
 // (optionally up to endTime). With a startTime, pages forward through the
 // range until endTime, capped at MAX_BARS.
 export async function fetchKlines(q: KlineQuery): Promise<Candle[]> {
+  if (q.symbol.includes(':')) {
+    return fetchKlinesHL(q)
+  }
   const base = `${REST}/klines?symbol=${q.symbol}&interval=${q.interval}`
 
   if (q.startTime == null) {
@@ -120,6 +145,12 @@ export function subscribeKline(
   onMsg: (k: LiveKline) => void,
   onStatus?: (open: boolean) => void,
 ): () => void {
+  // HIP-3 markets have no Binance WS stream. Phase A: skip live ticks for them;
+  // the chart will refresh on the polled candle path instead.
+  if (symbol.includes(':')) {
+    onStatus?.(false)
+    return () => {}
+  }
   const ws = new WebSocket(`${WS}/${symbol.toLowerCase()}@kline_${interval}`)
 
   ws.onopen = () => onStatus?.(true)

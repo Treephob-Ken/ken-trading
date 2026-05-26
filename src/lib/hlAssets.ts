@@ -24,7 +24,15 @@ export async function fetchHLAssets(): Promise<SymbolInfo[]> {
   })
   if (!res.ok) throw new Error(`/api/assets returned ${res.status}`)
   const names: string[] = await res.json()
-  _cache = names.map((n) => ({ symbol: `${n}USDT`, base: n, quote: 'USDC' }))
+  // HIP-3 assets (e.g. "xyz:GOLD") carry their dex prefix and have no Binance
+  // pair; keep the raw name as both `symbol` and `base`. Plain crypto names get
+  // the legacy `{BASE}USDT` shape so Binance fetches still work.
+  _cache = names.map((n) => {
+    if (n.includes(':')) {
+      return { symbol: n, base: n, quote: 'USDC' }
+    }
+    return { symbol: `${n}USDT`, base: n, quote: 'USDC' }
+  })
   return _cache
 }
 
