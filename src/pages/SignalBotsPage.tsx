@@ -151,9 +151,9 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
   const signalMarkersRef = useRef<SeriesMarker<Time>[]>([])
   const tradeMarkersRef = useRef<SeriesMarker<Time>[]>([])
 
-  // Markers off by default — live chart stays clean; click Show Buy/Sell to reveal.
-  const [showSignals, setShowSignals] = useState(false)
-  const [showIndicator, setShowIndicator] = useState(true)
+  // Live-chart defaults: show trade markers, hide indicator lines for clean candles.
+  const [showSignals, setShowSignals] = useState(true)
+  const [showIndicator, setShowIndicator] = useState(false)
 
   // Live Markov regime labels for the hover overlay. Cheap — same logic the
   // Backtester runs; just needs ≥30 candles to start labelling.
