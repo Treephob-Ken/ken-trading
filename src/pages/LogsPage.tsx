@@ -3,24 +3,22 @@ import { Download } from 'lucide-react'
 import { apiFetch } from '@/contexts/AuthContext'
 import { downloadCsv, toCsv } from '@/lib/csv'
 import type { AuditLine, Fill, JournalSummary, RoundTrip } from '@/lib/journal'
-import { sourceLabel } from '@/lib/journal'
+import { sourceLabel, humanizeReason } from '@/lib/journal'
 import KpiHero from '@/components/journal/KpiHero'
 import FiltersBar, { type FilterState } from '@/components/journal/FiltersBar'
 import RoundTripsTable from '@/components/journal/RoundTripsTable'
 import FillsTable from '@/components/journal/FillsTable'
 import AuditTable from '@/components/journal/AuditTable'
-import EventsStream from '@/components/journal/EventsStream'
 import TradeDetailModal from '@/components/journal/TradeDetailModal'
 import ActivityHeatmap from '@/components/journal/ActivityHeatmap'
 import BotLeaderboard from '@/components/journal/BotLeaderboard'
 
-type TabId = 'roundtrips' | 'fills' | 'audit' | 'events'
+type TabId = 'roundtrips' | 'fills' | 'rejected'
 
 const TABS: { id: TabId; label: string; hint: string }[] = [
   { id: 'roundtrips', label: 'Round-Trips', hint: 'Completed trades, entry → exit' },
   { id: 'fills', label: 'Fills', hint: 'Every execution from Hyperliquid' },
-  { id: 'audit', label: 'Audit', hint: 'Local order attempts, filled or not' },
-  { id: 'events', label: 'Events', hint: 'Live bot log stream' },
+  { id: 'rejected', label: 'Rejected', hint: 'Orders that failed, with the reason' },
 ]
 
 // View Transitions API for crossfade between tabs. No-op in unsupported browsers.
@@ -113,7 +111,7 @@ export default function LogsPage() {
     return [...s].sort()
   }, [trips, fills, audit])
 
-  const showResult = tab === 'roundtrips' || tab === 'audit'
+  const showResult = tab === 'roundtrips'
 
   const handleExport = () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -181,37 +179,37 @@ export default function LogsPage() {
         ],
       )
       downloadCsv(`fills-${filter.range}-${stamp}.csv`, csv)
-    } else if (tab === 'audit') {
+    } else if (tab === 'rejected') {
       const csv = toCsv(
-        audit.map((a) => ({
-          ts: a.ts,
-          asset: a.asset,
-          side: a.side,
-          filled: a.filled,
-          requestedSize: a.requestedSize,
-          filledSize: a.filledSize,
-          avgPx: a.avgPx ?? '',
-          notionalUsd: a.notionalUsd,
-        })),
+        audit
+          .filter((a) => !a.filled && !a.resting)
+          .map((a) => ({
+            ts: a.ts,
+            asset: a.asset,
+            side: a.side,
+            reason: humanizeReason(a.reason),
+            rawReason: a.reason ?? '',
+            requestedSize: a.requestedSize,
+            notionalUsd: a.notionalUsd,
+          })),
         [
           { key: 'ts', label: 'Time' },
           { key: 'asset', label: 'Asset' },
           { key: 'side', label: 'Side' },
-          { key: 'filled', label: 'Filled' },
+          { key: 'reason', label: 'Reason' },
+          { key: 'rawReason', label: 'Raw Reason' },
           { key: 'requestedSize', label: 'Requested Size' },
-          { key: 'filledSize', label: 'Filled Size' },
-          { key: 'avgPx', label: 'Avg Price' },
           { key: 'notionalUsd', label: 'Notional (USD)' },
         ],
       )
-      downloadCsv(`audit-${filter.range}-${stamp}.csv`, csv)
+      downloadCsv(`rejected-${filter.range}-${stamp}.csv`, csv)
     }
   }
 
-  const canExport = tab !== 'events' && (
+  const canExport = (
     (tab === 'roundtrips' && trips.length > 0) ||
     (tab === 'fills' && fills.length > 0) ||
-    (tab === 'audit' && audit.length > 0)
+    (tab === 'rejected' && audit.length > 0)
   )
 
   return (
@@ -236,7 +234,7 @@ export default function LogsPage() {
       {/* Error banner */}
       {error && (
         <div className="rounded-lg border border-loss/30 bg-loss/10 px-3 py-2 text-xs text-loss">
-          Couldn't load journal data: {error}. The Events tab still works.
+          Couldn't load journal data: {error}.
         </div>
       )}
 
@@ -271,23 +269,20 @@ export default function LogsPage() {
       </div>
 
       {/* Filters */}
-      {tab !== 'events' && (
-        <FiltersBar
-          state={filter}
-          onChange={setFilter}
-          bots={botOptions}
-          assets={assetOptions}
-          showResult={showResult}
-        />
-      )}
+      <FiltersBar
+        state={filter}
+        onChange={setFilter}
+        bots={botOptions}
+        assets={assetOptions}
+        showResult={showResult}
+      />
 
       {/* Active tab */}
       {tab === 'roundtrips' && (
         <RoundTripsTable rows={trips} loading={loadingTrips} filter={filter} onSelect={setDetailTrip} />
       )}
       {tab === 'fills' && <FillsTable rows={fills} loading={loadingFills} filter={filter} />}
-      {tab === 'audit' && <AuditTable rows={audit} loading={loadingAudit} filter={filter} />}
-      {tab === 'events' && <EventsStream />}
+      {tab === 'rejected' && <AuditTable rows={audit} loading={loadingAudit} filter={filter} />}
 
       {/* Detail modal */}
       <TradeDetailModal trip={detailTrip} onClose={() => setDetailTrip(null)} />

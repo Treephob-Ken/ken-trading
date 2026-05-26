@@ -50,6 +50,8 @@ export interface AuditLine {
   filledSize: number
   avgPx: number | null
   notionalUsd: number
+  resting?: boolean
+  reason?: string
 }
 
 export interface DailyBucket {
@@ -123,4 +125,34 @@ export function fmtTimeShort(ms: number): string {
 export function sourceLabel(s: FillSource): string {
   if (s.kind === 'manual') return 'Manual'
   return s.botName || s.kind
+}
+
+// Translate raw rejection strings (HL status codes, server-side limit errors)
+// into a short plain-English explanation. Falls back to the raw text if no
+// pattern matches.
+export function humanizeReason(reason: string | undefined): string {
+  if (!reason) return 'Unknown — order did not fill'
+  const r = reason.trim()
+  const low = r.toLowerCase()
+
+  // Hyperliquid order status codes
+  if (/MinTradeNtl/i.test(r)) return 'Order too small — Hyperliquid min is $10'
+  if (/InsufficientMarginForOrder|insufficient.*margin/i.test(r)) return 'Not enough margin in your account'
+  if (/ReduceOnly|reduce.only/i.test(r)) return 'Reduce-only blocked — no open position to close'
+  if (/Tick|priceMustBe/i.test(r)) return 'Price snapping issue (tick size)'
+  if (/Lot|sizeMustBe/i.test(r)) return 'Size snapping issue (lot size)'
+  if (/MaxLeverage|leverage/i.test(r)) return 'Exceeds max leverage allowed'
+  if (/OrderRejected|RejectedFromGov/i.test(r)) return 'Hyperliquid rejected the order'
+
+  // Server-side safety caps (from limits.ts)
+  if (/not in ALLOWED_ASSETS/i.test(r)) return 'Coin not in your allow-list'
+  if (/MAX_TRADE_NOTIONAL_USD/i.test(r)) return 'Exceeds your max trade size cap'
+  if (/Rate limit reached/i.test(r)) return 'Hit your trades-per-hour limit'
+  if (/rounds to 0/i.test(r)) return 'Size too small after rounding'
+
+  // IOC limit didn't cross the book
+  if (low.includes('waitingforfill') || low.includes('waitingfortrigger')) return 'Order placed but not filled yet'
+
+  // Fallback — first 80 chars of the raw message
+  return r.length > 80 ? r.slice(0, 80) + '…' : r
 }
