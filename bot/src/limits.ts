@@ -80,6 +80,12 @@ export interface AuditEntry {
   filledSize: number
   avgPx: number | null
   notionalUsd: number
+  // Resting limits are not rejections — flagged so the UI can filter them out
+  // of the "Rejected Orders" view.
+  resting?: boolean
+  // Raw failure string ("MinTradeNtl", "Rate limit reached…", asset-not-allowed
+  // message). Frontend humanizes for display. Absent on filled orders.
+  reason?: string
 }
 
 // Append one line of NDJSON to the audit log and count it toward the rolling

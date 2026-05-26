@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
+  ChevronsRight,
+  Eye,
+  EyeOff,
   Play,
   Plus,
   Save,
@@ -15,6 +18,8 @@ import {
   createChart,
   createSeriesMarkers,
   type IChartApi,
+  type ISeriesApi,
+  type ISeriesMarkersPluginApi,
   type SeriesMarker,
   type Time,
   type UTCTimestamp,
@@ -133,6 +138,18 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
   const [trades, setTrades] = useState<TradeRecord[]>([])
   const [hover, setHover] = useState<ChartHoverState | null>(null)
 
+  // Chart + marker plugin refs so the visibility toggles and "Latest Price"
+  // button can operate without rebuilding the chart.
+  const chartRef = useRef<IChartApi | null>(null)
+  const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+  const indicatorLinesRef = useRef<ISeriesApi<'Line'>[]>([])
+  const waveMarkersRef = useRef<SeriesMarker<Time>[]>([])
+  const signalMarkersRef = useRef<SeriesMarker<Time>[]>([])
+  const tradeMarkersRef = useRef<SeriesMarker<Time>[]>([])
+
+  const [showSignals, setShowSignals] = useState(true)
+  const [showIndicator, setShowIndicator] = useState(true)
+
   // Live Markov regime labels for the hover overlay. Cheap — same logic the
   // Backtester runs; just needs ≥30 candles to start labelling.
   const regimeLabels = useMemo(() => {
@@ -203,13 +220,16 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       candles.map(c => ({ time: t(c.time), open: c.open, high: c.high, low: c.low, close: c.close }))
     )
 
-    // Strategy indicator overlays
+    // Strategy indicator overlays — captured in a ref so we can toggle them.
+    indicatorLinesRef.current = []
     for (const ln of strategyOutput.mainLines) {
       const s = chart.addSeries(LineSeries, {
         color: ln.color, lineWidth: 2,
         priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        visible: showIndicator,
       })
       s.setData(ln.data.map(p => ({ time: t(p.time), value: p.value })))
+      indicatorLinesRef.current.push(s)
     }
 
     // Horizontal price lines (Elliott Fibonacci retracements, etc.) — same
@@ -226,24 +246,21 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       })
     }
 
-    // Strategy signals (teal/red arrows — identical to Backtester style)
-    const allMarkers: SeriesMarker<Time>[] = []
+    // Three marker groups so the toggle button can hide buy/sell + trades
+    // without touching the wave-number annotations.
+    waveMarkersRef.current = (strategyOutput.waveMarkers ?? []).map(wm => ({
+      time: t(wm.time) as Time,
+      position: wm.position,
+      color: '#a78bfa',
+      shape: 'circle',
+      text: wm.label,
+      size: 0.5,
+    }))
 
-    // Wave-number labels (Elliott ① ② ③ ④ ⑤) — folded into the same marker list.
-    for (const wm of strategyOutput.waveMarkers ?? []) {
-      allMarkers.push({
-        time: t(wm.time) as Time,
-        position: wm.position,
-        color: '#a78bfa',
-        shape: 'circle',
-        text: wm.label,
-        size: 0.5,
-      })
-    }
-
+    signalMarkersRef.current = []
     strategyOutput.signals.forEach((sig, i) => {
       if (!sig) return
-      allMarkers.push({
+      signalMarkersRef.current.push({
         time: t(candles[i].time) as Time,
         position: sig === 'buy' ? 'belowBar' : 'aboveBar',
         color: sig === 'buy' ? '#26a69a' : '#ef5350',
@@ -253,21 +270,18 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       })
     })
 
-    // Actual executed trades (yellow/orange — distinguish from signals)
-    trades.filter(tr => tr.price).forEach(tr => {
-      allMarkers.push({
-        time: t(Math.floor(tr.time / 1000)) as Time,
-        position: tr.side === 'buy' ? 'belowBar' : 'aboveBar',
-        color: tr.side === 'buy' ? '#facc15' : '#f97316',
-        shape: tr.side === 'buy' ? 'arrowUp' : 'arrowDown',
-        text: tr.side === 'buy' ? '▲' : '▼',
-        size: 2,
-      })
-    })
+    tradeMarkersRef.current = trades.filter(tr => tr.price).map(tr => ({
+      time: t(Math.floor(tr.time / 1000)) as Time,
+      position: tr.side === 'buy' ? 'belowBar' : 'aboveBar',
+      color: tr.side === 'buy' ? '#facc15' : '#f97316',
+      shape: tr.side === 'buy' ? 'arrowUp' : 'arrowDown',
+      text: tr.side === 'buy' ? '▲' : '▼',
+      size: 2,
+    }))
 
-    // LW Charts requires markers sorted ascending by time
-    allMarkers.sort((a, b) => Number(a.time) - Number(b.time))
-    const markersPlugin = createSeriesMarkers(candleSeries, allMarkers)
+    const markersPlugin = createSeriesMarkers(candleSeries, [])
+    markersApiRef.current = markersPlugin
+    chartRef.current = chart
     chart.timeScale().fitContent()
 
     // Crosshair → hovered bar — drives the overlay panel
@@ -320,8 +334,37 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       markersPlugin.detach()
       chart.remove()
       subChart?.remove()
+      chartRef.current = null
+      markersApiRef.current = null
+      indicatorLinesRef.current = []
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, strategyOutput, trades])
+
+  // Apply markers — wave numbers always show; buy/sell + trade arrows respect
+  // the showSignals toggle. Re-runs whenever the underlying data changes too.
+  useEffect(() => {
+    const api = markersApiRef.current
+    if (!api) return
+    const list: SeriesMarker<Time>[] = [
+      ...waveMarkersRef.current,
+      ...(showSignals ? signalMarkersRef.current : []),
+      ...(showSignals ? tradeMarkersRef.current : []),
+    ]
+    list.sort((a, b) => Number(a.time) - Number(b.time))
+    api.setMarkers(list)
+  }, [showSignals, candles, strategyOutput, trades])
+
+  // Toggle indicator line visibility without rebuilding the chart.
+  useEffect(() => {
+    for (const s of indicatorLinesRef.current) {
+      try { s.applyOptions({ visible: showIndicator }) } catch {}
+    }
+  }, [showIndicator])
+
+  const goToLatest = () => {
+    chartRef.current?.timeScale().scrollToRealTime()
+  }
 
   // tradeAtBar resolver — actual executed trades have ms timestamps; convert + match against bar second.
   const resolveTradeAtBar = (c: Candle): HoverTradeInfo | null => {
@@ -335,14 +378,14 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
 
   return (
     <div className="card overflow-hidden p-0">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <h3 className="text-sm font-semibold text-text">
           Chart
           <span className="ml-2 text-xs font-normal font-sans text-dim">
             {cfg.symbol.replace(/USDT$/, '/USDC')} · {cfg.timeframe}
           </span>
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
           {strategyOutput?.mainLines && strategyOutput.mainLines.length > 0 && (
             <span className="font-mono text-[10px] text-dim">
               {strategyOutput.mainLines.map(l => l.id).join(' · ')}
@@ -351,6 +394,38 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
           {loadingCandles && (
             <span className="text-[10px] text-dim animate-pulse">Loading…</span>
           )}
+          <button
+            onClick={() => setShowSignals((v) => !v)}
+            className={`flex items-center gap-1 rounded-md border px-2 py-1 transition ${
+              showSignals
+                ? 'border-brand bg-brand/10 text-brand'
+                : 'border-border bg-panel-2 text-muted hover:border-border-strong hover:text-text'
+            }`}
+            title="Show or hide BUY/SELL signal markers and executed trade arrows"
+          >
+            {showSignals ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            {showSignals ? 'Hide Buy/Sell' : 'Show Buy/Sell'}
+          </button>
+          <button
+            onClick={() => setShowIndicator((v) => !v)}
+            className={`flex items-center gap-1 rounded-md border px-2 py-1 transition ${
+              showIndicator
+                ? 'border-brand bg-brand/10 text-brand'
+                : 'border-border bg-panel-2 text-muted hover:border-border-strong hover:text-text'
+            }`}
+            title="Show or hide strategy indicator lines (ZigZag, EMA, BB, etc.)"
+          >
+            {showIndicator ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            {showIndicator ? 'Hide Indicator' : 'Show Indicator'}
+          </button>
+          <button
+            onClick={goToLatest}
+            className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-muted transition hover:border-border-strong hover:text-text"
+            title="Jump to the most recent price"
+          >
+            <ChevronsRight className="h-3.5 w-3.5" />
+            Latest Price
+          </button>
         </div>
       </div>
       {loadingCandles && !candles.length ? (

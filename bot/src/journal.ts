@@ -68,6 +68,8 @@ export interface AuditLine {
   filledSize: number
   avgPx: number | null
   notionalUsd: number
+  resting?: boolean
+  reason?: string
 }
 
 export interface DailyBucket {
@@ -154,6 +156,8 @@ export function loadAuditLines(uid: string | undefined, from: number, to: number
         filledSize: Number(j.filledSize ?? 0),
         avgPx: j.avgPx == null ? null : Number(j.avgPx),
         notionalUsd: Number(j.notionalUsd ?? 0),
+        resting: j.resting === true ? true : undefined,
+        reason: typeof j.reason === 'string' ? j.reason : undefined,
       })
     } catch { /* skip malformed line */ }
   }

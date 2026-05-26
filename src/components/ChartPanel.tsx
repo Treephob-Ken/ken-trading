@@ -47,8 +47,12 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
   const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const waveMarkersRef = useRef<SeriesMarker<Time>[]>([])
   const tradeMarkersRef = useRef<SeriesMarker<Time>[]>([])
+  // Indicator line series (strategy mainLines like ZigZag, EMA, BB, etc.) —
+  // kept so the visibility toggle can hide/show them without rebuilding.
+  const indicatorLinesRef = useRef<ISeriesApi<'Line'>[]>([])
 
   const [showSignals, setShowSignals] = useState(true)
+  const [showIndicator, setShowIndicator] = useState(true)
   // Hovered bar info, surfaced as a floating overlay on the chart.
   const [hover, setHover] = useState<ChartHoverState | null>(null)
 
@@ -93,6 +97,7 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
 
+    indicatorLinesRef.current = []
     for (const ln of output?.mainLines ?? []) {
       const s = chart.addSeries(LineSeries, {
         color: ln.color,
@@ -100,8 +105,10 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
+        visible: showIndicator,
       })
       s.setData(ln.data.map((d) => ({ time: t(d.time), value: d.value })))
+      indicatorLinesRef.current.push(s)
     }
 
     waveMarkersRef.current = (output?.waveMarkers ?? []).map((wm) => ({
@@ -209,6 +216,7 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
       candleSeriesRef.current = null
       markersApiRef.current = null
       tradePriceLinesRef.current = []
+      indicatorLinesRef.current = []
     }
   }, [candles, output, trades])
 
@@ -224,6 +232,13 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
     list.sort((a, b) => (a.time as number) - (b.time as number))
     api.setMarkers(list)
   }, [showSignals, candles, output, trades])
+
+  // Toggle indicator line visibility without rebuilding the chart.
+  useEffect(() => {
+    for (const s of indicatorLinesRef.current) {
+      try { s.applyOptions({ visible: showIndicator }) } catch {}
+    }
+  }, [showIndicator])
 
   // Zoom to selected trade and add entry/exit price lines
   useEffect(() => {
@@ -316,6 +331,18 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
         >
           {showSignals ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
           {showSignals ? 'Hide Buy/Sell' : 'Show Buy/Sell'}
+        </button>
+        <button
+          onClick={() => setShowIndicator((v) => !v)}
+          className={`flex items-center gap-1 rounded-md border px-2 py-1 transition ${
+            showIndicator
+              ? 'border-brand bg-brand/10 text-brand'
+              : 'border-border bg-panel-2 text-muted hover:border-border-strong hover:text-text'
+          }`}
+          title="Show or hide strategy indicator lines (ZigZag, EMA, BB, etc.)"
+        >
+          {showIndicator ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+          {showIndicator ? 'Hide Indicator' : 'Show Indicator'}
         </button>
         <button
           onClick={goToLatest}

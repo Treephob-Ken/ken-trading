@@ -124,8 +124,17 @@ export async function executeMarketTrade(
   }
 
   const notionalUsd = Number(sizeStr) * meta.midPx
-  assertNotionalAllowed(notionalUsd)
-  assertRateLimit()
+  try {
+    assertNotionalAllowed(notionalUsd)
+    assertRateLimit()
+  } catch (e) {
+    recordTrade({
+      asset: req.asset, side: req.side, requestedSize: req.size,
+      filled: false, filledSize: 0, avgPx: null, notionalUsd,
+      reason: (e as Error).message,
+    })
+    throw e
+  }
 
   log.info(
     `Trade: ${req.side.toUpperCase()} ${sizeStr} ${req.asset} ` +
@@ -188,6 +197,7 @@ export async function executeMarketTrade(
     filledSize: 0,
     avgPx: null,
     notionalUsd,
+    reason: desc,
   })
   return {
     ...base,
@@ -242,15 +252,26 @@ export async function placeOrder(
   const { info, exchange } = getClients(creds)
   const meta = await getAssetMeta(info, asset)
 
-  assertAssetAllowed(asset)
-
+  // Run all pre-checks together so a rejection here lands in the audit log
+  // with a reason — otherwise these throws would be invisible in the UI.
   const sizeStr = roundSize(size, meta)
-  if (Number(sizeStr) <= 0) {
-    throw new Error(`size ${size} rounds to 0 at ${meta.szDecimals} decimals for ${asset}`)
-  }
   const notionalUsd = Number(sizeStr) * meta.midPx
-  assertNotionalAllowed(notionalUsd)
-  assertRateLimit()
+  try {
+    assertAssetAllowed(asset)
+    if (Number(sizeStr) <= 0) {
+      throw new Error(`size ${size} rounds to 0 at ${meta.szDecimals} decimals for ${asset}`)
+    }
+    assertNotionalAllowed(notionalUsd)
+    assertRateLimit()
+  } catch (e) {
+    recordTrade({
+      asset, side, requestedSize: size,
+      filled: false, filledSize: 0, avgPx: null,
+      notionalUsd: Number.isFinite(notionalUsd) ? notionalUsd : 0,
+      reason: (e as Error).message,
+    })
+    throw e
+  }
 
   let pxStr: string
   let tif: 'Ioc' | 'Gtc'
@@ -288,12 +309,12 @@ export async function placeOrder(
   } else if (status && typeof status === 'object' && 'resting' in status) {
     const r = status.resting
     log.ok(`Resting limit: oid ${r.oid} @ ${pxStr}`)
-    recordTrade({ asset, side, requestedSize: size, filled: false, filledSize: 0, avgPx: null, notionalUsd })
+    recordTrade({ asset, side, requestedSize: size, filled: false, filledSize: 0, avgPx: null, notionalUsd, resting: true })
     result = { ...base, ok: true, filled: false, resting: true, orderId: r.oid, filledSize: 0, avgPx: null, tpPlaced: false, slPlaced: false, message: `Limit placed @ ${pxStr} (oid ${r.oid})` }
   } else {
     const desc = typeof status === 'string' ? status : JSON.stringify(status)
     log.warn(`Not filled: ${desc}`)
-    recordTrade({ asset, side, requestedSize: size, filled: false, filledSize: 0, avgPx: null, notionalUsd })
+    recordTrade({ asset, side, requestedSize: size, filled: false, filledSize: 0, avgPx: null, notionalUsd, reason: desc })
     result = { ...base, ok: true, filled: false, resting: false, orderId: null, filledSize: 0, avgPx: null, tpPlaced: false, slPlaced: false, message: `Not filled: ${desc}` }
   }
 
