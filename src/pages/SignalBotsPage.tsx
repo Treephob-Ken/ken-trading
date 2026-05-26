@@ -246,8 +246,8 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       })
     }
 
-    // Three marker groups so the toggle button can hide buy/sell + trades
-    // without touching the wave-number annotations.
+    // Wave-number annotations (Elliott ① ② ③ ④ ⑤) — pinned to the chart, not
+    // part of the buy/sell toggle.
     waveMarkersRef.current = (strategyOutput.waveMarkers ?? []).map(wm => ({
       time: t(wm.time) as Time,
       position: wm.position,
@@ -257,27 +257,148 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       size: 0.5,
     }))
 
+    // We intentionally do NOT render hindsight strategy B/S markers — only the
+    // bot's actual fills, walked chronologically and paired into open/close
+    // events with realized PnL. Style mirrors the Trade Log detail chart.
     signalMarkersRef.current = []
-    strategyOutput.signals.forEach((sig, i) => {
-      if (!sig) return
-      signalMarkersRef.current.push({
-        time: t(candles[i].time) as Time,
-        position: sig === 'buy' ? 'belowBar' : 'aboveBar',
-        color: sig === 'buy' ? '#26a69a' : '#ef5350',
-        shape: sig === 'buy' ? 'arrowUp' : 'arrowDown',
-        text: sig === 'buy' ? 'B' : 'S',
-        size: 1,
-      })
-    })
+    tradeMarkersRef.current = []
+    const sortedTrades = [...trades]
+      .filter(tr => tr.price != null && tr.price > 0)
+      .sort((a, b) => a.time - b.time)
 
-    tradeMarkersRef.current = trades.filter(tr => tr.price).map(tr => ({
-      time: t(Math.floor(tr.time / 1000)) as Time,
-      position: tr.side === 'buy' ? 'belowBar' : 'aboveBar',
-      color: tr.side === 'buy' ? '#facc15' : '#f97316',
-      shape: tr.side === 'buy' ? 'arrowUp' : 'arrowDown',
-      text: tr.side === 'buy' ? '▲' : '▼',
-      size: 2,
-    }))
+    let posSize = 0           // signed: + long, − short
+    let entryPx = 0           // size-weighted average entry price
+    let entrySide: 'long' | 'short' | null = null
+    for (const tr of sortedTrades) {
+      const px = tr.price as number
+      const time = t(Math.floor(tr.time / 1000)) as Time
+      const signed = tr.side === 'buy' ? tr.size : -tr.size
+
+      // OPEN — flat → directional
+      if (posSize === 0) {
+        posSize = signed
+        entryPx = px
+        entrySide = signed > 0 ? 'long' : 'short'
+        tradeMarkersRef.current.push({
+          time,
+          position: signed > 0 ? 'belowBar' : 'aboveBar',
+          color: signed > 0 ? '#26a69a' : '#ef5350',
+          shape: signed > 0 ? 'arrowUp' : 'arrowDown',
+          text: signed > 0 ? 'Open long' : 'Open short',
+          size: 2,
+        })
+        continue
+      }
+
+      const sameSide = (posSize > 0 && signed > 0) || (posSize < 0 && signed < 0)
+      if (sameSide) {
+        // ADD — average up/down. Rare for this bot but handled.
+        const newSize = posSize + signed
+        entryPx = (entryPx * Math.abs(posSize) + px * Math.abs(signed)) / Math.abs(newSize)
+        posSize = newSize
+        tradeMarkersRef.current.push({
+          time,
+          position: signed > 0 ? 'belowBar' : 'aboveBar',
+          color: signed > 0 ? '#26a69a' : '#ef5350',
+          shape: signed > 0 ? 'arrowUp' : 'arrowDown',
+          text: signed > 0 ? 'Add long' : 'Add short',
+          size: 2,
+        })
+        continue
+      }
+
+      // CLOSE (and maybe flip)
+      const closeSize = Math.min(Math.abs(posSize), Math.abs(signed))
+      const pnl = entrySide === 'long'
+        ? (px - entryPx) * closeSize
+        : (entryPx - px) * closeSize
+      const pnlText = `Close ${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(2)}`
+      tradeMarkersRef.current.push({
+        time,
+        position: posSize > 0 ? 'aboveBar' : 'belowBar',
+        color: pnl >= 0 ? '#26a69a' : '#ef5350',
+        shape: posSize > 0 ? 'arrowDown' : 'arrowUp',
+        text: pnlText,
+        size: 2,
+      })
+
+      const remainder = Math.abs(signed) - closeSize
+      if (remainder > 0) {
+        // Flip — fill closed the old side and opened a new one
+        posSize = signed > 0 ? remainder : -remainder
+        entryPx = px
+        entrySide = signed > 0 ? 'long' : 'short'
+        tradeMarkersRef.current.push({
+          time,
+          position: signed > 0 ? 'belowBar' : 'aboveBar',
+          color: signed > 0 ? '#26a69a' : '#ef5350',
+          shape: signed > 0 ? 'arrowUp' : 'arrowDown',
+          text: signed > 0 ? 'Open long' : 'Open short',
+          size: 2,
+        })
+      } else {
+        posSize = 0
+        entrySide = null
+      }
+    }
+
+    // Solid entry / dashed exit price lines for the most recent CLOSED round-
+    // trip, same style as the Trade Log detail chart. Skipped while a position
+    // is still open since "exit" hasn't happened yet.
+    if (posSize === 0 && sortedTrades.length >= 2) {
+      // Walk backwards to find the last open → close pair
+      let lastEntry: { px: number; side: 'long' | 'short' } | null = null
+      let lastExitPx: number | null = null
+      let scanPos = 0
+      let scanEntryPx = 0
+      let scanSide: 'long' | 'short' | null = null
+      for (const tr of sortedTrades) {
+        const signed = tr.side === 'buy' ? tr.size : -tr.size
+        if (scanPos === 0) {
+          scanPos = signed
+          scanEntryPx = tr.price as number
+          scanSide = signed > 0 ? 'long' : 'short'
+        } else {
+          const sameSide = (scanPos > 0 && signed > 0) || (scanPos < 0 && signed < 0)
+          if (sameSide) {
+            const newSize = scanPos + signed
+            scanEntryPx = (scanEntryPx * Math.abs(scanPos) + (tr.price as number) * Math.abs(signed)) / Math.abs(newSize)
+            scanPos = newSize
+          } else {
+            const closeSize = Math.min(Math.abs(scanPos), Math.abs(signed))
+            const remainder = Math.abs(signed) - closeSize
+            if (remainder === 0) {
+              lastEntry = { px: scanEntryPx, side: scanSide as 'long' | 'short' }
+              lastExitPx = tr.price as number
+              scanPos = 0
+              scanSide = null
+            }
+          }
+        }
+      }
+      if (lastEntry && lastExitPx != null) {
+        const entryColor = lastEntry.side === 'long' ? '#26a69a' : '#ef5350'
+        candleSeries.createPriceLine({
+          price: lastEntry.px,
+          color: entryColor,
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `ENTRY ${lastEntry.side.toUpperCase()}`,
+        })
+        const pnl = lastEntry.side === 'long'
+          ? lastExitPx - lastEntry.px
+          : lastEntry.px - lastExitPx
+        candleSeries.createPriceLine({
+          price: lastExitPx,
+          color: pnl >= 0 ? '#26a69a' : '#ef5350',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `EXIT ${pnl >= 0 ? '+' : ''}${pnl.toFixed(4)}`,
+        })
+      }
+    }
 
     const markersPlugin = createSeriesMarkers(candleSeries, [])
     markersApiRef.current = markersPlugin
