@@ -52,6 +52,9 @@ interface SignalBotConfig {
   params: Record<string, number>; asset: string; size: number
   slippagePct: number; cooldownSec: number; tradeSide: TradeSide
   tpPct?: number; slPct?: number
+  // Risk mode — when set, bot recomputes size from live price on each trade:
+  // positionUsd = riskUsd / (slPct/100); size = positionUsd / currentPrice.
+  riskUsd?: number
   // MTF filter — block trades that conflict with the higher TF's last signal
   mtfEnabled?: boolean
   mtfTimeframe?: string
@@ -390,8 +393,6 @@ export default function SignalBotsPage() {
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null)
-  const [riskUsd, setRiskUsd] = useState<number | ''>('')
-  const [sizingSlPct, setSizingSlPct] = useState<number | ''>('')
   const [assetPrice, setAssetPrice] = useState<number | null>(null)
   const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
 
@@ -579,8 +580,9 @@ export default function SignalBotsPage() {
             slippagePct: 1,
             cooldownSec: 60,
             tradeSide: (pre.direction === 'short' ? 'sell' : pre.direction === 'both' ? 'both' : 'buy') as TradeSide,
-            slPct: pre.slPct,
+            slPct: pre.slPct ?? pre.sizingSlPct,
             tpPct: pre.tpPct,
+            riskUsd: pre.riskUsd,
             mtfEnabled: pre.mtfEnabled,
             mtfTimeframe: pre.mtfTimeframe,
           }
@@ -588,9 +590,6 @@ export default function SignalBotsPage() {
           setSelectedId(null)
           setCfg(newCfg)
           setDirty(true)
-          // Pre-fill Risk Mode calculator when backtester used volatility sizing
-          if (pre.riskUsd) setRiskUsd(pre.riskUsd)
-          if (pre.sizingSlPct) setSizingSlPct(pre.sizingSlPct)
           return
         } catch { /* bad sessionStorage — ignore */ }
       }
@@ -631,10 +630,12 @@ export default function SignalBotsPage() {
       .catch(() => {})
   }, [cfg?.asset])
 
-  // Position sizing: risk $ / SL% → position notional → qty
+  // Position sizing: risk $ / SL% → position notional → qty. Reads from cfg
+  // so the values persist across reload. Backend recomputes size on each trade
+  // from live price when cfg.riskUsd + cfg.slPct are both set.
   const sizingResult = useMemo(() => {
-    const risk = typeof riskUsd === 'number' && riskUsd > 0 ? riskUsd : null
-    const sl = typeof sizingSlPct === 'number' && sizingSlPct > 0 ? sizingSlPct : null
+    const risk = typeof cfg?.riskUsd === 'number' && cfg.riskUsd > 0 ? cfg.riskUsd : null
+    const sl = typeof cfg?.slPct === 'number' && cfg.slPct > 0 ? cfg.slPct : null
     if (!risk || !sl) return null
     const positionUsd = risk / (sl / 100)
     const rawQty = assetPrice ? positionUsd / assetPrice : null
@@ -648,15 +649,9 @@ export default function SignalBotsPage() {
         ? `$${(assetPrice * (1 - sl / 100)).toLocaleString('en', { maximumFractionDigits: 4 })}  /  $${(assetPrice * (1 + sl / 100)).toLocaleString('en', { maximumFractionDigits: 4 })}`
         : `−${sl}% / +${sl}% from entry`,
     }
-  }, [riskUsd, sizingSlPct, cfg?.asset, assetPrice, maxLeverage])
+  }, [cfg?.riskUsd, cfg?.slPct, cfg?.asset, assetPrice, maxLeverage])
 
-  // Auto-apply computed qty to Order size whenever sizing result updates
-  useEffect(() => {
-    if (sizingResult?.rawQty && !running) {
-      patch({ size: parseFloat(sizingResult.rawQty.toFixed(6)) })
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizingResult?.rawQty])
+  const riskMode = sizingResult !== null
 
 
   // When switching to a bot, clear new-bot state
@@ -802,6 +797,16 @@ export default function SignalBotsPage() {
                 </p>
               )}
 
+              {riskMode && (
+                <div className="rounded-lg border border-brand/30 bg-brand/5 px-3 py-1.5 text-[10px] leading-snug">
+                  <span className="font-semibold text-brand">Risk Mode:</span>{' '}
+                  <span className="font-mono text-text">${cfg.riskUsd}</span>{' '}
+                  risk / <span className="font-mono text-text">{cfg.slPct}%</span> SL{' '}
+                  → ~<span className="font-mono text-text">{sizingResult?.qty}</span>{' '}
+                  <span className="text-dim">(recomputed each trade from live price)</span>
+                </div>
+              )}
+
               <Field label="Asset">
                 <select
                   disabled={running}
@@ -849,8 +854,8 @@ export default function SignalBotsPage() {
               <div className="my-1 h-px bg-border" />
 
               <div className="grid grid-cols-2 gap-2">
-                <Field label="Order size">
-                  <input type="number" disabled={running} step="any" min="0"
+                <Field label={riskMode ? 'Order size (ignored — risk mode)' : 'Order size'}>
+                  <input type="number" disabled={running || riskMode} step="any" min="0"
                     value={cfg.size} onChange={(e) => patch({ size: Number(e.target.value) })} className={inputCls} />
                 </Field>
                 <Field label="Slippage %">
@@ -944,28 +949,23 @@ export default function SignalBotsPage() {
               {/* ── Position Sizing Calculator ── */}
               <div className="my-1 h-px bg-border" />
               <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Risk mode (auto-sizes)</p>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Risk USD">
-                  <input
-                    type="number" step="any" min="0" placeholder="e.g. 50"
-                    value={riskUsd}
-                    onChange={(e) => setRiskUsd(e.target.value === '' ? '' : Number(e.target.value))}
-                    className={inputCls}
-                  />
-                </Field>
-                <Field label="SL %">
-                  <input
-                    type="number" step="0.1" min="0" placeholder="e.g. 2"
-                    value={sizingSlPct}
-                    onChange={(e) => setSizingSlPct(e.target.value === '' ? '' : Number(e.target.value))}
-                    className={inputCls}
-                  />
-                </Field>
-              </div>
+              <Field label="Risk USD">
+                <input
+                  type="number" disabled={running} step="any" min="0" placeholder="e.g. 50 (leave empty to use Order Size)"
+                  value={cfg.riskUsd ?? ''}
+                  onChange={(e) => patch({ riskUsd: e.target.value === '' ? undefined : Number(e.target.value) })}
+                  className={inputCls}
+                />
+              </Field>
+              <p className="text-[10px] text-dim leading-snug">
+                {riskMode
+                  ? `Uses Auto SL % above (${cfg.slPct}%) as the risk distance. Bot recomputes order size from live price on each trade so your $ risk stays constant.`
+                  : 'Set Risk USD + an Auto SL % above to enable risk mode. Otherwise the bot uses the fixed Order Size below.'}
+              </p>
               {sizingResult && (
                 <div className="rounded-lg border border-brand/20 bg-brand/5 px-3 py-2 text-[10px] space-y-1">
                   <div className="flex justify-between"><span className="text-dim">Notional</span><span className="font-mono text-text">{sizingResult.positionUsd}</span></div>
-                  <div className="flex justify-between"><span className="text-dim">Order size</span><span className="font-mono text-text">{sizingResult.qty}</span></div>
+                  <div className="flex justify-between"><span className="text-dim">Order size (live)</span><span className="font-mono text-text">{sizingResult.qty}</span></div>
                   <div className="flex justify-between"><span className="text-dim">Leverage</span><span className="font-mono text-text">{sizingResult.maxLev}</span></div>
                   <div className="flex justify-between"><span className="text-dim">Margin (USDC)</span><span className="font-mono text-text">{sizingResult.margin}</span></div>
                   <div className="flex justify-between"><span className="text-dim">SL/TP</span><span className="font-mono text-loss">{sizingResult.slPrices}</span></div>

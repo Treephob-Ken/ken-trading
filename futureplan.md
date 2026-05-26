@@ -114,6 +114,83 @@ for architecture details.
 
 ---
 
+## ▶ Phase D — Funding Arbitrage (PLANNED — waiting on capital)
+
+**Why waiting:** This strategy only makes sense with **$3,000-5,000 USDC** on HL.
+Below that, HL fees (perp 0.035% + spot 0.07%) eat most of the funding income
+and the absolute dollar profit isn't worth the time. Currently saving up to that
+amount — once funded, ship this phase.
+
+### What it is (plain words)
+Perp futures pay a fee called **funding** every hour on HL. When funding is
+positive (which it usually is, because retail tends to go long), **shorts get
+paid**. To not care about price moving, hedge by **buying the same coin on HL
+spot**. Result: collect funding hourly, market-neutral, like a yield farm.
+
+### Realistic numbers (HL-only, after fees)
+- Net APR: **8-15%** on a diversified basket, with low drawdown.
+- $3k capital → ~$240-450/yr
+- $5k capital → ~$400-700/yr
+- $10k capital → ~$800-1,500/yr
+
+Not life-changing money, but earns while sleeping and scales linearly with
+capital. Real income kicks in at $20k+.
+
+### Strategy ranking (ship in this order)
+
+| # | Strategy | Notes |
+|---|---|---|
+| 1 | **Diversified carry basket** | Short perp + long spot on 5-7 HL coins, equal weight, 1.5x leverage max. Boring, stable. |
+| 2 | **High-APR sniper** | Only enter when predicted funding APR > 15%. Exit when it drops below 10%. Better $/effort. |
+| 3 | **New listing hype farm** | When HL lists a new coin (e.g. HYPE/PURR launches), funding can hit 200-500% APR for 1-3 days. Manual only, capped at 5% of capital per trade. |
+| 4 | Cross-exchange spread (HL vs Binance) | Needs Binance integration — not first to ship. |
+
+### The trick that makes HL-only profitable: maker rebates
+HL pays **0.015%** to provide liquidity (limit orders that rest, not market
+orders). If all 4 legs (enter perp/spot, exit perp/spot) are filled as maker:
+- Round-trip fees drop from 0.21% → ~0.05%
+- Break even at 10% APR drops from 8 days to 2 days
+- **Always use limit orders.** Market-order farming is barely worth it.
+
+### What to build (in order)
+
+**Layer 1 — Funding Scanner page** (1-2 days work, no trading code)
+- New `src/pages/FundingPage.tsx` following the existing `ScannerPage` pattern.
+- New backend route `GET /api/funding/rates` that calls HL `predictedFundings`
+  + `fundingHistory` endpoints.
+- Table columns: coin, current funding APR, 7d avg, predicted next funding,
+  HL spot available (yes/no), **net APR after estimated fees**, verdict badge
+  (Great / Good / Skip — reusing the `verdict.ts` pattern from Scanner).
+- Click a row → opens Trade page pre-filled with a short order.
+- Persist filters in `localStorage`; persist scan results in `sessionStorage`.
+
+**Layer 2 — Funding backtester** (after Layer 1 has run for 2 weeks of data)
+- Feed historical funding + price into a delta-neutral simulator.
+- Show APR you would have earned per coin, drawdowns from imperfect hedge,
+  fee drag, time-in-position distribution.
+
+**Layer 3 — Funding bot** (only after manually trading for 1+ month)
+- New bot type alongside `SignalBot` / `GridBot`: `FundingBot`.
+- Reuses existing registry, multi-user, persistence patterns in `server.ts`.
+- Logic: enter when net APR > X%, rebalance hedge ratio daily, exit when
+  funding flips or drops below Y%, time-stop after 48h.
+
+### Risks to handle in code
+- **Funding flips negative** mid-position → need exit rule, not "hold forever."
+- **Liquidation on the perp leg** even with a hedge → cap leverage at 2x, monitor
+  margin ratio, auto-add margin if it drops below threshold.
+- **Spot leg slippage on entry** → use limit orders; abort entry if book is too thin.
+- **Wallet transfers** — HL has separate spot and perp sub-accounts; `usdClassTransfer`
+  needs to be wired into the bot when moving capital between them.
+
+### Capital plan
+- **Now:** save $3,000+ USDC.
+- **Once funded:** ship Layer 1 (Scanner), watch for 2 weeks before any trading.
+- **First trades:** manual, 3-5 picks, limit orders only, ~$500-1000 per position.
+- **After 1 month of proven returns:** decide whether to build the auto-bot.
+
+---
+
 ## Later ideas
 
 - Streaming candle-close evaluation instead of 30s polling for the signal bots
