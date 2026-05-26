@@ -4,7 +4,7 @@
 > Max ~200 lines. When something changes, **edit the relevant section** —
 > don't append a dated entry. Git history is the changelog.
 
-Last reviewed: 2026-05-26 (Phase A: HIP-3 read-only support — gold, stocks, forex, commodities)
+Last reviewed: 2026-05-26 (Phase B: HIP-3 live trading validated on mainnet — real fill on xyz:GOLD + clean close)
 
 ---
 
@@ -60,7 +60,8 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Grid Optimizer (sweep + deploy-to-bot) | ✅ |
 | Currency Scanner (Indicator + Grid tabs, batch-rank top 30 HL coins, persisted results + colored verdicts) | ✅ |
 | Scanner — "Stocks & Commodities" universe toggle (HIP-3 ranked by HL open interest) | ✅ Phase A read-only |
-| HIP-3 markets (Gold, S&P 500, US stocks, forex, oil) in Backtester + Symbol picker | ✅ Phase A — backtest only, no live orders yet |
+| HIP-3 markets (Gold, S&P 500, US stocks, forex, oil) in Backtester + Symbol picker | ✅ Phase A — backtest |
+| HIP-3 live trading via Trade page market orders (xyz:GOLD, etc.) | ✅ Phase B — asset-ID routing validated with real fill on mainnet |
 | Live SSE log tail across all bots | ✅ Logs page |
 | Login page redesign (dot-grid, framer-motion) | ✅ |
 
@@ -68,10 +69,13 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 
 ## What's still pending
 
-- [ ] HIP-3 Phase B: enable live trading for `xyz:GOLD` end-to-end on testnet
-      first, then mainnet (add to `ALLOWED_ASSETS`, wire Signal Bot creation,
-      verify TP/SL brackets land on HIP-3 asset IDs).
-- [ ] HIP-3 Phase C: rollout to TSLA / NVDA / S&P 500 + Scanner stocks tab live.
+- [ ] HIP-3 Phase C: UI polish. Three known gaps:
+      (1) Trade page Open Positions only shows main perp dex — HIP-3 positions
+      live in their own dex compartment and don't appear (use HL UI for now).
+      (2) Signal Bot creation UI hardcodes `${asset}USDT` symbol composition,
+      so `xyz:GOLD` can't be selected as a signal bot asset yet (orders go
+      through fine if you craft the config manually).
+      (3) No manual Limit-order toggle on the Trade page; market only.
 - [ ] Per-user audit log: `limits.ts:recordTrade` accepts `userId` but
       `trade.ts` doesn't thread it through, so all entries still land in the
       global `bot/trade-audit.log`.

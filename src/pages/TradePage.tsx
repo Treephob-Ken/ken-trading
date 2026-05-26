@@ -23,6 +23,8 @@ import MultiBotConflictBanner from '@/components/MultiBotConflictBanner'
 
 interface PositionInfo {
   asset: string; size: number; side: 'long' | 'short'
+  // null for main perp dex; "xyz" etc. for HIP-3 positions.
+  dex?: string | null
   entryPx: number | null; unrealizedPnl: number
   // Pro-trader metrics from /api/account
   liquidationPx?: number | null
@@ -30,6 +32,13 @@ interface PositionInfo {
   marginUsed?: number
   positionValue?: number
   markPx?: number
+}
+
+interface DexBalance {
+  dex: string | null
+  accountValue: number
+  withdrawable: number
+  totalMarginUsed: number
 }
 
 interface PositionSource {
@@ -55,6 +64,7 @@ interface AccountState {
   currentPrice: number | null
   position: PositionInfo | null
   allPositions: PositionInfo[]
+  dexBalances?: DexBalance[]
 }
 
 interface AssetInfo {
@@ -586,7 +596,12 @@ export default function TradePage() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-text">{pos.asset}/USDC</span>
+                        <span className="font-semibold text-text">
+                          {pos.asset.includes(':') ? pos.asset.split(':')[1] : pos.asset}/USDC
+                        </span>
+                        {pos.dex && (
+                          <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-brand">{pos.dex}</span>
+                        )}
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
                           pos.side === 'long' ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'
                         }`}>{pos.side}</span>

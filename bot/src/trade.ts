@@ -7,7 +7,9 @@ import {
   type HLClients,
 } from './hyperliquid.js'
 import {
+  dexOf,
   listAllAssets,
+  listHip3Dexes,
   normalizeAssetName,
   resolveAssetMeta,
 } from './hyperliquid-hip3.js'
@@ -438,6 +440,8 @@ export async function listAssetsTagged(creds?: EnvConfig | null): Promise<Listed
 
 export interface PositionInfo {
   asset: string
+  // null for main perp dex, dex name (e.g. "xyz") for HIP-3 positions.
+  dex?: string | null
   size: number
   side: 'long' | 'short'
   entryPx: number | null
@@ -451,14 +455,27 @@ export interface PositionInfo {
   markPx?: number             // current HL mark price for the asset
 }
 
+// Per-dex margin summary. HIP-3 dexes have independent margin from main perp,
+// so the UI surfaces them separately rather than aggregating.
+export interface DexBalance {
+  dex: string | null   // null = main perp dex
+  accountValue: number
+  withdrawable: number
+  totalMarginUsed: number
+}
+
 export interface AccountState {
   network: 'testnet' | 'mainnet'
   user: string
+  // Main perp dex values (kept for backward compat with existing dashboard widgets).
   accountValue: number
   withdrawable: number
   currentPrice: number | null
   position: PositionInfo | null
+  // Merged across main + HIP-3 dexes — every position tagged with .dex.
   allPositions: PositionInfo[]
+  // Per-dex margin summary so the UI can show main and xyz balances side-by-side.
+  dexBalances?: DexBalance[]
 }
 
 export async function getAccountState(
@@ -466,31 +483,47 @@ export async function getAccountState(
   creds?: EnvConfig | null,
 ): Promise<AccountState> {
   const c = getClients(creds)
-  const state = await c.info.clearinghouseState({ user: c.user })
 
-  // Fetch the meta + price context once; needed for markPx on every position.
-  // One extra HL roundtrip but it returns the whole universe so we can read
-  // every asset's mark price without N more calls.
-  let markPxByAsset = new Map<string, number>()
-  try {
-    const [meta, ctxs] = await c.info.metaAndAssetCtxs()
-    meta.universe.forEach((u, i) => {
-      const ctx = ctxs[i]
-      if (ctx) markPxByAsset.set(u.name, Number(ctx.markPx ?? ctx.midPx ?? 0))
-    })
-  } catch { /* if this fails, mark prices stay empty — positions still render with entryPx only */ }
+  // Build mark-price + position views for every dex (main + HIP-3) in parallel.
+  // We surface main-dex `accountValue` and `withdrawable` as top-level fields for
+  // backward compat; per-dex breakdown is in dexBalances.
+  const hip3Dexes = await listHip3Dexes(c.info)
+  const dexes: (string | null)[] = [null, ...hip3Dexes]
 
-  function enrich(ap: typeof state.assetPositions[number]): PositionInfo {
-    const szi = Number(ap.position.szi)
-    const p = ap.position as typeof ap.position & {
+  const perDex = await Promise.all(
+    dexes.map(async (dex) => {
+      const stateP = dex
+        ? c.info.clearinghouseState({ user: c.user, dex })
+        : c.info.clearinghouseState({ user: c.user })
+      const ctxP = dex
+        ? c.info.metaAndAssetCtxs({ dex })
+        : c.info.metaAndAssetCtxs()
+      const [state, [meta, ctxs]] = await Promise.all([stateP, ctxP])
+      const markPx = new Map<string, number>()
+      meta.universe.forEach((u, i) => {
+        const ctx = ctxs[i]
+        if (ctx) markPx.set(u.name, Number(ctx.markPx ?? ctx.midPx ?? 0))
+      })
+      return { dex, state, markPx }
+    }),
+  )
+
+  function enrich(ap: { position: Record<string, unknown> }, dex: string | null, markPx: Map<string, number>): PositionInfo {
+    const p = ap.position as {
+      coin: string
+      szi: string
+      entryPx?: string | null
+      unrealizedPnl: string
       liquidationPx?: string | null
       marginUsed?: string | null
       positionValue?: string | null
       leverage?: { type: string; value: number }
     }
-    const markPx = markPxByAsset.get(p.coin) ?? null
+    const szi = Number(p.szi)
+    const mark = markPx.get(p.coin) ?? null
     return {
       asset: p.coin,
+      dex,
       size: Math.abs(szi),
       side: szi > 0 ? 'long' : 'short',
       entryPx: p.entryPx ? Number(p.entryPx) : null,
@@ -498,40 +531,56 @@ export async function getAccountState(
       liquidationPx: p.liquidationPx ? Number(p.liquidationPx) : null,
       leverage: p.leverage?.value,
       marginUsed: p.marginUsed ? Number(p.marginUsed) : undefined,
-      positionValue: p.positionValue ? Number(p.positionValue) : (markPx ? Math.abs(szi) * markPx : undefined),
-      markPx: markPx ?? undefined,
+      positionValue: p.positionValue ? Number(p.positionValue) : (mark ? Math.abs(szi) * mark : undefined),
+      markPx: mark ?? undefined,
     }
   }
 
+  const main = perDex.find((d) => d.dex === null)!
+
+  // Per-dex margin breakdown.
+  const dexBalances: DexBalance[] = perDex.map((d) => ({
+    dex: d.dex,
+    accountValue: Number(d.state.marginSummary.accountValue),
+    withdrawable: Number(d.state.withdrawable),
+    totalMarginUsed: Number(d.state.marginSummary.totalMarginUsed),
+  }))
+
+  // Merge positions across every dex.
+  const allPositions: PositionInfo[] = []
+  for (const d of perDex) {
+    for (const ap of d.state.assetPositions) {
+      if (Number(ap.position.szi) === 0) continue
+      allPositions.push(enrich(ap as { position: Record<string, unknown> }, d.dex, d.markPx))
+    }
+  }
+
+  // Single-asset focus (used by the manual Trade page when an asset is selected).
   let currentPrice: number | null = null
   let position: AccountState['position'] = null
   if (asset) {
-    const want = asset.trim().toUpperCase()
-    currentPrice = markPxByAsset.get(want) ?? null
+    const want = normalizeAssetName(asset)
+    const assetDex = dexOf(want)
+    const sourceDex = perDex.find((d) => d.dex === assetDex) ?? main
+    currentPrice = sourceDex.markPx.get(want) ?? null
     if (currentPrice === null) {
       try {
         const priceMeta = await getAssetMeta(c.info, want)
         currentPrice = priceMeta.midPx
       } catch { /* skip if asset not found */ }
     }
-    const ap = state.assetPositions.find((p) => p.position.coin === want)
-    if (ap && Number(ap.position.szi) !== 0) {
-      position = enrich(ap)
-    }
+    position = allPositions.find((p) => p.asset === want) ?? null
   }
-
-  const allPositions: PositionInfo[] = state.assetPositions
-    .filter((ap) => Number(ap.position.szi) !== 0)
-    .map(enrich)
 
   return {
     network: c.isTestnet ? 'testnet' : 'mainnet',
     user: c.user,
-    accountValue: Number(state.marginSummary.accountValue),
-    withdrawable: Number(state.withdrawable),
+    accountValue: Number(main.state.marginSummary.accountValue),
+    withdrawable: Number(main.state.withdrawable),
     currentPrice,
     position,
     allPositions,
+    dexBalances,
   }
 }
 
@@ -540,12 +589,16 @@ export async function cancelAssetOrders(
   creds?: EnvConfig | null,
 ): Promise<number> {
   const { info, exchange, user } = getClients(creds)
-  const meta = await getAssetMeta(info, asset)
-  const open = await info.openOrders({ user })
-  const mine = (open as Array<{ coin: string; oid: number }>).filter((o) => o.coin === asset)
+  const normalized = normalizeAssetName(asset)
+  const meta = await getAssetMeta(info, normalized)
+  // HIP-3 open orders only show up when openOrders is queried with the dex param.
+  const open = meta.dex
+    ? await info.openOrders({ user, dex: meta.dex })
+    : await info.openOrders({ user })
+  const mine = (open as Array<{ coin: string; oid: number }>).filter((o) => o.coin === normalized)
   if (mine.length === 0) return 0
   await exchange.cancel({ cancels: mine.map((o) => ({ a: meta.assetId, o: o.oid })) })
-  log.info(`Cancelled ${mine.length} open order(s) for ${asset}`)
+  log.info(`Cancelled ${mine.length} open order(s) for ${normalized}`)
   return mine.length
 }
 
@@ -579,8 +632,11 @@ export async function getPositionBrackets(
   creds?: EnvConfig | null,
 ): Promise<PositionBrackets> {
   const { info, user } = getClients(creds)
-  const want = asset.trim().toUpperCase()
-  const open = (await info.frontendOpenOrders({ user })) as Array<{
+  const want = normalizeAssetName(asset)
+  const wantDex = dexOf(want)
+  const open = (wantDex
+    ? await info.frontendOpenOrders({ user, dex: wantDex })
+    : await info.frontendOpenOrders({ user })) as Array<{
     coin: string
     oid: number
     triggerPx?: string | null
