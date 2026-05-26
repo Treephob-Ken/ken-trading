@@ -539,7 +539,9 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
         <h3 className="text-sm font-semibold text-text">
           Chart
           <span className="ml-2 text-xs font-normal font-sans text-dim">
-            {cfg.symbol.replace(/USDT$/, '/USDC')} · {cfg.timeframe}
+            {cfg.symbol.includes(':')
+              ? `${cfg.symbol.split(':')[1]}/USDC`
+              : cfg.symbol.replace(/USDT$/, '/USDC')} · {cfg.timeframe}
           </span>
         </h3>
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -610,6 +612,18 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       )}
     </div>
   )
+}
+
+// Canonicalize an asset key. Same rules the bot server uses for the
+// /api/positions/sources map and what getAccountState returns: HIP-3 stays
+// `dex:COIN` (dex lowercase, coin upper), plain crypto becomes UPPERCASE.
+function canonAsset(raw: string): string {
+  const s = raw.trim()
+  if (s.includes(':')) {
+    const i = s.indexOf(':')
+    return s.slice(0, i).toLowerCase() + ':' + s.slice(i + 1).toUpperCase()
+  }
+  return s.toUpperCase()
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -700,7 +714,7 @@ export default function SignalBotsPage() {
     try {
       let res: Response
       const botName = isNew
-        ? `${cfg.asset.toUpperCase()}-${cfg.strategyId.toUpperCase()}-${cfg.timeframe.toUpperCase()}`
+        ? `${canonAsset(cfg.asset)}-${cfg.strategyId.toUpperCase()}-${cfg.timeframe.toUpperCase()}`
         : undefined
       if (selectedId && !isNew) {
         res = await apiFetch(`/api/signal/bots/${selectedId}`, {
@@ -811,9 +825,16 @@ export default function SignalBotsPage() {
           const params: Record<string, number> = {}
           if (stratMeta) for (const d of stratMeta.params) params[d.key] = d.default
           if (pre.params) Object.assign(params, pre.params)
+          // HIP-3 assets carry a colon (e.g. "xyz:GOLD") and have no Binance
+          // pair, so we don't append USDT and we keep the dex prefix in lowercase.
+          const preAsset = (pre.asset ?? 'ETH')
+          const preIsHip3 = preAsset.includes(':')
+          const canonPre = preIsHip3
+            ? preAsset.slice(0, preAsset.indexOf(':')).toLowerCase() + ':' + preAsset.slice(preAsset.indexOf(':') + 1).toUpperCase()
+            : preAsset.toUpperCase()
           const newCfg: SignalBotConfig = {
-            asset: pre.asset?.toUpperCase() ?? 'ETH',
-            symbol: `${(pre.asset ?? 'ETH').toUpperCase()}USDT`,
+            asset: canonPre,
+            symbol: preIsHip3 ? canonPre : `${canonPre}USDT`,
             timeframe: pre.timeframe ?? '1h',
             strategyId: stratId,
             params,
@@ -958,7 +979,7 @@ export default function SignalBotsPage() {
             <p className="px-4 py-3 text-xs text-dim">No bots yet. Click New to create one.</p>
           )}
           {bots.map(b => {
-            const asset = b.symbol.replace(/USDT$/i, '').toUpperCase()
+            const asset = canonAsset(b.symbol.replace(/USDT$/i, ''))
             const stranded = (sources[asset] ?? []).some(
               (s) => s.botId === b.id && s.kind === 'signal' && s.stranded,
             )
@@ -1018,12 +1039,12 @@ export default function SignalBotsPage() {
               {/* Stranded position banner — selected bot is stopped but its
                   asset still has an open position on the exchange. */}
               {selectedId && !isNew && cfg.asset && (() => {
-                const arr = sources[cfg.asset.toUpperCase()] ?? []
+                const arr = sources[canonAsset(cfg.asset)] ?? []
                 const mine = arr.find((s) => s.botId === selectedId && s.kind === 'signal')
                 if (!mine?.stranded || !mine.position) return null
                 return (
                   <StrandedBanner
-                    asset={cfg.asset.toUpperCase()}
+                    asset={canonAsset(cfg.asset)}
                     botName={bots.find((b) => b.id === selectedId)?.name ?? cfg.asset}
                     botKind="signal"
                     position={mine.position}
@@ -1038,11 +1059,11 @@ export default function SignalBotsPage() {
 
               {/* Multi-bot conflict — two or more bots on this asset. */}
               {selectedId && !isNew && cfg.asset && (() => {
-                const arr = sources[cfg.asset.toUpperCase()] ?? []
+                const arr = sources[canonAsset(cfg.asset)] ?? []
                 if (arr.length < 2) return null
                 return (
                   <MultiBotConflictBanner
-                    asset={cfg.asset.toUpperCase()}
+                    asset={canonAsset(cfg.asset)}
                     sources={arr}
                     hideBotId={selectedId}
                   />
@@ -1075,7 +1096,10 @@ export default function SignalBotsPage() {
                   }}
                   className={inputCls}
                 >
-                  {symbols.map(s => <option key={s.symbol} value={s.symbol}>{s.base}/USDC</option>)}
+                  {symbols.map(s => {
+                    const label = s.base.includes(':') ? s.base.split(':')[1] : s.base
+                    return <option key={s.symbol} value={s.symbol}>{label}/USDC{s.base.includes(':') ? ` · ${s.base.split(':')[0]}` : ''}</option>
+                  })}
                 </select>
               </Field>
 

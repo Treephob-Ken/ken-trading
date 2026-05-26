@@ -869,9 +869,21 @@ app.get('/api/positions/sources', requireAuth, async (req: Request, res: Respons
 
   const sources: Record<string, SourceEntry[]> = {}
 
+  // Canonicalize an asset key to match what getAccountState returns for the
+  // same position. For HIP-3 the canonical shape is `dex:COIN` (lowercase dex);
+  // for crypto it's plain uppercase ticker.
+  const canon = (raw: string): string => {
+    const s = raw.trim()
+    if (s.includes(':')) {
+      const i = s.indexOf(':')
+      return s.slice(0, i).toLowerCase() + ':' + s.slice(i + 1).toUpperCase()
+    }
+    return s.replace(/USDT$/i, '').toUpperCase()
+  }
+
   // Signal bots
   for (const sum of listSignalBots(uid)) {
-    const asset = sum.symbol.replace(/USDT$/i, '').toUpperCase()
+    const asset = canon(sum.symbol)
     if (!asset) continue
     if (!sources[asset]) sources[asset] = []
     sources[asset].push({
@@ -886,7 +898,7 @@ app.get('/api/positions/sources', requireAuth, async (req: Request, res: Respons
   // Grid bots
   const gridMap = gridBotsForUser(uid)
   for (const cfg of listConfigs(uid)) {
-    const asset = (cfg.asset || '').toUpperCase()
+    const asset = canon(cfg.asset || '')
     if (!asset) continue
     const entry = gridMap.get(cfg.id || '')
     if (!sources[asset]) sources[asset] = []
@@ -1217,8 +1229,13 @@ app.get('/api/signal/bots/:id/chart-data', requireAuth, async (req: Request, res
       asset?: string; symbol?: string; timeframe?: string
       strategyId?: string; strategy?: string; params?: Record<string, number>
     }
-    const asset = (cfg.asset || (cfg.symbol ?? '').replace(/USDT$/i, '') || 'ETH').toUpperCase()
-    const sym = asset + 'USDT'
+    const rawAsset = cfg.asset || (cfg.symbol ?? '').replace(/USDT$/i, '') || 'ETH'
+    // HIP-3 (colon) names go straight to fetchKlines (which routes to HL's
+    // candleSnapshot). Plain crypto names get the legacy `${ASSET}USDT` shape
+    // so Binance keeps working.
+    const isHip3 = rawAsset.includes(':')
+    const asset = isHip3 ? rawAsset : rawAsset.toUpperCase()
+    const sym = isHip3 ? asset : asset + 'USDT'
     const tf = cfg.timeframe || '1h'
     const stratId = (cfg.strategyId ?? cfg.strategy) as Parameters<typeof generateChartData>[0] | undefined
     const params = (cfg.params ?? {}) as Record<string, number>

@@ -168,9 +168,19 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     params[def.key] = typeof num === 'number' && Number.isFinite(num) ? num : def.default
   }
 
+  // Canonical asset shape: `dex:COIN` for HIP-3 (preserve dex lowercase, coin
+  // upper); plain UPPERCASE ticker for main perps.
+  const canonAsset = (raw: string): string => {
+    const s = raw.trim()
+    if (s.includes(':')) {
+      const i = s.indexOf(':')
+      return s.slice(0, i).toLowerCase() + ':' + s.slice(i + 1).toUpperCase()
+    }
+    return s.toUpperCase()
+  }
   const asset = typeof b.asset === 'string' && b.asset.trim()
-    ? b.asset.trim().toUpperCase()
-    : symbol.replace(/USDT$/, '')
+    ? canonAsset(b.asset)
+    : canonAsset(symbol.replace(/USDT$/, ''))
 
   const riskRaw = typeof b.riskUsd === 'string' ? Number(b.riskUsd) : b.riskUsd
   const riskUsd =
