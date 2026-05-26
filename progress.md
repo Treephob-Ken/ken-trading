@@ -4,7 +4,7 @@
 > Max ~200 lines. When something changes, **edit the relevant section** —
 > don't append a dated entry. Git history is the changelog.
 
-Last reviewed: 2026-05-26 (Phase B: HIP-3 live trading validated on mainnet — real fill on xyz:GOLD + clean close)
+Last reviewed: 2026-05-26 (Phase C: HIP-3 UI polish — cross-dex positions, signal bots, Limit toggle)
 
 ---
 
@@ -61,7 +61,9 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Currency Scanner (Indicator + Grid tabs, batch-rank top 30 HL coins, persisted results + colored verdicts) | ✅ |
 | Scanner — "Stocks & Commodities" universe toggle (HIP-3 ranked by HL open interest) | ✅ Phase A read-only |
 | HIP-3 markets (Gold, S&P 500, US stocks, forex, oil) in Backtester + Symbol picker | ✅ Phase A — backtest |
-| HIP-3 live trading via Trade page market orders (xyz:GOLD, etc.) | ✅ Phase B — asset-ID routing validated with real fill on mainnet |
+| HIP-3 live trading via Trade page market + limit orders | ✅ Phase B + C.3 |
+| HIP-3 positions visible + closeable in Trade page Open Positions (cross-dex) | ✅ Phase C.1 |
+| Signal bots can target HIP-3 symbols (xyz:GOLD etc.) end-to-end | ✅ Phase C.2 |
 | Live SSE log tail across all bots | ✅ Logs page |
 | Login page redesign (dot-grid, framer-motion) | ✅ |
 
@@ -69,13 +71,15 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 
 ## What's still pending
 
-- [ ] HIP-3 Phase C: UI polish. Three known gaps:
-      (1) Trade page Open Positions only shows main perp dex — HIP-3 positions
-      live in their own dex compartment and don't appear (use HL UI for now).
-      (2) Signal Bot creation UI hardcodes `${asset}USDT` symbol composition,
-      so `xyz:GOLD` can't be selected as a signal bot asset yet (orders go
-      through fine if you craft the config manually).
-      (3) No manual Limit-order toggle on the Trade page; market only.
+- [ ] HIP-3 follow-ups (none blocking; nice-to-haves):
+      - Resting limit orders aren't shown anywhere in the dashboard; you only
+        know a limit didn't fill by checking the HL UI directly.
+      - Position detail chart for HIP-3 (the inline candle chart you see after
+        clicking an Open Position row) still hits Binance with `${asset}USDT`
+        and silently fails — switch to the HL candleSnapshot path like the
+        Backtester already does.
+      - No Grid Bot creation flow for HIP-3 yet (Grid math + UI need the same
+        canonAsset treatment we applied to signal bots).
 - [ ] Per-user audit log: `limits.ts:recordTrade` accepts `userId` but
       `trade.ts` doesn't thread it through, so all entries still land in the
       global `bot/trade-audit.log`.
