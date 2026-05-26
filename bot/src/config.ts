@@ -128,7 +128,7 @@ export function listConfigs(userId?: string): GridConfig[] {
   if (!userId) migrateLegacyConfig() // only run legacy migration in single-tenant mode
   if (!existsSync(dir)) return []
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.json'))
+    .filter((f) => f.endsWith('.json') && !f.endsWith('.runtime.json'))
     .map((f) => {
       const cfg = JSON.parse(readFileSync(join(dir, f), 'utf8')) as GridConfig
       cfg.id = cfg.id ?? f.replace(/\.json$/, '')
