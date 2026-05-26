@@ -444,12 +444,12 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
         </div>
       )}
       {strategyOutput?.subPane && (
-        <>
+        <div className={showIndicator ? '' : 'hidden'}>
           <div className="border-t border-border bg-panel px-3 py-1 font-mono text-[10px] text-dim">
             {strategyOutput.subPane.title}
           </div>
           <div ref={subRef} className="h-[108px] w-full" />
-        </>
+        </div>
       )}
     </div>
   )

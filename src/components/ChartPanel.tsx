@@ -50,6 +50,9 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
   // Indicator line series (strategy mainLines like ZigZag, EMA, BB, etc.) —
   // kept so the visibility toggle can hide/show them without rebuilding.
   const indicatorLinesRef = useRef<ISeriesApi<'Line'>[]>([])
+  // Sub-pane indicator series (oscillators like RSI, MACD, Stoch). MACD also
+  // adds a HistogramSeries — both kinds end up here.
+  const subPaneSeriesRef = useRef<ISeriesApi<'Line' | 'Histogram'>[]>([])
 
   const [showSignals, setShowSignals] = useState(true)
   const [showIndicator, setShowIndicator] = useState(true)
@@ -152,16 +155,18 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
     }
 
     const sub = output?.subPane
+    subPaneSeriesRef.current = []
     if (sub) {
       if (sub.hist && sub.hist.length > 0) {
         const h = chart.addSeries(
           HistogramSeries,
-          { priceLineVisible: false, lastValueVisible: false },
+          { priceLineVisible: false, lastValueVisible: false, visible: showIndicator },
           1,
         )
         h.setData(
           sub.hist.map((d) => ({ time: t(d.time), value: d.value, color: d.color })),
         )
+        subPaneSeriesRef.current.push(h)
       }
       sub.lines.forEach((ln, idx) => {
         const s = chart.addSeries(
@@ -172,10 +177,12 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
             priceLineVisible: false,
             lastValueVisible: false,
             crosshairMarkerVisible: false,
+            visible: showIndicator,
           },
           1,
         )
         s.setData(ln.data.map((d) => ({ time: t(d.time), value: d.value })))
+        subPaneSeriesRef.current.push(s)
         if (idx === 0 && sub.refLines) {
           for (const level of sub.refLines) {
             s.createPriceLine({
@@ -217,6 +224,7 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
       markersApiRef.current = null
       tradePriceLinesRef.current = []
       indicatorLinesRef.current = []
+      subPaneSeriesRef.current = []
     }
   }, [candles, output, trades])
 
@@ -233,9 +241,13 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
     api.setMarkers(list)
   }, [showSignals, candles, output, trades])
 
-  // Toggle indicator line visibility without rebuilding the chart.
+  // Toggle indicator visibility (main-chart lines + sub-pane oscillators like
+  // MACD/RSI/Stoch) without rebuilding the chart.
   useEffect(() => {
     for (const s of indicatorLinesRef.current) {
+      try { s.applyOptions({ visible: showIndicator }) } catch {}
+    }
+    for (const s of subPaneSeriesRef.current) {
       try { s.applyOptions({ visible: showIndicator }) } catch {}
     }
   }, [showIndicator])
