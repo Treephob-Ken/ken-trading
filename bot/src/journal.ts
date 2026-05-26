@@ -213,11 +213,28 @@ export async function fetchFillsFromHL(
 // A round-trip starts when the position goes from 0 to non-zero and ends when
 // it returns to 0. Size flips (long → short in a single fill) are split into a
 // closing fill + an opening fill of the new direction.
+//
+// Same-millisecond ordering: when the bot flips direction it fires close-then-
+// open back-to-back. HL may return those fills in either order, but the math
+// only works if closes are processed first (otherwise the close-fill's PnL is
+// absorbed by the wrong round-trip). We pre-sort same-time fills using HL's
+// `dir` string: anything with "Close" goes before anything with "Open".
 export function pairRoundTrips(fills: Fill[]): RoundTrip[] {
+  const dirRank = (dir: string): number => {
+    const d = dir.toLowerCase()
+    if (d.includes('close')) return 0   // close fills first
+    if (d.includes('open')) return 2    // opens last
+    return 1                            // anything else (flips, unknown) in the middle
+  }
+
   const byAsset = new Map<string, Fill[]>()
   for (const f of fills) {
     if (!byAsset.has(f.asset)) byAsset.set(f.asset, [])
     byAsset.get(f.asset)!.push(f)
+  }
+  // Stable sort: chronological first, then closes-before-opens within same ms.
+  for (const list of byAsset.values()) {
+    list.sort((a, b) => a.time - b.time || dirRank(a.dir) - dirRank(b.dir))
   }
 
   const trips: RoundTrip[] = []

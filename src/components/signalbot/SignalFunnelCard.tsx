@@ -38,9 +38,14 @@ export default function SignalFunnelCard({ status }: Props) {
   if (total === 0) {
     return (
       <div className="card p-4">
-        <h3 className="mb-2 text-sm font-semibold text-text">Signal funnel</h3>
-        <p className="text-[11px] text-dim">
-          No signals observed yet — the strategy hasn't fired on a closed bar this session.
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-text">Signal funnel</h3>
+          <span className="text-[10px] text-dim">since last start</span>
+        </div>
+        <p className="text-[11px] text-dim leading-relaxed">
+          No new signals since the bot was last started. These counters reset on
+          restart — check the chart for historical fills and the Trade Log for
+          all-time PnL.
         </p>
       </div>
     )
