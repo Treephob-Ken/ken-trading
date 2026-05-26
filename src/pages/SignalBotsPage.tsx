@@ -398,6 +398,11 @@ export default function SignalBotsPage() {
   const [assetPrice, setAssetPrice] = useState<number | null>(null)
   // Live mark price surfaced by LivePositionCard; used by LiveStatusCard for $ size.
   const [livePrice, setLivePrice] = useState<number | null>(null)
+  // All-time stats for the selected bot. Polled on a slow cadence (60s) because
+  // it hits HL's fill history which is rate-limited and slow.
+  const [botStats, setBotStats] = useState<{
+    netPnl: number; roundTrips: number; winRate: number
+  } | null>(null)
   const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
 
   // Position-source map (keyed by asset, e.g. ETH) — used to detect stranded
@@ -619,6 +624,23 @@ export default function SignalBotsPage() {
     const id = setInterval(refreshSources, POLL_MS)
     return () => clearInterval(id)
   }, [refreshSources])
+
+  // All-time bot stats — slower poll (60s) because HL fills are expensive.
+  useEffect(() => {
+    if (!selectedId || isNew) { setBotStats(null); return }
+    let cancelled = false
+    const load = () => {
+      apiFetch(`/api/signal/bots/${selectedId}/stats`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d: { netPnl: number; roundTrips: number; winRate: number } | null) => {
+          if (!cancelled && d) setBotStats(d)
+        })
+        .catch(() => { /* tolerate */ })
+    }
+    load()
+    const id = setInterval(load, 60_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [selectedId, isNew])
 
   // Fetch price + max leverage for the selected asset so the sizing card can render
   useEffect(() => {
@@ -1027,6 +1049,9 @@ export default function SignalBotsPage() {
                 lastSignalAt={status.lastSignalAt}
                 lastError={status.lastError}
                 tradesExecuted={status.tradesExecuted}
+                allTimeNetPnl={botStats?.netPnl ?? null}
+                allTimeRoundTrips={botStats?.roundTrips ?? null}
+                allTimeWinRate={botStats?.winRate ?? null}
               />
             </div>
             <div className="flex items-stretch gap-2">

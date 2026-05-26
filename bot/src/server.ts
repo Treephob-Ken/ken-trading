@@ -1110,6 +1110,34 @@ app.get('/api/signal/bots/:id/trades', requireAuth, (req: Request, res: Response
   }
 })
 
+// All-time PnL stats for a single signal bot. Pairs HL fills into round-trips
+// and filters by the bot's asset (the journal attributes one bot per asset).
+app.get('/api/signal/bots/:id/stats', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set. Add them in Settings.' }); return }
+    const bot = getSignalBot(req.params.id, userId(req))
+    const cfg = bot.getStatus().config as { asset?: string; symbol?: string }
+    const asset = (cfg.asset || (cfg.symbol ?? '').replace(/USDT$/i, '') || '').toUpperCase()
+    if (!asset) { res.status(400).json({ error: 'Bot has no asset configured' }); return }
+
+    const to = Date.now()
+    const from = to - 365 * 24 * 60 * 60 * 1000   // 1 year — HL's typical retention window
+    const srcMap = buildAssetSourceMap(userId(req))
+    const fills = await fetchFillsFromHL(creds, from, to, srcMap)
+    const trips = pairRoundTrips(fills).filter((t) => t.asset === asset)
+
+    const wins = trips.filter((t) => t.closedPnl > 0).length
+    const losses = trips.filter((t) => t.closedPnl < 0).length
+    const netPnl = trips.reduce((sum, t) => sum + t.closedPnl, 0)
+    const winRate = trips.length > 0 ? (wins / trips.length) * 100 : 0
+
+    res.json({ netPnl, roundTrips: trips.length, wins, losses, winRate })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
 app.get('/api/signal/bots/:id/chart-data', requireAuth, async (req: Request, res: Response) => {
   try {
     const bot = getSignalBot(req.params.id, userId(req))

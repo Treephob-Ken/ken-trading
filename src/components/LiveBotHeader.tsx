@@ -18,6 +18,10 @@ interface Props {
   lastError?: string | null
   /** Number of trades executed during this session. */
   tradesExecuted?: number
+  /** All-time stats for this bot (filtered by asset over HL fill history). */
+  allTimeNetPnl?: number | null
+  allTimeRoundTrips?: number | null
+  allTimeWinRate?: number | null
 }
 
 function relativeTime(ms: number | null | undefined): string {
@@ -54,8 +58,20 @@ export default function LiveBotHeader({
   lastSignalAt,
   lastError,
   tradesExecuted,
+  allTimeNetPnl,
+  allTimeRoundTrips,
+  allTimeWinRate,
 }: Props) {
   const s = STATE_STYLES[state]
+
+  const pnlTone: 'gain' | 'loss' | undefined =
+    allTimeNetPnl == null ? undefined
+    : allTimeNetPnl > 0 ? 'gain'
+    : allTimeNetPnl < 0 ? 'loss'
+    : undefined
+  const pnlLabel = allTimeNetPnl == null
+    ? null
+    : `${allTimeNetPnl >= 0 ? '+$' : '−$'}${Math.abs(allTimeNetPnl).toFixed(2)} all-time`
 
   return (
     <div className={`card overflow-hidden ${s.bg}`}>
@@ -87,6 +103,15 @@ export default function LiveBotHeader({
           )}
           {typeof tradesExecuted === 'number' && (
             <Chip label={`${tradesExecuted} trade${tradesExecuted === 1 ? '' : 's'} this session`} />
+          )}
+          {typeof allTimeRoundTrips === 'number' && allTimeRoundTrips > 0 && (
+            <Chip label={`${allTimeRoundTrips} round-trip${allTimeRoundTrips === 1 ? '' : 's'}`} />
+          )}
+          {pnlLabel && (
+            <Chip tone={pnlTone} label={pnlLabel} />
+          )}
+          {typeof allTimeWinRate === 'number' && typeof allTimeRoundTrips === 'number' && allTimeRoundTrips > 0 && (
+            <Chip label={`${allTimeWinRate.toFixed(1)}% wins`} />
           )}
           {lastSignal && (
             <Chip
