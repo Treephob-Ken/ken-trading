@@ -223,7 +223,7 @@ export default function FundamentalsPage() {
 
       {data && (
         <>
-          <VerdictCard verdict={data.verdict} />
+          <SummaryCard bundle={data} />
           <ChipRow verdict={data.verdict} bundle={data} />
           <section
             aria-label="Fundamentals charts"
@@ -249,7 +249,7 @@ export default function FundamentalsPage() {
 function SkeletonGrid() {
   return (
     <div aria-busy="true" aria-label="Loading fundamentals" className="flex flex-col gap-4">
-      <div className="h-32 rounded-2xl border border-border bg-panel/60 animate-pulse" />
+      <div className="h-[420px] rounded-2xl border border-border bg-panel/60 animate-pulse" />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="h-14 rounded-xl border border-border bg-panel/60 animate-pulse" />
@@ -264,26 +264,239 @@ function SkeletonGrid() {
   )
 }
 
-// ─── Verdict card ────────────────────────────────────────────────────────────
+// ─── Summary card (7-step framework, replaces old VerdictCard) ───────────────
+// Mirrors the "สูตร 7-step" reading order from docs/USER_GUIDE.md §10 so the
+// whole macro picture is visible above the fold. Each row's tone uses the same
+// thresholds as its matching detail card; rows scroll to those cards on click.
 
-function VerdictCard({ verdict }: { verdict: Verdict }) {
-  const tone = stanceTone(verdict.stance)
-  const tc = toneClasses[tone]
+type StepTone = Tone
+
+interface SummaryStep {
+  n: number
+  name: string
+  reading: string
+  tone: StepTone
+  target: string | null
+}
+
+function combineTones(...tones: Tone[]): Tone {
+  if (tones.some((t) => t === 'loss')) return 'loss'
+  if (tones.some((t) => t === 'warn')) return 'warn'
+  if (tones.every((t) => t === 'gain')) return 'gain'
+  return 'neutral'
+}
+
+function scrollToCard(id: string): void {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function SummaryCard({ bundle }: { bundle: Bundle }) {
+  const { verdict, fng, mvrv, regime, funding, oi, dominance, volatility, cycle, smartMoney } = bundle
+  const sTone = stanceTone(verdict.stance)
+  const sTC = toneClasses[sTone]
+
+  // Per-reading tones — duplicated locally from each detail card so the source
+  // of truth stays adjacent to its display. Edits to a card's tone rule should
+  // also update the matching block here.
+  const fngV = fng.current.value
+  const fngTone: Tone = fngV <= 25 ? 'loss' : fngV <= 45 ? 'warn' : fngV < 55 ? 'neutral' : fngV < 75 ? 'warn' : 'gain'
+
+  const mvrvV = mvrv.current.value
+  const mvrvMean = mvrv.mean
+  const mvrvTone: Tone =
+    mvrvV < 1 ? 'gain'
+    : mvrvV < mvrvMean * 0.85 ? 'gain'
+    : mvrvV < mvrvMean * 1.15 ? 'neutral'
+    : mvrvV < 3.7 ? 'warn'
+    : 'loss'
+  const mvrvZone =
+    mvrvV < 1 ? 'Deep value'
+    : mvrvV < mvrvMean * 0.85 ? 'Cheap'
+    : mvrvV < mvrvMean * 1.15 ? 'Fair'
+    : mvrvV < 3.7 ? 'Rich'
+    : 'Euphoric'
+
+  const regimeTones: Record<RegimeLabel, Tone> = {
+    Markup: 'gain', Accumulation: 'warn', Distribution: 'warn', Markdown: 'loss',
+  }
+  const regimeTone = regimeTones[regime.label]
+
+  const fundingApr = funding.annualizedPct
+  const fundingTone: Tone =
+    fundingApr > 30 ? 'loss' : fundingApr > 15 ? 'warn' : fundingApr > -10 ? 'neutral' : 'gain'
+  const oiTone: Tone = Math.abs(oi.pct30d) > 20 ? 'warn' : 'neutral'
+
+  const volTones: Record<VolZone, Tone> = {
+    Calm: 'gain', Normal: 'neutral', Elevated: 'warn', Extreme: 'loss',
+  }
+  const volTone = volTones[volatility.current.zone]
+
+  const mayerTones: Record<MayerZone, Tone> = {
+    Cheap: 'gain', Fair: 'neutral', Hot: 'warn', 'Cycle Top': 'loss',
+  }
+  const mayerTone = mayerTones[cycle.current.zone]
+  const piTone: Tone = cycle.current.piGapPct >= 0 ? 'loss' : cycle.current.piGapPct > -10 ? 'warn' : 'neutral'
+
+  const lsV = smartMoney.longShort.current
+  const lsTone: Tone =
+    lsV > 1.6 ? 'loss' : lsV > 1.2 ? 'warn' : lsV > 0.8 ? 'neutral' : 'gain'
+  const prV = smartMoney.premium.current
+  const prTone: Tone =
+    prV > 0.05 ? 'gain' : prV > -0.05 ? 'neutral' : prV > -0.15 ? 'warn' : 'loss'
+
+  // Dominance is informational for BTC bias, but the guide counts it in the
+  // 11-indicator confidence rule — extreme alt-season or BTC-season = warn.
+  const domTone: Tone = dominance.btcDominance > 60 || dominance.btcDominance < 45 ? 'warn' : 'neutral'
+
+  const steps: SummaryStep[] = [
+    {
+      n: 1,
+      name: 'Verdict + Stance',
+      reading: verdict.stance,
+      tone: sTone,
+      target: null,
+    },
+    {
+      n: 2,
+      name: 'Macro Cycle (Mayer + Pi)',
+      reading: `Mayer ${cycle.current.mayer.toFixed(2)} (${cycle.current.zone}) · Pi ${cycle.current.piGapPct >= 0 ? '+' : ''}${cycle.current.piGapPct.toFixed(1)}%`,
+      tone: combineTones(mayerTone, piTone),
+      target: 'fund-cycle',
+    },
+    {
+      n: 3,
+      name: 'Sentiment + Valuation',
+      reading: `F&G ${fngV} ${fng.current.label} · MVRV ${mvrvV.toFixed(2)} ${mvrvZone}`,
+      tone: combineTones(fngTone, mvrvTone),
+      target: 'fund-fng',
+    },
+    {
+      n: 4,
+      name: 'Regime (Wyckoff)',
+      reading: `${regime.label} · ${Math.round(regime.confidence * 100)}% conf`,
+      tone: regimeTone,
+      target: 'fund-regime',
+    },
+    {
+      n: 5,
+      name: 'Leverage (Funding + OI)',
+      reading: `Funding ${fundingApr.toFixed(1)}% APR · OI ${oi.pct30d >= 0 ? '+' : ''}${oi.pct30d.toFixed(1)}%/30d`,
+      tone: combineTones(fundingTone, oiTone),
+      target: 'fund-leverage',
+    },
+    {
+      n: 6,
+      name: 'Volatility',
+      reading: `30D RV ${volatility.current.rv30.toFixed(1)}% · ${volatility.current.zone}`,
+      tone: volTone,
+      target: 'fund-vol',
+    },
+    {
+      n: 7,
+      name: 'Smart Money',
+      reading: `L/S ${lsV.toFixed(2)} · CB ${prV >= 0 ? '+' : ''}${prV.toFixed(2)}%`,
+      tone: combineTones(lsTone, prTone),
+      target: 'fund-smartmoney',
+    },
+  ]
+
+  // Decision rule from USER_GUIDE.md: count all 11 sub-readings for confidence.
+  const allTones: Tone[] = [
+    mayerTone, piTone, fngTone, mvrvTone, regimeTone,
+    fundingTone, oiTone, domTone, volTone, lsTone, prTone,
+  ]
+  const bullish = allTones.filter((t) => t === 'gain').length
+  const bearish = allTones.filter((t) => t === 'loss').length
+  const neutralCt = allTones.length - bullish - bearish
+  const highConf: 'bullish' | 'bearish' | null =
+    bullish >= 6 ? 'bullish' : bearish >= 6 ? 'bearish' : null
+
   return (
     <article
       aria-live="polite"
-      className={`rounded-2xl border ${tc.ring} ${tc.bg} backdrop-blur-sm p-5 shadow-[0_4px_24px_rgba(0,0,0,.35)]`}
+      className={`rounded-2xl border ${sTC.ring} ${sTC.bg} backdrop-blur-sm p-5 shadow-[0_4px_24px_rgba(0,0,0,.35)]`}
     >
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-dim">
-          Overall Verdict · {verdict.asset}
+          Overall Summary · {verdict.asset}
         </span>
-        <span className={`flex items-center gap-2 text-lg font-semibold ${tc.text}`}>
-          <span className={`h-2 w-2 rounded-full ${tc.dot}`} aria-hidden="true" />
+        <span className={`flex items-center gap-2 text-lg font-semibold ${sTC.text}`}>
+          <span className={`h-2 w-2 rounded-full ${sTC.dot}`} aria-hidden="true" />
           {verdict.stance}
         </span>
       </div>
+
       <p className="mt-3 max-w-3xl text-[13px] leading-relaxed text-text/90">{verdict.narrative}</p>
+
+      <div className="mt-4 border-t border-border/60" />
+
+      <ol className="mt-3 flex flex-col gap-1">
+        {steps.map((step) => {
+          const tc = toneClasses[step.tone]
+          const isClickable = step.target !== null
+          const rowContent = (
+            <>
+              <span className="w-5 shrink-0 text-[10px] font-semibold text-dim">{step.n}.</span>
+              <span className="w-44 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                {step.name}
+              </span>
+              <span className="fund-num flex-1 truncate font-mono text-[12px] text-text/90">
+                {step.reading}
+              </span>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-md border ${tc.ring} ${tc.bg} px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tc.text}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${tc.dot}`} aria-hidden="true" />
+                {step.tone === 'gain' ? 'bullish' : step.tone === 'loss' ? 'bearish' : step.tone === 'warn' ? 'caution' : 'neutral'}
+              </span>
+            </>
+          )
+          return isClickable ? (
+            <li key={step.n}>
+              <button
+                type="button"
+                onClick={() => scrollToCard(step.target as string)}
+                aria-label={`${step.name}: ${step.reading}. Scroll to detail card.`}
+                className="flex w-full items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border-strong/60 hover:bg-panel/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+              >
+                {rowContent}
+              </button>
+            </li>
+          ) : (
+            <li key={step.n} className="flex items-center gap-3 px-2 py-1.5">
+              {rowContent}
+            </li>
+          )
+        })}
+      </ol>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/60 pt-3 text-[11px]">
+        <span className="text-dim">Score:</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-gain" aria-hidden="true" />
+          <span className="fund-num font-mono text-gain">{bullish}</span>
+          <span className="text-muted">bullish</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-dim" aria-hidden="true" />
+          <span className="fund-num font-mono text-muted">{neutralCt}</span>
+          <span className="text-muted">neutral</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden="true" />
+          <span className="fund-num font-mono text-loss">{bearish}</span>
+          <span className="text-muted">bearish</span>
+        </span>
+        {highConf && (
+          <span
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+              highConf === 'bullish' ? 'border-gain/30 bg-gain/10 text-gain' : 'border-loss/30 bg-loss/10 text-loss'
+            }`}
+          >
+            High-confidence {highConf} (≥6/11)
+          </span>
+        )}
+      </div>
     </article>
   )
 }
@@ -418,6 +631,7 @@ interface ExpandableProps {
   statHeader: React.ReactNode
   setupChart: (el: HTMLElement) => () => void
   inlineHeight: number
+  anchorId?: string
 }
 
 function ExpandableQCard({
@@ -427,6 +641,7 @@ function ExpandableQCard({
   statHeader,
   setupChart,
   inlineHeight,
+  anchorId,
 }: ExpandableProps) {
   const inlineRef = useRef<HTMLDivElement>(null)
   const modalChartRef = useRef<HTMLDivElement>(null)
@@ -453,8 +668,9 @@ function ExpandableQCard({
   return (
     <>
       <article
+        id={anchorId}
         aria-label={ariaSummary ?? question}
-        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70"
+        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70 scroll-mt-4"
       >
         <h2 className="text-[13px] font-semibold tracking-tight text-text">{question}</h2>
         {statHeader}
@@ -605,6 +821,7 @@ function FngCard({ fng }: { fng: FngResult }) {
       statHeader={<StatHeader tone={tone} value={String(v)} label={fng.current.label} hint="1Y history · 0 fear → 100 greed" />}
       setupChart={setupChart}
       inlineHeight={220}
+      anchorId="fund-fng"
     />
   )
 }
@@ -660,6 +877,7 @@ function MvrvCard({ mvrv }: { mvrv: MvrvResult }) {
       statHeader={<StatHeader tone={tone} value={v.toFixed(2)} label="MVRV" hint={`mean ${mean.toFixed(2)} · red dotted 3.7 = top · green dotted 1.0 = bottom`} />}
       setupChart={setupChart}
       inlineHeight={220}
+      anchorId="fund-mvrv"
     />
   )
 }
@@ -727,6 +945,7 @@ function RegimeCard({ regime }: { regime: RegimeResult }) {
       statHeader={<StatHeader tone={tone} value={regime.label} label={`${conf}% conf`} hint="candles · EMA50 (violet) · EMA200 (amber)" />}
       setupChart={setupChart}
       inlineHeight={240}
+      anchorId="fund-regime"
     />
   )
 }
@@ -825,8 +1044,9 @@ function FundingOiCard({ funding, oi }: { funding: FundingResult; oi: OiResult }
   return (
     <>
       <article
+        id="fund-leverage"
         aria-label={`Funding rate ${fundingApr.toFixed(1)} percent annualized, open interest ${(oi.current.usd / 1e9).toFixed(2)} billion dollars`}
-        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70"
+        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70 scroll-mt-4"
       >
         <h2 className="text-[13px] font-semibold tracking-tight text-text">Is leverage flashing a warning?</h2>
         {statHeader}
@@ -981,6 +1201,7 @@ function VolatilityCard({ vol }: { vol: VolResult }) {
       statHeader={<StatHeader tone={tone} value={`${rv30.toFixed(1)}%`} label={`30D RV · ${zone}`} hint={`7D RV ${rv7.toFixed(1)}% · daily ATR ${atrPct.toFixed(2)}%`} />}
       setupChart={setupChart}
       inlineHeight={220}
+      anchorId="fund-vol"
     />
   )
 }
@@ -1054,6 +1275,7 @@ function CycleCard({ cycle }: { cycle: CycleResult }) {
       statHeader={<StatHeader tone={tone} value={mayer.toFixed(2)} label={`Mayer · ${zone}`} hint="log price · 200DMA (violet) · 111×2 (green) · 350DMA (red)" />}
       setupChart={setupChart}
       inlineHeight={240}
+      anchorId="fund-cycle"
     />
   )
 }
@@ -1163,8 +1385,9 @@ function SmartMoneyCard({ sm }: { sm: SmartMoneyResult }) {
   return (
     <>
       <article
+        id="fund-smartmoney"
         aria-label={`Long short ratio ${lsCurrent.toFixed(2)}, Coinbase premium ${prCurrent.toFixed(2)} percent`}
-        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70"
+        className="fund-card defer-render flex flex-col gap-3 rounded-2xl border border-border bg-panel/85 backdrop-blur-sm p-4 shadow-[0_4px_24px_rgba(0,0,0,.35)] transition-colors hover:border-border-strong/70 scroll-mt-4"
       >
         <h2 className="text-[13px] font-semibold tracking-tight text-text">Where is the smart money positioned?</h2>
         {statHeader}

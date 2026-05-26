@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "framer-motion": "^12.40.0",
     "lightweight-charts": "^5.0.7",
     "lucide-react": "^0.469.0",
     "react": "^18.3.1",
