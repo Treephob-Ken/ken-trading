@@ -509,7 +509,17 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
   }, [showIndicator])
 
   const goToLatest = () => {
-    chartRef.current?.timeScale().scrollToRealTime()
+    const chart = chartRef.current
+    if (!chart || candles.length === 0) return
+    const ts = chart.timeScale()
+    const range = ts.getVisibleLogicalRange()
+    const width = range ? range.to - range.from : 60
+    const lastIdx = candles.length - 1
+    // Centers the latest candle by extending visible range half-a-width past it.
+    ts.setVisibleLogicalRange({
+      from: lastIdx - width / 2,
+      to: lastIdx + width / 2,
+    })
   }
 
   // tradeAtBar resolver — actual executed trades have ms timestamps; convert + match against bar second.
