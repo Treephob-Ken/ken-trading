@@ -117,6 +117,15 @@ export default function TradePage() {
   const [orderStatus, setOrderStatus] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // Market vs Limit toggle. Market = IOC limit capped by slippage% (current behaviour).
+  // Limit = resting GTC limit that won't fill until price reaches `limitPrice`.
+  type OrderType = 'market' | 'limit'
+  const [orderType, setOrderType] = useState<OrderType>(
+    () => (localStorage.getItem('trade_orderType') as OrderType) || 'market',
+  )
+  const [limitPrice, setLimitPrice] = useState<number | ''>('')
+  useEffect(() => { localStorage.setItem('trade_orderType', orderType) }, [orderType])
+
   // Sizing — Risk-based is the primary mode (matches Backtester / Signal Bots / Grid pages).
   // Fixed USDC stays available for quick manual sizing.
   type SizingMode = 'risk' | 'fixed'
@@ -297,14 +306,23 @@ export default function TradePage() {
     }
     if (size <= 0) { setOrderStatus('Computed size is zero — check inputs'); return }
 
+    // Validate limit price before submitting.
+    if (orderType === 'limit') {
+      if (typeof limitPrice !== 'number' || limitPrice <= 0) {
+        setOrderStatus('Enter a limit price')
+        return
+      }
+    }
+
     setBusy(true); setOrderStatus('Placing order…')
     try {
       // In Risk-based mode, send the SL/TP percentages so the bot places a real
       // reduce-only stop on Hyperliquid from the actual fill price. Without
       // these the order opens bare and the position has no automated downside.
       const body: Record<string, unknown> = {
-        asset: selectedAsset, side, size, orderType: 'market', maxSlippagePct: slippage,
+        asset: selectedAsset, side, size, orderType, maxSlippagePct: slippage,
       }
+      if (orderType === 'limit') body.limitPrice = limitPrice
       // SL/TP brackets are independent of sizing mode — both Risk-based and
       // Fixed USDC orders can opt in to reduce-only stops on the exchange.
       if (typeof slPct === 'number' && slPct > 0) body.slPct = slPct
@@ -701,19 +719,59 @@ export default function TradePage() {
               </div>
             </Field>
 
-            {/* Price + slippage */}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-dim">Price</span>
-                <div className="mt-1 rounded-lg border border-border bg-panel-2 px-3 py-2 font-mono text-sm text-text">
-                  {assetInfo?.midPx ? `$${assetInfo.midPx.toLocaleString()}` : '—'}
-                </div>
+            {/* Order type toggle — Market (IOC) vs Limit (GTC) */}
+            <div>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-dim">Order type</span>
+              <div className="flex gap-1 rounded-lg border border-border bg-bg p-1">
+                <button
+                  type="button"
+                  onClick={() => setOrderType('market')}
+                  className={`flex-1 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                    orderType === 'market' ? 'bg-brand/15 text-brand' : 'text-dim hover:text-text'
+                  }`}
+                >
+                  Market
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOrderType('limit')
+                    // Pre-fill limit price with current mid when switching for the first time.
+                    if (limitPrice === '' && assetInfo?.midPx) setLimitPrice(+assetInfo.midPx.toFixed(4))
+                  }}
+                  className={`flex-1 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                    orderType === 'limit' ? 'bg-brand/15 text-brand' : 'text-dim hover:text-text'
+                  }`}
+                >
+                  Limit
+                </button>
               </div>
-              <Field label="Max slippage %">
+            </div>
+
+            {/* Price + slippage (or limit price + slippage) */}
+            <div className="grid grid-cols-2 gap-2">
+              {orderType === 'market' ? (
+                <div>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-dim">Mid price</span>
+                  <div className="mt-1 rounded-lg border border-border bg-panel-2 px-3 py-2 font-mono text-sm text-text">
+                    {assetInfo?.midPx ? `$${assetInfo.midPx.toLocaleString()}` : '—'}
+                  </div>
+                </div>
+              ) : (
+                <Field label="Limit price">
+                  <input type="number" step="any" min="0"
+                    placeholder={assetInfo?.midPx ? assetInfo.midPx.toString() : '0'}
+                    value={limitPrice}
+                    onChange={e => setLimitPrice(e.target.value === '' ? '' : +e.target.value)}
+                    className={inputCls} />
+                </Field>
+              )}
+              <Field label={orderType === 'market' ? 'Max slippage %' : 'Slippage % (unused)'}>
                 <input type="number" step="0.1" min="0"
                   value={slippage}
                   onChange={e => setSlippage(+e.target.value)}
-                  className={inputCls} />
+                  disabled={orderType === 'limit'}
+                  className={`${inputCls} disabled:opacity-40`} />
               </Field>
             </div>
 
