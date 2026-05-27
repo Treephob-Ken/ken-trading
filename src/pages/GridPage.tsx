@@ -68,6 +68,8 @@ export default function GridPage({
 
   // ── deploy settings ──────────────────────────────────────────────────────────
   const [leverage, setLeverage] = useState(() => +(localStorage.getItem('gd_leverage') || '1'))
+  // Max leverage for the selected asset — fetched from HL meta on coin change.
+  const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
   const [slPct, setSlPct] = useState(() => +(localStorage.getItem('gd_slPct') || '2'))
   const [tpPct, setTpPct] = useState(() => +(localStorage.getItem('gd_tpPct') || '2'))
   const [riskUsd, setRiskUsd] = useState<number | ''>('')
@@ -101,6 +103,24 @@ export default function GridPage({
   useEffect(() => { localStorage.setItem('gd_leverage', String(leverage)) }, [leverage])
   useEffect(() => { localStorage.setItem('gd_slPct', String(slPct)) }, [slPct])
   useEffect(() => { localStorage.setItem('gd_tpPct', String(tpPct)) }, [tpPct])
+
+  // ── fetch max leverage for selected coin ─────────────────────────────────────
+  // Auto-set leverage to the coin's HL max whenever the symbol changes so the
+  // user doesn't have to look it up. They can still adjust manually after.
+  useEffect(() => {
+    const asset = symbol.includes(':') ? symbol : symbol.replace(/USDT$/, '')
+    setMaxLeverage(null)
+    let cancelled = false
+    apiFetch(`/api/asset-info?asset=${encodeURIComponent(asset)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { maxLeverage?: number } | null) => {
+        if (cancelled || !d?.maxLeverage) return
+        setMaxLeverage(d.maxLeverage)
+        setLeverage(d.maxLeverage)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [symbol])
 
   // ── fetch candles ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -340,7 +360,7 @@ export default function GridPage({
           leverage={leverage}
           leverageLabel="Leverage"
           slPct={slPct}
-          footnote={`Budget $${effectiveInvestment.toFixed(2)} × ${leverage}× leverage`}
+          footnote={`Budget $${effectiveInvestment.toFixed(2)} × ${leverage}× leverage${maxLeverage ? ` · HL max ${maxLeverage}×` : ''}`}
         />
       </aside>
 

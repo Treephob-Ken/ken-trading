@@ -29,6 +29,12 @@ function prettyBase(base: string): string {
   return i < 0 ? base : base.slice(i + 1)
 }
 
+// We pull data from Binance (USDT pairs) but trade on Hyperliquid (USDC perps).
+// Display the HL-side quote to match what the user actually trades.
+function prettyQuote(quote: string): string {
+  return quote === 'USDT' ? 'USDC' : quote
+}
+
 function marketBadge(market: Market): string {
   switch (market) {
     case 'crypto': return 'Crypto'
@@ -77,7 +83,7 @@ export default function SymbolSearch({ value, symbols, onChange }: Props) {
   // a friendlier pair label, falling back to the raw value while the list loads.
   const selected = symbols.find((s) => s.symbol === value)
   const displayValue = selected
-    ? `${prettyBase(selected.base)}/${selected.quote}`
+    ? `${prettyBase(selected.base)}/${prettyQuote(selected.quote)}`
     : value
 
   return (
@@ -130,7 +136,7 @@ export default function SymbolSearch({ value, symbols, onChange }: Props) {
                   >
                     <span className="font-medium">
                       {prettyBase(s.base)}
-                      <span className="text-dim">/{s.quote}</span>
+                      <span className="text-dim">/{prettyQuote(s.quote)}</span>
                     </span>
                     <span className="flex items-center gap-2">
                       {badge && (
