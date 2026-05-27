@@ -11,6 +11,7 @@ import { apiFetch } from '@/contexts/AuthContext'
 import ChartPanel from '@/components/ChartPanel'
 import Controls, { type SizingMode } from '@/components/Controls'
 import NumberInput from '@/components/NumberInput'
+import PositionSizeCard from '@/components/PositionSizeCard'
 import Results from '@/components/Results'
 import SummaryPanel from '@/components/SummaryPanel'
 import ConfidenceStrip from '@/components/ConfidenceStrip'
@@ -529,60 +530,6 @@ export default function BacktesterPage({
               </div>
             )}
 
-            {/* Position + max-loss preview. Leverage is auto = max for the asset. */}
-            {(() => {
-              const lev = maxLeverage ?? 1
-              const priceForCalc = lastPrice > 0 ? lastPrice : (assetMidPx ?? 0)
-              let notional = 0
-              let lossAtSl = 0
-              if (sizingMode === 'volatility') {
-                const riskUsd = initialCapital * targetRiskPct / 100
-                notional = stopLossPct > 0 ? riskUsd / (stopLossPct / 100) : 0
-                lossAtSl = riskUsd
-              } else {
-                notional = deployUsd
-                lossAtSl = stopLossPct > 0 ? notional * (stopLossPct / 100) : 0
-              }
-              const margin = notional / lev
-              const qty = priceForCalc > 0 && notional > 0 ? notional / priceForCalc : 0
-              return (
-                <div className="mb-3 rounded-lg border border-border bg-panel-2 px-2.5 py-2 text-[10px] space-y-1">
-                  <div className="text-[10px] font-semibold text-text mb-1">Risk preview</div>
-                  <div className="flex justify-between">
-                    <span className="text-dim">Position (notional)</span>
-                    <span className="font-mono text-text">
-                      {notional > 0 ? `$${notional.toFixed(2)}` : '—'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-dim">Max leverage</span>
-                    <span className="font-mono text-text">
-                      {maxLeverage ? `${maxLeverage}×` : '— (loading)'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-dim">Margin needed (at {lev}×)</span>
-                    <span className="font-mono text-text">
-                      {maxLeverage && margin > 0 ? `$${margin.toFixed(2)}` : '—'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-dim">Loss if SL hits</span>
-                    <span className={`font-mono ${stopLossPct > 0 ? 'text-loss' : 'text-dim'}`}>
-                      {stopLossPct > 0 && lossAtSl > 0
-                        ? `-$${lossAtSl.toFixed(2)}${maxLeverage ? ` (${((lossAtSl / Math.max(margin, 0.0001)) * 100).toFixed(0)}% of margin)` : ''}`
-                        : 'no SL set'}
-                    </span>
-                  </div>
-                  {sizingMode !== 'volatility' && qty > 0 && (
-                    <p className="text-[9px] text-dim mt-1 leading-relaxed">
-                      ≈ {qty.toFixed(6)} {symbol.replace(/USDT$/, '')} at ${priceForCalc.toFixed(2)}.
-                    </p>
-                  )}
-                </div>
-              )
-            })()}
-
             <button
               type="button"
               disabled={!canDeploy}
@@ -601,6 +548,23 @@ export default function BacktesterPage({
             </button>
           </div>
         )}
+
+        {/* ── Position Size card (consistent across pages) ── */}
+        {(() => {
+          const priceForCalc = lastPrice > 0 ? lastPrice : (assetMidPx ?? 0)
+          const notional = sizingMode === 'volatility'
+            ? (stopLossPct > 0 ? (initialCapital * targetRiskPct / 100) / (stopLossPct / 100) : 0)
+            : deployUsd
+          const qty = priceForCalc > 0 && notional > 0 ? notional / priceForCalc : 0
+          return (
+            <PositionSizeCard
+              notional={notional}
+              leverage={maxLeverage}
+              slPct={stopLossPct}
+              footnote={qty > 0 ? `≈ ${qty.toFixed(6)} ${symbol.replace(/USDT$/, '')} at $${priceForCalc.toFixed(2)}` : null}
+            />
+          )
+        })()}
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-4">

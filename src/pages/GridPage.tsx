@@ -22,6 +22,7 @@ import GridControls from '@/components/GridControls'
 import GridStats from '@/components/GridStats'
 import GridVerdictStrip from '@/components/GridVerdictStrip'
 import NumberInput from '@/components/NumberInput'
+import PositionSizeCard from '@/components/PositionSizeCard'
 
 interface Props {
   symbol: string
@@ -332,6 +333,15 @@ export default function GridPage({
             </div>
           </div>
         )}
+
+        {/* ── Position Size card (consistent across pages) ── */}
+        <PositionSizeCard
+          notional={effectiveInvestment > 0 && leverage > 0 ? effectiveInvestment * leverage : null}
+          leverage={leverage}
+          leverageLabel="Leverage"
+          slPct={slPct}
+          footnote={`Budget $${effectiveInvestment.toFixed(2)} × ${leverage}× leverage`}
+        />
       </aside>
 
       {/* ── RIGHT: Analysis + Deploy ─────────────────────────────────────────── */}

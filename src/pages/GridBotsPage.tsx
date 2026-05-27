@@ -23,6 +23,7 @@ import LiveBotHeader from '@/components/LiveBotHeader'
 import StrandedBanner, { type StrandedPosition } from '@/components/StrandedBanner'
 import MultiBotConflictBanner from '@/components/MultiBotConflictBanner'
 import GridActivityCard from '@/components/gridbot/GridActivityCard'
+import PositionSizeCard from '@/components/PositionSizeCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -838,6 +839,22 @@ export default function GridBotsPage() {
             </div>
           </div>
         )}
+
+        {/* ── Position Size card (consistent across pages) ── */}
+        {cfg && (() => {
+          const inv = typeof cfg.investment === 'number' ? cfg.investment : 0
+          const lev = typeof cfg.leverage === 'number' && cfg.leverage > 0 ? cfg.leverage : 1
+          const notional = inv > 0 ? inv * lev : null
+          return (
+            <PositionSizeCard
+              notional={notional}
+              leverage={lev}
+              leverageLabel="Leverage"
+              slPct={null}
+              footnote={inv > 0 ? `Budget $${inv.toFixed(2)} × ${lev}× leverage${assetInfo?.maxLeverage ? ` · HL max ${assetInfo.maxLeverage}×` : ''}` : 'set Budget + Leverage above'}
+            />
+          )
+        })()}
       </aside>
 
       {/* ── Right main area ── */}
