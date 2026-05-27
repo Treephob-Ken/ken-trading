@@ -4,6 +4,7 @@
 
 import { HttpTransport, InfoClient } from '@nktkas/hyperliquid'
 import type { Candle } from './strategies.js'
+import { normalizeAssetName } from '../hyperliquid-hip3.js'
 
 let publicInfo: InfoClient | null = null
 
@@ -51,9 +52,13 @@ export async function fetchKlinesHL(
   const end = Date.now()
   // pad by 2 bars so we always get at least `limit` bars back
   const start = end - ms * (limit + 2)
+  // HL is case-sensitive on the dex prefix — `XYZ:COIN` returns a 500. Old
+  // signal-bot configs (created pre-C.2) persisted uppercased names, so
+  // normalize defensively here.
+  const coin = normalizeAssetName(symbol)
   const info = getPublicInfo()
   const raw = await info.candleSnapshot({
-    coin: symbol,
+    coin,
     interval,
     startTime: start,
     endTime: end,

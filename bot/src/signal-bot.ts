@@ -148,7 +148,12 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   }
   const b = body as Record<string, unknown>
 
-  const symbol = typeof b.symbol === 'string' ? b.symbol.trim().toUpperCase() : ''
+  // For HIP-3 (colon names) the dex prefix MUST stay lowercase or HL's
+  // candleSnapshot 500s. Uppercase plain crypto tickers as before.
+  const symbolRaw = typeof b.symbol === 'string' ? b.symbol.trim() : ''
+  const symbol = symbolRaw.includes(':')
+    ? symbolRaw.slice(0, symbolRaw.indexOf(':')).toLowerCase() + ':' + symbolRaw.slice(symbolRaw.indexOf(':') + 1).toUpperCase()
+    : symbolRaw.toUpperCase()
   if (!symbol) throw new Error('symbol is required')
 
   const timeframe = typeof b.timeframe === 'string' ? b.timeframe : ''
