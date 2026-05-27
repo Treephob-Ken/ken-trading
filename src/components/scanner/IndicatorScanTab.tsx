@@ -28,7 +28,7 @@ type SortKey =
   | 'maxDrawdownPct'
   | 'sharpeRatio'
 
-const ALL_TFS = ['1h', '4h'] as const
+const ALL_TFS = ['15m', '30m', '1h', '4h', '1d', '1w'] as const
 const ALL_STRATS: StrategyId[] = STRATEGIES.map((s) => s.id)
 
 const STORAGE_KEY = 'scanner_indicator_results_v1'

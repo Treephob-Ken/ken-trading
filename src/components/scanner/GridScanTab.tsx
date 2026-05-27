@@ -20,7 +20,8 @@ type SortKey =
   | 'atrPct'
   | 'spacingMultiple'
 
-const GRID_TF = '4h'
+const GRID_TF_OPTIONS = ['15m', '30m', '1h', '4h', '1d'] as const
+type GridTf = typeof GRID_TF_OPTIONS[number]
 const STORAGE_KEY = 'scanner_grid_results_v1'
 
 interface PersistedState {
@@ -62,6 +63,10 @@ export default function GridScanTab({
   }, [])
 
   // Filters persist in localStorage.
+  const [gridTf, setGridTf] = useState<GridTf>(() => {
+    const saved = localStorage.getItem('scn_grid_tf') as GridTf | null
+    return saved && GRID_TF_OPTIONS.includes(saved) ? saved : '4h'
+  })
   const [sidewaysOnly, setSidewaysOnly] = useState(
     () => localStorage.getItem('scn_grid_sidewaysOnly') !== 'false',
   )
@@ -74,6 +79,7 @@ export default function GridScanTab({
   const [sortKey, setSortKey] = useState<SortKey>('totalReturnPct')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
+  useEffect(() => { localStorage.setItem('scn_grid_tf', gridTf) }, [gridTf])
   useEffect(() => { localStorage.setItem('scn_grid_sidewaysOnly', String(sidewaysOnly)) }, [sidewaysOnly])
   useEffect(() => { localStorage.setItem('scn_grid_minSpacingX', String(minSpacingX)) }, [minSpacingX])
   useEffect(() => { localStorage.setItem('scn_grid_minTradesPerDay', String(minTradesPerDay)) }, [minTradesPerDay])
@@ -93,7 +99,7 @@ export default function GridScanTab({
     try {
       const result = await runGridScan(
         universe,
-        { timeframe: GRID_TF, lookbackDays: 30 },
+        { timeframe: gridTf, lookbackDays: 30 },
         setProgress,
         ctrl.signal,
       )
@@ -213,10 +219,23 @@ export default function GridScanTab({
           />
         </div>
 
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] text-dim uppercase tracking-wider">Timeframe</span>
+          <select
+            value={gridTf}
+            onChange={(e) => setGridTf(e.target.value as GridTf)}
+            className="rounded-md border border-border bg-panel-2 px-2 py-1 text-xs font-mono text-text outline-none focus:border-brand/60"
+          >
+            {GRID_TF_OPTIONS.map((tf) => (
+              <option key={tf} value={tf}>{tf}</option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex-1" />
 
         <div className="text-[10px] text-dim font-mono">
-          Lookback 30d · TF {GRID_TF}
+          Lookback 30d · TF {gridTf}
         </div>
 
         {scannedAt && !scanning && (
