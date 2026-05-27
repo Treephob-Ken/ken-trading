@@ -109,6 +109,9 @@ interface SignalBotStatus {
   blockedByEnsemble?: number
   blockedBySlippage?: number
   lastTradeAt?: number
+  // Auto-pause reason if the bot stopped itself after 3+ failed orders
+  // (e.g. insufficient margin). Null when healthy.
+  autoPausedReason?: string | null
 }
 interface TradeRecord {
   time: number; side: 'buy' | 'sell'; asset: string; size: number; price: number | null
@@ -1154,11 +1157,69 @@ export default function SignalBotsPage() {
 
               <div className="my-1 h-px bg-border" />
 
-              <div className="grid grid-cols-2 gap-2">
-                <Field label={riskMode ? 'Order size (ignored — risk mode)' : 'Order size'}>
-                  <input type="number" disabled={running || riskMode} step="any" min="0"
-                    value={cfg.size} onChange={(e) => patch({ size: Number(e.target.value) })} className={inputCls} />
+              {/* ── Sizing Mode — mirrors the Backtester's Fixed | Risk-based toggle ── */}
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Sizing mode</p>
+              <div className="flex overflow-hidden rounded-md border border-border">
+                <button
+                  type="button"
+                  disabled={running}
+                  onClick={() => {
+                    // Switch to Fixed: clear riskUsd so the implicit mode flips back.
+                    if (riskMode) patch({ riskUsd: undefined })
+                  }}
+                  className={`flex-1 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    !riskMode ? 'bg-brand text-bg' : 'bg-panel-2 text-dim hover:text-text'
+                  } disabled:opacity-50`}
+                >
+                  Fixed
+                </button>
+                <button
+                  type="button"
+                  disabled={running}
+                  onClick={() => {
+                    // Switch to Risk-based: seed riskUsd if empty so the toggle "sticks".
+                    if (!riskMode) patch({ riskUsd: cfg.riskUsd ?? 50 })
+                  }}
+                  className={`flex-1 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    riskMode ? 'bg-brand text-bg' : 'bg-panel-2 text-dim hover:text-text'
+                  } disabled:opacity-50`}
+                >
+                  Risk-based
+                </button>
+              </div>
+
+              {!riskMode ? (
+                <Field label="Position Size ($)">
+                  <input
+                    type="number" disabled={running} step="any" min="0"
+                    value={assetPrice ? (cfg.size * assetPrice).toFixed(2) : cfg.size}
+                    onChange={(e) => {
+                      const usd = Number(e.target.value)
+                      // Convert $ → qty using live price so the bot's existing
+                      // size-based logic keeps working.
+                      const qty = assetPrice && assetPrice > 0 ? usd / assetPrice : usd
+                      patch({ size: parseFloat(qty.toFixed(6)) })
+                    }}
+                    className={inputCls}
+                  />
                 </Field>
+              ) : (
+                <Field label="Risk USD">
+                  <input
+                    type="number" disabled={running} step="any" min="0" placeholder="e.g. 50"
+                    value={cfg.riskUsd ?? ''}
+                    onChange={(e) => patch({ riskUsd: e.target.value === '' ? undefined : Number(e.target.value) })}
+                    className={inputCls}
+                  />
+                </Field>
+              )}
+              <p className="text-[10px] text-dim leading-snug">
+                {riskMode
+                  ? `Risk mode — bot recomputes size on every trade so the $ you can lose at Auto SL % stays constant${cfg.slPct ? ` (currently ${cfg.slPct}%)` : ' (set an Auto SL % below first)'}.`
+                  : 'Fixed mode — the bot opens this exact $ position every signal. Input is converted to qty using live price.'}
+              </p>
+
+              <div className="grid grid-cols-2 gap-2">
                 <Field label="Slippage %">
                   <input type="number" disabled={running} step="0.1" min="0"
                     value={cfg.slippagePct} onChange={(e) => patch({ slippagePct: Number(e.target.value) })} className={inputCls} />
@@ -1248,31 +1309,6 @@ export default function SignalBotsPage() {
                   : 'Off — every signal on the entry timeframe is taken without checking higher-TF agreement.'}
               </p>
 
-              {/* ── Position Sizing Calculator ── */}
-              <div className="my-1 h-px bg-border" />
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-dim">Risk mode (auto-sizes)</p>
-              <Field label="Risk USD">
-                <input
-                  type="number" disabled={running} step="any" min="0" placeholder="e.g. 50 (leave empty to use Order Size)"
-                  value={cfg.riskUsd ?? ''}
-                  onChange={(e) => patch({ riskUsd: e.target.value === '' ? undefined : Number(e.target.value) })}
-                  className={inputCls}
-                />
-              </Field>
-              <p className="text-[10px] text-dim leading-snug">
-                {riskMode
-                  ? `Uses Auto SL % above (${cfg.slPct}%) as the risk distance. Bot recomputes order size from live price on each trade so your $ risk stays constant.`
-                  : 'Set Risk USD + an Auto SL % above to enable risk mode. Otherwise the bot uses the fixed Order Size below.'}
-              </p>
-              {sizingResult && (
-                <div className="rounded-lg border border-brand/20 bg-brand/5 px-3 py-2 text-[10px] space-y-1">
-                  <div className="flex justify-between"><span className="text-dim">Notional</span><span className="font-mono text-text">{sizingResult.positionUsd}</span></div>
-                  <div className="flex justify-between"><span className="text-dim">Order size (live)</span><span className="font-mono text-text">{sizingResult.qty}</span></div>
-                  <div className="flex justify-between"><span className="text-dim">Leverage</span><span className="font-mono text-text">{sizingResult.maxLev}</span></div>
-                  <div className="flex justify-between"><span className="text-dim">Margin (USDC)</span><span className="font-mono text-text">{sizingResult.margin}</span></div>
-                  <div className="flex justify-between"><span className="text-dim">SL/TP</span><span className="font-mono text-loss">{sizingResult.slPrices}</span></div>
-                </div>
-              )}
               <div className="my-1 h-px bg-border" />
 
               <button
@@ -1327,7 +1363,7 @@ export default function SignalBotsPage() {
             <div className="flex-1 min-w-0">
               <LiveBotHeader
                 name={bots.find(b => b.id === selectedId)?.name ?? 'Signal Bot'}
-                state={status.lastError ? (running ? 'error' : 'error') : running ? 'running' : 'stopped'}
+                state={(status.autoPausedReason || status.lastError) ? 'error' : running ? 'running' : 'stopped'}
                 summary={
                   `${status.config.asset} · ${status.config.timeframe} · ${status.config.strategyId.toUpperCase()}` +
                   (status.config.mtfEnabled && status.config.mtfTimeframe
@@ -1341,7 +1377,7 @@ export default function SignalBotsPage() {
                 startedAt={status.startedAt}
                 lastSignal={status.lastSignal}
                 lastSignalAt={status.lastSignalAt}
-                lastError={status.lastError}
+                lastError={status.autoPausedReason || status.lastError}
                 tradesExecuted={status.tradesExecuted}
                 allTimeNetPnl={botStats?.netPnl ?? null}
                 allTimeRoundTrips={botStats?.roundTrips ?? null}

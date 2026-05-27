@@ -116,6 +116,9 @@ export interface SignalBotStatus {
   dailyPnlPct: number | null
   dailyPaused: boolean
   pausedForNetworkSwitch: boolean
+  // Set when the bot auto-stopped after 3+ consecutive failed orders (most
+  // commonly insufficient margin). Null when the bot is healthy.
+  autoPausedReason: string | null
   // Signal funnel — counts since last start. Lets the UI explain
   // "why didn't it trade?" without scraping the log.
   signalsSeen: number          // actionable signals on a freshly closed bar (post ensemble consensus)
@@ -296,6 +299,10 @@ class SignalBot {
   private lastError: string | null = null
   private lastTradeAt = 0
   private tradesExecuted = 0
+  // Track consecutive "Not filled" rejections (e.g. insufficient margin) so we
+  // can auto-pause the bot before it spams HL and burns the hourly rate limit.
+  private consecutiveNotFilled = 0
+  private autoPausedReason: string | null = null
   private evaluating = false
   private computedSize: number | null = null
   private lastVotes: SignalBotStatus['lastVotes'] = null
@@ -377,6 +384,7 @@ class SignalBot {
       dailyPnlPct: this.dailyPnlPct,
       dailyPaused: this.dailyPaused,
       pausedForNetworkSwitch: this.pausedForNetworkSwitch,
+      autoPausedReason: this.autoPausedReason,
       signalsSeen: this.signalsSeen,
       signalsExecuted: this.signalsExecuted,
       blockedByMtf: this.blockedByMtf,
@@ -424,6 +432,8 @@ class SignalBot {
     // an automatic resume on testnet switch, or the user explicitly clicked
     // Start while the bot was still paused.
     this.pausedForNetworkSwitch = false
+    this.autoPausedReason = null
+    this.consecutiveNotFilled = 0
     this.running = true
     this.startedAt = Date.now()
     this.lastError = null
@@ -744,7 +754,28 @@ class SignalBot {
           tpPct: cfg.tpPct,
           slPct: cfg.slPct,
         }, this.creds)
-        if (result.filled) this.tradesExecuted++
+        if (result.filled) {
+          this.tradesExecuted++
+          // Success — clear the not-filled streak + any auto-pause state.
+          this.consecutiveNotFilled = 0
+          this.autoPausedReason = null
+          // Cast widens the field's narrowed type (TS sometimes pins it to
+          // `null` after the lastError = null in start()).
+          const errStr = this.lastError as string | null
+          if (errStr && errStr.startsWith('Not filled')) this.lastError = null
+        } else {
+          // Order didn't fill (HL rejection — most commonly insufficient margin).
+          // Surface the reason on the bot status so the UI pill turns red.
+          this.lastError = result.message ?? 'Order not filled'
+          this.consecutiveNotFilled++
+          // Auto-pause after 3 consecutive rejections — protects HL rate limit
+          // and avoids piling up audit-log entries from a broken config.
+          if (this.consecutiveNotFilled >= 3) {
+            this.autoPausedReason = `Auto-paused after ${this.consecutiveNotFilled} consecutive failed orders: ${result.message ?? 'unknown'}`
+            this.log.warn(this.autoPausedReason)
+            this.running = false
+          }
+        }
         if (result.filled && (result.tpPlaced || result.slPlaced)) {
           this.log.info(`Bracket orders: ${result.tpPlaced ? 'TP✓' : 'TP✗'} ${result.slPlaced ? 'SL✓' : 'SL✗'}`)
         }
