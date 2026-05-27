@@ -36,7 +36,7 @@ export default function RoundTripsTable({ rows, loading, filter, onSelect }: Pro
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-border bg-bg overflow-hidden">
+      <div className="rounded-2xl border border-border bg-bg overflow-x-auto">
         <div className={HEAD}>
           <span>Exit</span><span>Bot</span><span>Asset</span><span>Side</span>
           <span className="text-right">Entry</span><span className="text-right">Exit Px</span>
@@ -69,7 +69,7 @@ export default function RoundTripsTable({ rows, loading, filter, onSelect }: Pro
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-bg overflow-hidden">
+    <div className="rounded-2xl border border-border bg-bg overflow-x-auto">
       <div className={HEAD}>
         <span>Exit</span><span>Bot</span><span>Asset</span><span>Side</span>
         <span className="text-right">Entry</span><span className="text-right">Exit Px</span>

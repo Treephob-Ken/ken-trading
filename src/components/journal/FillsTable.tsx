@@ -54,7 +54,7 @@ export default function FillsTable({ rows, loading, filter }: Props) {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-bg overflow-hidden">
+    <div className="rounded-2xl border border-border bg-bg overflow-x-auto">
       <div className={HEAD}>
         <span>Time</span><span>Bot</span><span>Asset</span><span>Direction</span>
         <span>Side</span><span className="text-right">Price</span><span className="text-right">Size</span>

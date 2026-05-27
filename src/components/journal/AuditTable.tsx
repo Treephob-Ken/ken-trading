@@ -52,7 +52,7 @@ export default function AuditTable({ rows, loading, filter }: Props) {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-bg overflow-hidden">
+    <div className="rounded-2xl border border-border bg-bg overflow-x-auto">
       <div className={HEAD}>
         <span>When</span><span>Asset</span><span>Side</span>
         <span>Why it failed</span>
