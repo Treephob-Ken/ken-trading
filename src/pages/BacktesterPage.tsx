@@ -7,6 +7,7 @@ import { defaultParams, generateSignals, strategyMeta } from '@/lib/strategies'
 import { runBacktest } from '@/lib/backtest'
 import { fmtPrice } from '@/lib/format'
 import { useHLAssets } from '@/lib/hlAssets'
+import { apiFetch } from '@/contexts/AuthContext'
 import ChartPanel from '@/components/ChartPanel'
 import Controls, { type SizingMode } from '@/components/Controls'
 import NumberInput from '@/components/NumberInput'
@@ -84,15 +85,15 @@ export default function BacktesterPage({
     () => +(localStorage.getItem('bt_targetRiskPct') || '2'),
   )
 
-  // Deploy card — order size in qty (only used when sizingMode='fixed')
-  const [deploySize, setDeploySize] = useState(
-    () => +(localStorage.getItem('bt_deploySize') || '0.01'),
+  // Deploy card — position notional in USD (only used when sizingMode='fixed').
+  // Bot's "budget mode" maps this to: notional = investment × leverage.
+  const [deployUsd, setDeployUsd] = useState(
+    () => +(localStorage.getItem('bt_deployUsd') || '100'),
   )
-  // Leverage shown on the deploy preview so the user knows margin + max loss.
-  // Display-only — HL leverage is actually set per-asset on the account.
-  const [deployLeverage, setDeployLeverage] = useState(
-    () => +(localStorage.getItem('bt_deployLeverage') || '1'),
-  )
+  // Max leverage for the selected asset — fetched from HL meta. Display-only;
+  // HL leverage is actually set per-asset on the user's account.
+  const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
+  const [assetMidPx, setAssetMidPx] = useState<number | null>(null)
 
   // ─── MTF state ──────────────────────────────────────────────────────────────
   // Visual side-by-side toggle. Stored separately from the filter flag because
@@ -132,11 +133,24 @@ export default function BacktesterPage({
     localStorage.setItem('bt_targetRiskPct', String(targetRiskPct))
   }, [targetRiskPct])
   useEffect(() => {
-    localStorage.setItem('bt_deploySize', String(deploySize))
-  }, [deploySize])
+    localStorage.setItem('bt_deployUsd', String(deployUsd))
+  }, [deployUsd])
+
+  // Fetch max leverage + mid price for the selected asset whenever it changes.
   useEffect(() => {
-    localStorage.setItem('bt_deployLeverage', String(deployLeverage))
-  }, [deployLeverage])
+    const asset = symbol.replace(/USDT$/, '')
+    setMaxLeverage(null); setAssetMidPx(null)
+    let cancelled = false
+    apiFetch(`/api/asset-info?asset=${encodeURIComponent(asset)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { midPx?: number; maxLeverage?: number } | null) => {
+        if (cancelled || !d) return
+        if (d.maxLeverage) setMaxLeverage(d.maxLeverage)
+        if (d.midPx) setAssetMidPx(d.midPx)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [symbol])
   useEffect(() => { localStorage.setItem('bt_mtfView', String(mtfView)) }, [mtfView])
   useEffect(() => { localStorage.setItem('bt_mtfTimeframe', mtfTimeframe) }, [mtfTimeframe])
   useEffect(() => { localStorage.setItem('bt_mtfFilter', String(mtfFilter)) }, [mtfFilter])
@@ -366,14 +380,23 @@ export default function BacktesterPage({
         sizingSlPct: stopLossPct > 0 ? stopLossPct : undefined,
       }
     }
-    return { ...base, size: deploySize }
+    // Fixed mode: user enters notional in $. Map to bot's budget mode:
+    //   notional = investment × leverage
+    // Send the asset's max leverage so the saved config reflects "max lev"
+    // intent. If max lev isn't known yet, fall back to leverage=1.
+    const lev = maxLeverage && maxLeverage > 0 ? maxLeverage : 1
+    return {
+      ...base,
+      investment: parseFloat((deployUsd / lev).toFixed(4)),
+      leverage: lev,
+    }
   }, [
     symbol, strategyId, timeframe, params, direction,
-    stopLossPct, sizingMode, initialCapital, targetRiskPct, deploySize,
-    mtfFilter, mtfTimeframe,
+    stopLossPct, sizingMode, initialCapital, targetRiskPct, deployUsd,
+    maxLeverage, mtfFilter, mtfTimeframe,
   ])
 
-  const canDeploy = sizingMode === 'fixed' ? deploySize > 0 : stopLossPct > 0
+  const canDeploy = sizingMode === 'fixed' ? deployUsd > 0 : stopLossPct > 0
   const pairLabel = symbol.replace(/USDT$/, '/USDC')
   const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
   const dataCapped = candles.length >= MAX_BARS
@@ -491,40 +514,24 @@ export default function BacktesterPage({
               </div>
             ) : (
               <div className="mb-3">
-                <label className="mb-1 block text-[11px] text-dim">Order Size (qty per trade)</label>
+                <label className="mb-1 block text-[11px] text-dim">Position Size ($)</label>
                 <NumberInput
                   className="field"
-                  value={deploySize}
-                  min={0.0001}
-                  step={0.001}
-                  onChange={setDeploySize}
+                  value={deployUsd}
+                  min={1}
+                  step={10}
+                  onChange={setDeployUsd}
                 />
                 <p className="mt-1 text-[10px] text-dim">
-                  Number of contracts the bot places on each signal.
+                  Dollar notional per trade. Bot opens this position size at max leverage.
                 </p>
               </div>
             )}
 
-            {/* Leverage + risk preview — shows the $ amounts that come out of
-                the user's sizing choice so they don't have to do math. */}
-            <div className="mb-3">
-              <label className="mb-1 block text-[11px] text-dim">Leverage (×)</label>
-              <NumberInput
-                className="field"
-                value={deployLeverage}
-                min={1}
-                step={1}
-                onChange={setDeployLeverage}
-              />
-              <p className="mt-1 text-[10px] text-dim">
-                Set this to match the leverage you've set on Hyperliquid for this asset.
-                Used only to preview margin — the bot doesn't change your HL leverage.
-              </p>
-            </div>
-
-            {/* Position + max-loss preview */}
+            {/* Position + max-loss preview. Leverage is auto = max for the asset. */}
             {(() => {
-              const lev = Math.max(1, deployLeverage)
+              const lev = maxLeverage ?? 1
+              const priceForCalc = lastPrice > 0 ? lastPrice : (assetMidPx ?? 0)
               let notional = 0
               let lossAtSl = 0
               if (sizingMode === 'volatility') {
@@ -532,37 +539,43 @@ export default function BacktesterPage({
                 notional = stopLossPct > 0 ? riskUsd / (stopLossPct / 100) : 0
                 lossAtSl = riskUsd
               } else {
-                notional = deploySize * lastPrice
+                notional = deployUsd
                 lossAtSl = stopLossPct > 0 ? notional * (stopLossPct / 100) : 0
               }
               const margin = notional / lev
-              const priceKnown = lastPrice > 0 || sizingMode === 'volatility'
+              const qty = priceForCalc > 0 && notional > 0 ? notional / priceForCalc : 0
               return (
                 <div className="mb-3 rounded-lg border border-border bg-panel-2 px-2.5 py-2 text-[10px] space-y-1">
                   <div className="text-[10px] font-semibold text-text mb-1">Risk preview</div>
                   <div className="flex justify-between">
                     <span className="text-dim">Position (notional)</span>
                     <span className="font-mono text-text">
-                      {priceKnown && notional > 0 ? `$${notional.toFixed(2)}` : '—'}
+                      {notional > 0 ? `$${notional.toFixed(2)}` : '—'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dim">Max leverage</span>
+                    <span className="font-mono text-text">
+                      {maxLeverage ? `${maxLeverage}×` : '— (loading)'}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-dim">Margin needed (at {lev}×)</span>
                     <span className="font-mono text-text">
-                      {priceKnown && margin > 0 ? `$${margin.toFixed(2)}` : '—'}
+                      {maxLeverage && margin > 0 ? `$${margin.toFixed(2)}` : '—'}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-dim">Loss if SL hits</span>
                     <span className={`font-mono ${stopLossPct > 0 ? 'text-loss' : 'text-dim'}`}>
                       {stopLossPct > 0 && lossAtSl > 0
-                        ? `-$${lossAtSl.toFixed(2)} (${((lossAtSl / Math.max(margin, 0.0001)) * 100).toFixed(0)}% of margin)`
+                        ? `-$${lossAtSl.toFixed(2)}${maxLeverage ? ` (${((lossAtSl / Math.max(margin, 0.0001)) * 100).toFixed(0)}% of margin)` : ''}`
                         : 'no SL set'}
                     </span>
                   </div>
-                  {sizingMode !== 'volatility' && lastPrice > 0 && (
+                  {sizingMode !== 'volatility' && qty > 0 && (
                     <p className="text-[9px] text-dim mt-1 leading-relaxed">
-                      Based on last price ${lastPrice.toFixed(2)} × {deploySize} qty.
+                      ≈ {qty.toFixed(6)} {symbol.replace(/USDT$/, '')} at ${priceForCalc.toFixed(2)}.
                     </p>
                   )}
                 </div>
