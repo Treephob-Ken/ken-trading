@@ -1175,6 +1175,50 @@ export default function SignalBotsPage() {
                 </Field>
               </div>
 
+              {/* Risk preview for fixed Order Size mode — mirrors the Backtester deploy card. */}
+              {!riskMode && cfg.size > 0 && (() => {
+                const lev = maxLeverage ?? 1
+                const notional = assetPrice ? cfg.size * assetPrice : 0
+                const margin = notional / lev
+                const lossAtSl = cfg.slPct && cfg.slPct > 0 ? notional * (cfg.slPct / 100) : 0
+                return (
+                  <div className="rounded-lg border border-border bg-panel-2 px-3 py-2 text-[10px] space-y-1">
+                    <div className="text-[10px] font-semibold text-text mb-1">Risk preview</div>
+                    <div className="flex justify-between">
+                      <span className="text-dim">Position (notional)</span>
+                      <span className="font-mono text-text">
+                        {notional > 0 ? `$${notional.toFixed(2)}` : '— (loading price)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-dim">Max leverage</span>
+                      <span className="font-mono text-text">
+                        {maxLeverage ? `${maxLeverage}×` : '— (loading)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-dim">Margin needed (at {lev}×)</span>
+                      <span className="font-mono text-text">
+                        {maxLeverage && margin > 0 ? `$${margin.toFixed(2)}` : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-dim">Loss if SL hits</span>
+                      <span className={`font-mono ${cfg.slPct && cfg.slPct > 0 ? 'text-loss' : 'text-dim'}`}>
+                        {cfg.slPct && cfg.slPct > 0 && lossAtSl > 0
+                          ? `-$${lossAtSl.toFixed(2)}${maxLeverage ? ` (${((lossAtSl / Math.max(margin, 0.0001)) * 100).toFixed(0)}% of margin)` : ''}`
+                          : 'no Auto SL % set'}
+                      </span>
+                    </div>
+                    {assetPrice && (
+                      <p className="text-[9px] text-dim mt-1 leading-relaxed">
+                        Based on live price ${assetPrice.toFixed(2)} × {cfg.size} qty.
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
+
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Auto TP %">
                   <input type="number" disabled={running} step="0.1" min="0" placeholder="off"

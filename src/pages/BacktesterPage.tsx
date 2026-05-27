@@ -339,6 +339,8 @@ export default function BacktesterPage({
     setParams(initialParams)
   }
 
+  const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
+
   // Kelly fraction nudge — derived from the backtest result. Surfaced under the
   // "Risk per Trade %" input so the user has a math-backed sizing recommendation
   // instead of guessing. Half-Kelly is the safer default (Thorp, Aronson).
@@ -380,25 +382,24 @@ export default function BacktesterPage({
         sizingSlPct: stopLossPct > 0 ? stopLossPct : undefined,
       }
     }
-    // Fixed mode: user enters notional in $. Map to bot's budget mode:
-    //   notional = investment × leverage
-    // Send the asset's max leverage so the saved config reflects "max lev"
-    // intent. If max lev isn't known yet, fall back to leverage=1.
-    const lev = maxLeverage && maxLeverage > 0 ? maxLeverage : 1
+    // Fixed mode: user enters notional in $. Convert to qty using the latest
+    // price so the SignalBotsPage form receives a concrete `size` it can
+    // display and the bot can trade with. Falls back to mid price if Binance
+    // candles haven't loaded yet.
+    const priceForQty = lastPrice > 0 ? lastPrice : (assetMidPx ?? 0)
+    const qty = priceForQty > 0 ? deployUsd / priceForQty : 0
     return {
       ...base,
-      investment: parseFloat((deployUsd / lev).toFixed(4)),
-      leverage: lev,
+      size: parseFloat(qty.toFixed(6)),
     }
   }, [
     symbol, strategyId, timeframe, params, direction,
     stopLossPct, sizingMode, initialCapital, targetRiskPct, deployUsd,
-    maxLeverage, mtfFilter, mtfTimeframe,
+    lastPrice, assetMidPx, mtfFilter, mtfTimeframe,
   ])
 
   const canDeploy = sizingMode === 'fixed' ? deployUsd > 0 : stopLossPct > 0
   const pairLabel = symbol.replace(/USDT$/, '/USDC')
-  const lastPrice = liveCandle?.close ?? candles[candles.length - 1]?.close ?? 0
   const dataCapped = candles.length >= MAX_BARS
 
   return (
