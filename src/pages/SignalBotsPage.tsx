@@ -675,6 +675,10 @@ export default function SignalBotsPage() {
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
   const dirtyRef = useRef(dirty)
+  // Bumped each time saveConfig finishes. Polls remember the value at their
+  // start; if it changed by the time the poll's response arrives, the server
+  // data we just fetched predates the save and we must NOT overwrite local cfg.
+  const saveTokenRef = useRef(0)
   dirtyRef.current = dirty
 
   const running = status?.running ?? false
@@ -740,6 +744,11 @@ export default function SignalBotsPage() {
         }])
       }
       setDirty(false)
+      // Invalidate any in-flight poll responses that fetched data before this save.
+      saveTokenRef.current += 1
+      // Adopt the server's parsed config directly — keeps the form in sync
+      // even if the next poll is delayed.
+      if (data.config) setCfg(data.config)
       setNotice({ text: 'Configuration saved', ok: true })
     } catch (e) {
       setNotice({ text: `Save failed: ${(e as Error).message}`, ok: false })
@@ -777,6 +786,9 @@ export default function SignalBotsPage() {
   const refresh = useCallback(async () => {
     const id = selectedIdRef.current
     if (!id) return
+    // Snapshot the save token BEFORE the fetch. If it changes by the time the
+    // response arrives, a save fired in between and our data is stale.
+    const tokenAtStart = saveTokenRef.current
     try {
       const [stRes, logRes] = await Promise.all([
         apiFetch(`/api/signal/bots/${id}`),
@@ -786,7 +798,10 @@ export default function SignalBotsPage() {
         const st: SignalBotStatus = await stRes.json()
         setStatus(st)
         setBots(prev => prev.map(b => b.id === id ? { ...b, running: st.running } : b))
-        if (!dirtyRef.current || st.running) setCfg(st.config)
+        // Skip cfg overwrite if (a) user is mid-edit, OR (b) a save fired
+        // while this poll was in flight (response is now stale).
+        const staleByRace = saveTokenRef.current !== tokenAtStart
+        if ((!dirtyRef.current && !staleByRace) || st.running) setCfg(st.config)
       }
       if (logRes.ok) setLogs(await logRes.json())
     } catch { /* silently skip — server may be restarting */ }
