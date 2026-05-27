@@ -88,6 +88,11 @@ export default function BacktesterPage({
   const [deploySize, setDeploySize] = useState(
     () => +(localStorage.getItem('bt_deploySize') || '0.01'),
   )
+  // Leverage shown on the deploy preview so the user knows margin + max loss.
+  // Display-only — HL leverage is actually set per-asset on the account.
+  const [deployLeverage, setDeployLeverage] = useState(
+    () => +(localStorage.getItem('bt_deployLeverage') || '1'),
+  )
 
   // ─── MTF state ──────────────────────────────────────────────────────────────
   // Visual side-by-side toggle. Stored separately from the filter flag because
@@ -129,6 +134,9 @@ export default function BacktesterPage({
   useEffect(() => {
     localStorage.setItem('bt_deploySize', String(deploySize))
   }, [deploySize])
+  useEffect(() => {
+    localStorage.setItem('bt_deployLeverage', String(deployLeverage))
+  }, [deployLeverage])
   useEffect(() => { localStorage.setItem('bt_mtfView', String(mtfView)) }, [mtfView])
   useEffect(() => { localStorage.setItem('bt_mtfTimeframe', mtfTimeframe) }, [mtfTimeframe])
   useEffect(() => { localStorage.setItem('bt_mtfFilter', String(mtfFilter)) }, [mtfFilter])
@@ -496,6 +504,70 @@ export default function BacktesterPage({
                 </p>
               </div>
             )}
+
+            {/* Leverage + risk preview — shows the $ amounts that come out of
+                the user's sizing choice so they don't have to do math. */}
+            <div className="mb-3">
+              <label className="mb-1 block text-[11px] text-dim">Leverage (×)</label>
+              <NumberInput
+                className="field"
+                value={deployLeverage}
+                min={1}
+                step={1}
+                onChange={setDeployLeverage}
+              />
+              <p className="mt-1 text-[10px] text-dim">
+                Set this to match the leverage you've set on Hyperliquid for this asset.
+                Used only to preview margin — the bot doesn't change your HL leverage.
+              </p>
+            </div>
+
+            {/* Position + max-loss preview */}
+            {(() => {
+              const lev = Math.max(1, deployLeverage)
+              let notional = 0
+              let lossAtSl = 0
+              if (sizingMode === 'volatility') {
+                const riskUsd = initialCapital * targetRiskPct / 100
+                notional = stopLossPct > 0 ? riskUsd / (stopLossPct / 100) : 0
+                lossAtSl = riskUsd
+              } else {
+                notional = deploySize * lastPrice
+                lossAtSl = stopLossPct > 0 ? notional * (stopLossPct / 100) : 0
+              }
+              const margin = notional / lev
+              const priceKnown = lastPrice > 0 || sizingMode === 'volatility'
+              return (
+                <div className="mb-3 rounded-lg border border-border bg-panel-2 px-2.5 py-2 text-[10px] space-y-1">
+                  <div className="text-[10px] font-semibold text-text mb-1">Risk preview</div>
+                  <div className="flex justify-between">
+                    <span className="text-dim">Position (notional)</span>
+                    <span className="font-mono text-text">
+                      {priceKnown && notional > 0 ? `$${notional.toFixed(2)}` : '—'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dim">Margin needed (at {lev}×)</span>
+                    <span className="font-mono text-text">
+                      {priceKnown && margin > 0 ? `$${margin.toFixed(2)}` : '—'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dim">Loss if SL hits</span>
+                    <span className={`font-mono ${stopLossPct > 0 ? 'text-loss' : 'text-dim'}`}>
+                      {stopLossPct > 0 && lossAtSl > 0
+                        ? `-$${lossAtSl.toFixed(2)} (${((lossAtSl / Math.max(margin, 0.0001)) * 100).toFixed(0)}% of margin)`
+                        : 'no SL set'}
+                    </span>
+                  </div>
+                  {sizingMode !== 'volatility' && lastPrice > 0 && (
+                    <p className="text-[9px] text-dim mt-1 leading-relaxed">
+                      Based on last price ${lastPrice.toFixed(2)} × {deploySize} qty.
+                    </p>
+                  )}
+                </div>
+              )
+            })()}
 
             <button
               type="button"
