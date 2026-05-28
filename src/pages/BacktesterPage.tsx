@@ -166,18 +166,40 @@ export default function BacktesterPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeframe])
 
-  // Scanner deep-link: when navigated here with { presetStrategy }, apply it
-  // and clear the state so a page refresh doesn't keep re-applying.
+  // Scanner deep-link: when navigated here from the Scanner row's "Open"
+  // button, copy across the exact inputs the scanner used (strategy, params,
+  // direction, lookback window) so the Backtester's numbers match the row
+  // the user clicked. Without this, the Backtester would re-use its own
+  // saved params/dates and show a different result.
   useEffect(() => {
-    const preset = (location.state as { presetStrategy?: StrategyId } | null)?.presetStrategy
-    if (!preset) return
-    setStrategyId(preset)
-    let next = defaultParams(preset)
-    try {
-      const saved = localStorage.getItem(`bt_params_${preset}`)
-      if (saved) next = JSON.parse(saved)
-    } catch {}
-    setParams(next)
+    const state = location.state as {
+      presetStrategy?: StrategyId
+      presetParams?: Record<string, number>
+      presetDirection?: Direction
+      presetLookbackDays?: number
+    } | null
+    if (!state?.presetStrategy) return
+
+    setStrategyId(state.presetStrategy)
+    // Apply scanner's params (defaults, currently). Falls back to whatever
+    // the user had saved if the scanner didn't include them.
+    if (state.presetParams) {
+      setParams(state.presetParams)
+    } else {
+      let next = defaultParams(state.presetStrategy)
+      try {
+        const saved = localStorage.getItem(`bt_params_${state.presetStrategy}`)
+        if (saved) next = JSON.parse(saved)
+      } catch {}
+      setParams(next)
+    }
+    if (state.presetDirection) setDirection(state.presetDirection)
+    if (state.presetLookbackDays) {
+      const now = new Date()
+      const past = new Date(now.getTime() - state.presetLookbackDays * 86_400_000)
+      setStartDate(past.toISOString().slice(0, 10))
+      setEndDate(now.toISOString().slice(0, 10))
+    }
     navigate(location.pathname, { replace: true, state: null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state])

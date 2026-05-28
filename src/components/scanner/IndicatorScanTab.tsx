@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Play, Square, ArrowRight, Medal, Trophy } from 'lucide-react'
 import type { Direction, StrategyId } from '@/types'
 import type { SymbolInfo } from '@/lib/binance'
-import { STRATEGIES } from '@/lib/strategies'
+import { defaultParams, STRATEGIES } from '@/lib/strategies'
 import {
   runIndicatorScan,
   type IndicatorScanRow,
@@ -192,7 +192,18 @@ export default function IndicatorScanTab({
   const goToBacktest = (r: IndicatorScanRow) => {
     onPickSymbol(r.symbol)
     onPickTimeframe(r.timeframe)
-    navigate('/backtest', { state: { presetStrategy: r.strategyId } })
+    // Pass through the exact inputs the scanner used so the Backtester's
+    // numbers match the row the user clicked. Otherwise the Backtester
+    // would reload its own saved params/date/direction and show different
+    // results from the row's reported return.
+    navigate('/backtest', {
+      state: {
+        presetStrategy: r.strategyId,
+        presetParams: defaultParams(r.strategyId),
+        presetDirection: direction,
+        presetLookbackDays: lookback,
+      },
+    })
   }
 
   const headerClick = (k: SortKey) => {
