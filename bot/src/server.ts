@@ -28,6 +28,7 @@ import {
   listAssets,
   parseTradeRequest,
   placeOrder,
+  setAssetLeverage,
 } from './trade.js'
 import {
   createSignalBot,
@@ -975,17 +976,31 @@ app.post('/api/order', requireAuth, async (req: Request, res: Response) => {
   }
   const num = (k: string) => { const v = b[k]; const n = typeof v === 'string' ? Number(v) : v; return typeof n === 'number' && n > 0 ? n : undefined }
   try {
+    // Manual trades always use the asset's max leverage on HL (cross). This
+    // keeps the position-size panel's math accurate (it sizes from maxLev)
+    // and prevents accidental low-leverage orders that would otherwise need
+    // far more margin than the UI shows. Skipped for reduce-only closes.
+    const reduceOnly = Boolean(b.reduceOnly)
+    let appliedLeverage: number | null = null
+    if (!reduceOnly) {
+      const info = await getAssetInfo(asset, userCreds(req))
+      const maxLev = info?.maxLeverage
+      if (maxLev && maxLev > 0) {
+        const lev = await setAssetLeverage(asset, maxLev, true, userCreds(req))
+        appliedLeverage = lev.appliedLeverage
+      }
+    }
     const result = await placeOrder({
       asset, side, size, orderType,
       limitPrice: num('limitPrice'),
-      reduceOnly: Boolean(b.reduceOnly),
+      reduceOnly,
       tpPrice: num('tpPrice'),
       slPrice: num('slPrice'),
       tpPct: num('tpPct'),
       slPct: num('slPct'),
       maxSlippagePct: num('maxSlippagePct'),
     }, userCreds(req))
-    res.json(result)
+    res.json({ ...result, ...(appliedLeverage ? { appliedLeverage } : {}) })
   } catch (e) {
     log.err(`Order failed: ${(e as Error).message}`)
     res.status(500).json({ error: (e as Error).message })

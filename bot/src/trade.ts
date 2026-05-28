@@ -602,6 +602,31 @@ export async function cancelAssetOrders(
   return mine.length
 }
 
+// Set the leverage for an asset on Hyperliquid. Cross by default — matches
+// what grid-bot does at startup. Safe to call before every order; HL is a
+// no-op when the asset is already at the requested leverage. Logged-and-
+// swallowed on failure so a leverage hiccup never blocks the order itself.
+export async function setAssetLeverage(
+  asset: string,
+  leverage: number,
+  isCross: boolean,
+  creds?: EnvConfig | null,
+): Promise<{ ok: boolean; appliedLeverage: number; error?: string }> {
+  if (!(leverage > 0)) return { ok: false, appliedLeverage: 0, error: 'leverage must be > 0' }
+  const { info, exchange } = getClients(creds)
+  const normalized = normalizeAssetName(asset)
+  const meta = await getAssetMeta(info, normalized)
+  const capped = Math.min(Math.floor(leverage), meta.maxLeverage || leverage)
+  try {
+    await exchange.updateLeverage({ asset: meta.index, isCross, leverage: capped })
+    return { ok: true, appliedLeverage: capped }
+  } catch (e) {
+    const msg = (e as Error).message
+    log.warn(`Could not set leverage to ${capped}x for ${normalized}: ${msg}`)
+    return { ok: false, appliedLeverage: capped, error: msg }
+  }
+}
+
 // Snapshot OIDs of all currently open orders for an asset. Call this BEFORE
 // placing a new entry+bracket; pair with cancelOrdersByOid() afterwards to
 // cancel only the old/stale orders without touching the new SL/TP brackets.

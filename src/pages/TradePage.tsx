@@ -18,6 +18,7 @@ import StatTile, { type Tone } from '@/components/ui/StatTile'
 import InfoTip from '@/components/InfoTip'
 import AssetInfoCard from '@/components/AssetInfoCard'
 import MultiBotConflictBanner from '@/components/MultiBotConflictBanner'
+import PositionSizeCard from '@/components/PositionSizeCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -975,6 +976,31 @@ export default function TradePage() {
 
         {/* Asset Info card — fills the space below Place Order */}
         <AssetInfoCard asset={selectedAsset || null} ctx={assetInfo} />
+
+        {/* Position Size card — same shape as Backtester / Grid / Signal Bot pages.
+            Manual trades always run at the asset's max leverage on HL (cross),
+            so this panel uses maxLeverage for the margin & loss math. */}
+        {(() => {
+          const notional = sizingMode === 'risk'
+            ? (sizing?.positionUsd ?? null)
+            : (typeof usdcAmount === 'number' && usdcAmount > 0 ? usdcAmount : null)
+          const lev = assetInfo?.maxLeverage ?? null
+          const qty = notional && assetInfo?.midPx
+            ? (notional / assetInfo.midPx).toFixed(6)
+            : null
+          const footnote = qty && selectedAsset
+            ? `Order qty ${qty} ${selectedAsset} · always opens at max leverage on HL (cross)`
+            : 'Manual trades always open at the asset’s max leverage on HL (cross).'
+          return (
+            <PositionSizeCard
+              notional={notional}
+              leverage={lev}
+              leverageLabel="Max leverage (used)"
+              slPct={typeof slPct === 'number' ? slPct : null}
+              footnote={footnote}
+            />
+          )
+        })()}
       </aside>
     </main>
   )
