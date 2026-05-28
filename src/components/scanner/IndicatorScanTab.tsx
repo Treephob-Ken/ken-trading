@@ -29,6 +29,17 @@ type SortKey =
   | 'sharpeRatio'
 
 const ALL_TFS = ['15m', '30m', '1h', '4h', '1d', '1w'] as const
+const LOOKBACK_OPTIONS = [30, 60, 90, 180, 365] as const
+type LookbackDays = typeof LOOKBACK_OPTIONS[number]
+
+// Format YYYY-MM-DD from a Date (UTC).
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10)
+// Returns "from → to" given a lookback in days.
+function lookbackRange(days: number): { from: string; to: string } {
+  const now = new Date()
+  const past = new Date(now.getTime() - days * 86_400_000)
+  return { from: fmtDate(past), to: fmtDate(now) }
+}
 const ALL_STRATS: StrategyId[] = STRATEGIES.map((s) => s.id)
 
 const STORAGE_KEY = 'scanner_indicator_results_v1'
@@ -87,6 +98,10 @@ export default function IndicatorScanTab({
       return { '1h': true, '4h': true }
     }
   })
+  const [lookback, setLookback] = useState<LookbackDays>(() => {
+    const saved = Number(localStorage.getItem('scn_ind_lookback') ?? 90) as LookbackDays
+    return (LOOKBACK_OPTIONS as readonly number[]).includes(saved) ? saved : 90
+  })
   const [stratFilter, setStratFilter] = useState<Record<StrategyId, boolean>>(() => {
     try {
       const saved = localStorage.getItem('scn_ind_stratFilter')
@@ -101,6 +116,7 @@ export default function IndicatorScanTab({
   useEffect(() => { localStorage.setItem('scn_ind_direction', direction) }, [direction])
   useEffect(() => { localStorage.setItem('scn_ind_tfFilter', JSON.stringify(tfFilter)) }, [tfFilter])
   useEffect(() => { localStorage.setItem('scn_ind_stratFilter', JSON.stringify(stratFilter)) }, [stratFilter])
+  useEffect(() => { localStorage.setItem('scn_ind_lookback', String(lookback)) }, [lookback])
 
   const start = async () => {
     if (universe.length === 0) {
@@ -119,7 +135,7 @@ export default function IndicatorScanTab({
         universe,
         {
           timeframes: ALL_TFS.filter((tf) => tfFilter[tf]),
-          lookbackDays: 90,
+          lookbackDays: lookback,
           direction,
         },
         setProgress,
@@ -239,6 +255,23 @@ export default function IndicatorScanTab({
             onChange={(e) => setMinTrades(Math.max(0, Number(e.target.value) || 0))}
             className="w-20 rounded-md border border-border bg-panel-2 px-2 py-1 text-xs text-text outline-none focus:border-brand/60"
           />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] text-dim uppercase tracking-wider">Lookback</span>
+          <select
+            value={lookback}
+            onChange={(e) => setLookback(Number(e.target.value) as LookbackDays)}
+            className="rounded-md border border-border bg-panel-2 px-2 py-1 text-xs font-mono text-text outline-none focus:border-brand/60"
+            title="How many days of past candles each backtest covers"
+          >
+            {LOOKBACK_OPTIONS.map((d) => (
+              <option key={d} value={d}>{d}d</option>
+            ))}
+          </select>
+          <span className="font-mono text-[9px] text-dim">
+            {(() => { const r = lookbackRange(lookback); return `${r.from} → ${r.to}` })()}
+          </span>
         </div>
 
         <div className="flex-1" />

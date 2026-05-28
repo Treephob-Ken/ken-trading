@@ -22,7 +22,16 @@ type SortKey =
 
 const GRID_TF_OPTIONS = ['15m', '30m', '1h', '4h', '1d'] as const
 type GridTf = typeof GRID_TF_OPTIONS[number]
+const LOOKBACK_OPTIONS = [14, 30, 60, 90, 180] as const
+type LookbackDays = typeof LOOKBACK_OPTIONS[number]
 const STORAGE_KEY = 'scanner_grid_results_v1'
+
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10)
+function lookbackRange(days: number): { from: string; to: string } {
+  const now = new Date()
+  const past = new Date(now.getTime() - days * 86_400_000)
+  return { from: fmtDate(past), to: fmtDate(now) }
+}
 
 interface PersistedState {
   rows: GridScanRow[]
@@ -67,6 +76,10 @@ export default function GridScanTab({
     const saved = localStorage.getItem('scn_grid_tf') as GridTf | null
     return saved && GRID_TF_OPTIONS.includes(saved) ? saved : '4h'
   })
+  const [lookback, setLookback] = useState<LookbackDays>(() => {
+    const saved = Number(localStorage.getItem('scn_grid_lookback') ?? 30) as LookbackDays
+    return (LOOKBACK_OPTIONS as readonly number[]).includes(saved) ? saved : 30
+  })
   const [sidewaysOnly, setSidewaysOnly] = useState(
     () => localStorage.getItem('scn_grid_sidewaysOnly') !== 'false',
   )
@@ -80,6 +93,7 @@ export default function GridScanTab({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   useEffect(() => { localStorage.setItem('scn_grid_tf', gridTf) }, [gridTf])
+  useEffect(() => { localStorage.setItem('scn_grid_lookback', String(lookback)) }, [lookback])
   useEffect(() => { localStorage.setItem('scn_grid_sidewaysOnly', String(sidewaysOnly)) }, [sidewaysOnly])
   useEffect(() => { localStorage.setItem('scn_grid_minSpacingX', String(minSpacingX)) }, [minSpacingX])
   useEffect(() => { localStorage.setItem('scn_grid_minTradesPerDay', String(minTradesPerDay)) }, [minTradesPerDay])
@@ -99,7 +113,7 @@ export default function GridScanTab({
     try {
       const result = await runGridScan(
         universe,
-        { timeframe: gridTf, lookbackDays: 30 },
+        { timeframe: gridTf, lookbackDays: lookback },
         setProgress,
         ctrl.signal,
       )
@@ -232,11 +246,24 @@ export default function GridScanTab({
           </select>
         </div>
 
-        <div className="flex-1" />
-
-        <div className="text-[10px] text-dim font-mono">
-          Lookback 30d · TF {gridTf}
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] text-dim uppercase tracking-wider">Lookback</span>
+          <select
+            value={lookback}
+            onChange={(e) => setLookback(Number(e.target.value) as LookbackDays)}
+            className="rounded-md border border-border bg-panel-2 px-2 py-1 text-xs font-mono text-text outline-none focus:border-brand/60"
+            title="How many days of past candles each backtest covers"
+          >
+            {LOOKBACK_OPTIONS.map((d) => (
+              <option key={d} value={d}>{d}d</option>
+            ))}
+          </select>
+          <span className="font-mono text-[9px] text-dim">
+            {(() => { const r = lookbackRange(lookback); return `${r.from} → ${r.to}` })()}
+          </span>
         </div>
+
+        <div className="flex-1" />
 
         {scannedAt && !scanning && (
           <div className="text-[10px] text-dim font-mono">
