@@ -76,6 +76,7 @@ import {
   summarize,
 } from './journal.js'
 import { listPausedGridBotIds, listRunningGridBotIds, readGridRuntime, writeGridRuntime } from './grid-runtime.js'
+import { isNotifyEnabled, startFillNotifier } from './notify.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -449,6 +450,9 @@ app.put('/settings/credentials', requireAuth, async (req: Request, res: Response
     evictClientCache(hlUser)
     const newCreds = (() => { try { return loadUserCreds(uid) } catch { return null } })()
     if (newCreds) {
+      // First-time creds save → start the Telegram fill notifier for this user.
+      // Idempotent: per-address dedupe inside notify.ts prevents double-subs.
+      void startFillNotifier(newCreds)
       for (const sum of listSignalBots(uid)) {
         try {
           const bot = getSignalBot(sum.id, uid)
@@ -1364,8 +1368,10 @@ const PORT = 3001
 // you ever run the bot in a setup where the proxy is on a different host.
 const HOST = process.env.HOST?.trim() || '127.0.0.1'
 
-createServer(app).listen(PORT, HOST, () => {
+createServer(app).listen(PORT, HOST, async () => {
   log.ok(`Bot dashboard -> http://${HOST}:${PORT}`)
+
+  if (isNotifyEnabled()) log.ok('Telegram notifications ENABLED (TELEGRAM_BOT_TOKEN + CHAT_ID set)')
 
   if (MULTI_USER) {
     log.ok('Multi-user mode ENABLED')
@@ -1378,6 +1384,8 @@ createServer(app).listen(PORT, HOST, () => {
         maybeAutostartSignalBots(u.id, credsFn)
         maybeAutostartGridBots(u.id, credsFn)
         armKillSwitchForUser(u.id)
+        // One userFills subscription per user — fires Telegram on every close.
+        void startFillNotifier(credsFn())
       }
     } else {
       log.info('No users yet — register at /auth/register to get started')
@@ -1385,5 +1393,12 @@ createServer(app).listen(PORT, HOST, () => {
   } else {
     maybeAutostartSignalBots()
     maybeAutostartGridBots()
+    // Single-tenant mode: creds come from process.env via loadEnv().
+    try {
+      const { loadEnv } = await import('./config.js')
+      void startFillNotifier(loadEnv())
+    } catch (e) {
+      log.warn(`Single-tenant Telegram notifier skipped: ${(e as Error).message}`)
+    }
   }
 })
