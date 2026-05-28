@@ -30,7 +30,7 @@ import {
   type Signal,
   type StrategyId,
 } from './strategy/strategies.js'
-import { cancelAssetOrders, getAccountState, getAssetInfo, placeOrder } from './trade.js'
+import { cancelOrdersByOid, getAccountState, getAssetInfo, placeOrder, snapshotAssetOrderOids } from './trade.js'
 import { MULTI_USER } from './auth.js'
 import type { EnvConfig } from './config.js'
 
@@ -725,9 +725,12 @@ class SignalBot {
       this.signalsExecuted++
       this.log.info(`${sig.toUpperCase()} signal on ${cfg.symbol} ${cfg.timeframe} close — executing`)
       try {
-        // Cancel stale TP/SL bracket orders first so they don't double-close.
-        const cancelled = await cancelAssetOrders(cfg.asset, this.creds)
-        if (cancelled > 0) this.log.info(`Cleared ${cancelled} stale order(s) for ${cfg.asset}`)
+        // SAFEGUARD: snapshot old open-order OIDs BEFORE doing anything else.
+        // We used to call cancelAssetOrders() here, but if the new entry then
+        // failed (e.g. insufficient margin) the original position was left
+        // naked. New flow: keep old SL/TP alive through the trade, then
+        // cancel only those OLD OIDs after we confirm the new entry filled.
+        const staleOids = await snapshotAssetOrderOids(cfg.asset, this.creds)
 
         // Close opposite position (reduce-only) before opening the new one.
         if (willClose && closeSize > 0) {
@@ -741,7 +744,18 @@ class SignalBot {
           this.log.fill(closeRes.message)
         }
 
-        if (!willOpen) return
+        if (!willOpen) {
+          // Position closed but no re-entry — stale brackets can go now.
+          if (staleOids.length > 0) {
+            try {
+              const cancelled = await cancelOrdersByOid(cfg.asset, staleOids, this.creds)
+              if (cancelled > 0) this.log.info(`Cleared ${cancelled} stale order(s) for ${cfg.asset}`)
+            } catch (e) {
+              this.log.warn(`Stale-order cleanup failed: ${(e as Error).message}`)
+            }
+          }
+          return
+        }
 
         // Open the new position with SL (and optional TP) bracket.
         this.lastTradeAt = Date.now()
@@ -763,11 +777,28 @@ class SignalBot {
           // `null` after the lastError = null in start()).
           const errStr = this.lastError as string | null
           if (errStr && errStr.startsWith('Not filled')) this.lastError = null
+
+          // Entry + brackets are in place — now safe to drop the OLD stops.
+          // Cancelling by saved OID guarantees we don't touch the brand-new
+          // SL/TP we just placed for this position.
+          if (staleOids.length > 0) {
+            try {
+              const cancelled = await cancelOrdersByOid(cfg.asset, staleOids, this.creds)
+              if (cancelled > 0) this.log.info(`Cleared ${cancelled} stale order(s) for ${cfg.asset}`)
+            } catch (e) {
+              this.log.warn(`Stale-order cleanup failed: ${(e as Error).message}`)
+            }
+          }
         } else {
           // Order didn't fill (HL rejection — most commonly insufficient margin).
           // Surface the reason on the bot status so the UI pill turns red.
           this.lastError = result.message ?? 'Order not filled'
           this.consecutiveNotFilled++
+          // Old SL/TP intentionally kept in place — any pre-existing position
+          // is still protected by its original stop.
+          if (staleOids.length > 0) {
+            this.log.warn(`Entry not filled — keeping ${staleOids.length} existing stop order(s) in place`)
+          }
           // Auto-pause after 3 consecutive rejections — protects HL rate limit
           // and avoids piling up audit-log entries from a broken config.
           if (this.consecutiveNotFilled >= 3) {

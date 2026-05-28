@@ -602,6 +602,50 @@ export async function cancelAssetOrders(
   return mine.length
 }
 
+// Snapshot OIDs of all currently open orders for an asset. Call this BEFORE
+// placing a new entry+bracket; pair with cancelOrdersByOid() afterwards to
+// cancel only the old/stale orders without touching the new SL/TP brackets.
+export async function snapshotAssetOrderOids(
+  asset: string,
+  creds?: EnvConfig | null,
+): Promise<number[]> {
+  const { info, user } = getClients(creds)
+  const normalized = normalizeAssetName(asset)
+  const meta = await getAssetMeta(info, normalized)
+  const open = meta.dex
+    ? await info.openOrders({ user, dex: meta.dex })
+    : await info.openOrders({ user })
+  return (open as Array<{ coin: string; oid: number }>)
+    .filter((o) => o.coin === normalized)
+    .map((o) => o.oid)
+}
+
+// Cancel a specific set of OIDs for an asset. Returns the count actually
+// cancelled. Silently skips IDs that are no longer on the book.
+export async function cancelOrdersByOid(
+  asset: string,
+  oids: number[],
+  creds?: EnvConfig | null,
+): Promise<number> {
+  if (oids.length === 0) return 0
+  const { info, exchange, user } = getClients(creds)
+  const normalized = normalizeAssetName(asset)
+  const meta = await getAssetMeta(info, normalized)
+  const open = meta.dex
+    ? await info.openOrders({ user, dex: meta.dex })
+    : await info.openOrders({ user })
+  const stillOpen = new Set(
+    (open as Array<{ coin: string; oid: number }>)
+      .filter((o) => o.coin === normalized)
+      .map((o) => o.oid),
+  )
+  const toCancel = oids.filter((oid) => stillOpen.has(oid))
+  if (toCancel.length === 0) return 0
+  await exchange.cancel({ cancels: toCancel.map((oid) => ({ a: meta.assetId, o: oid })) })
+  log.info(`Cancelled ${toCancel.length} stale order(s) for ${normalized}`)
+  return toCancel.length
+}
+
 export interface PositionBrackets {
   slPx: number | null  // stop-loss trigger price (lower for longs, higher for shorts)
   tpPx: number | null  // take-profit trigger price
