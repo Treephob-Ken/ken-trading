@@ -720,6 +720,17 @@ export default function TradePage() {
               </div>
             </Field>
 
+            {/* Leverage — manual orders always run at the asset's max on HL (cross).
+                Shown here so the user knows the leverage before clicking Buy/Sell. */}
+            {selectedAsset && (
+              <div className="rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 flex items-center justify-between">
+                <span className="text-[11px] text-dim">Leverage (auto)</span>
+                <span className="font-mono text-sm font-semibold text-brand">
+                  {assetInfo?.maxLeverage ? `${assetInfo.maxLeverage}× max` : '— (loading)'}
+                </span>
+              </div>
+            )}
+
             {/* Order type toggle — Market (IOC) vs Limit (GTC) */}
             <div>
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-dim">Order type</span>
