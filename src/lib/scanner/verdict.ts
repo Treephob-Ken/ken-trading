@@ -13,6 +13,35 @@ export interface Verdict {
   reason: string        // one-line plain-English explanation
 }
 
+// Plain-English haircut applied to backtest return. Real-money trading loses
+// some of the edge to slippage, funding, and bad luck. 50% is a rough but
+// honest rule of thumb. Capped at -100%.
+export function realisticEstimatePct(backtestPct: number): number {
+  if (backtestPct <= 0) return backtestPct
+  return Math.max(-100, backtestPct * 0.5)
+}
+
+// One-line warning when the result shouldn't be trusted at face value.
+// Returns null if there's no specific concern. Kept short on purpose.
+export function realismWarning(opts: {
+  totalReturnPct: number
+  lookbackDays?: number
+  sharpeRatio?: number
+  looksAhead?: boolean
+}): string | null {
+  if (opts.looksAhead) return 'This strategy cheats with future info — ignore the numbers'
+  if (opts.lookbackDays !== undefined && opts.lookbackDays < 60) {
+    return `Only tested on ${opts.lookbackDays} days — may not repeat on a different month`
+  }
+  if (opts.sharpeRatio !== undefined && opts.sharpeRatio > 3) {
+    return 'Score looks too good to be true — re-check on a longer lookback'
+  }
+  if (opts.totalReturnPct > 200) {
+    return 'Huge return — likely a lucky window, not a repeatable edge'
+  }
+  return null
+}
+
 export function gradeColor(g: Grade): string {
   switch (g) {
     case 'great':   return 'text-gain'
@@ -35,11 +64,19 @@ export function gradeBg(g: Grade): string {
 
 // ── Indicator Scanner ─────────────────────────────────────────────────────
 export function gradeIndicatorRow(r: IndicatorScanRow): Verdict {
+  // Look-ahead trumps everything else — the numbers are not real.
+  if (r.looksAhead) {
+    return {
+      grade: 'skip',
+      label: 'Looks fake',
+      reason: 'This strategy uses future info to "predict" the past — backtest is not realistic',
+    }
+  }
   if (r.totalReturnPct <= 0) {
     return {
       grade: 'skip',
       label: 'Skip',
-      reason: `Lost ${Math.abs(r.totalReturnPct).toFixed(1)}% over 90d — strategy didn't fit this market`,
+      reason: `Lost ${Math.abs(r.totalReturnPct).toFixed(1)}% in the test — strategy didn't fit this market`,
     }
   }
   if (r.numTrades < 5) {

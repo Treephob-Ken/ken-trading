@@ -12,6 +12,8 @@ import {
 import {
   gradeBg,
   gradeIndicatorRow,
+  realismWarning,
+  realisticEstimatePct,
   timeAgo,
 } from '@/lib/scanner/verdict'
 
@@ -420,13 +422,32 @@ export default function IndicatorScanTab({
               }`}
             >
               {bestPick.row.totalReturnPct >= 0 ? '+' : ''}
-              {bestPick.row.totalReturnPct.toFixed(2)}%
+              {bestPick.row.totalReturnPct.toFixed(2)}% test
             </span>
+            {!bestPick.row.looksAhead && (
+              <span className="font-mono text-xs text-dim">
+                · real-money guess {realisticEstimatePct(bestPick.row.totalReturnPct) >= 0 ? '+' : ''}
+                {realisticEstimatePct(bestPick.row.totalReturnPct).toFixed(1)}%
+              </span>
+            )}
           </div>
           <p className="text-xs leading-relaxed opacity-90">
             {bestPick.verdict.reason}
             <span className="ml-2 text-[10px] opacity-70">→ click to open in Backtester</span>
           </p>
+          {(() => {
+            const w = realismWarning({
+              totalReturnPct: bestPick.row.totalReturnPct,
+              lookbackDays: bestPick.row.lookbackDays,
+              sharpeRatio: bestPick.row.sharpeRatio,
+              looksAhead: bestPick.row.looksAhead,
+            })
+            return w ? (
+              <p className="rounded-md border border-warn/30 bg-warn/5 px-2 py-1.5 text-[11px] text-warn">
+                ⚠ {w}
+              </p>
+            ) : null
+          })()}
         </button>
       )}
 
@@ -489,7 +510,13 @@ export default function IndicatorScanTab({
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
                     onClick={() => headerClick('totalReturnPct')}
                   >
-                    Return %{sortArrow('totalReturnPct')}
+                    Test return{sortArrow('totalReturnPct')}
+                  </th>
+                  <th
+                    className="px-3 py-2 text-right"
+                    title="Backtest result minus a 50% haircut for slippage, fees, and bad luck. Rough guess of what you'd actually make if you ran the bot."
+                  >
+                    Real-money guess
                   </th>
                   <th
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
@@ -537,10 +564,10 @@ export default function IndicatorScanTab({
                       {r.strategyName}
                       {r.looksAhead && (
                         <span
-                          className="ml-1.5 rounded border border-warn/40 bg-warn/10 px-1 py-0.5 text-[8px] font-bold uppercase text-warn"
-                          title="Look-ahead detected — this strategy uses information not available in real time. Backtest numbers are not realistic."
+                          className="ml-1.5 rounded border border-loss/40 bg-loss/10 px-1 py-0.5 text-[8px] font-bold uppercase text-loss"
+                          title="This strategy uses future info to predict the past. Backtest result is not realistic — don't trust it."
                         >
-                          ⚠ peeks
+                          ⚠ Looks fake
                         </span>
                       )}
                     </td>
@@ -551,6 +578,18 @@ export default function IndicatorScanTab({
                     >
                       {r.totalReturnPct >= 0 ? '+' : ''}
                       {r.totalReturnPct.toFixed(2)}%
+                    </td>
+                    <td
+                      className={`px-3 py-2 text-right font-mono tabular-nums ${
+                        r.looksAhead ? 'text-dim' : realisticEstimatePct(r.totalReturnPct) > 0 ? 'text-gain' : 'text-loss'
+                      }`}
+                      title={r.looksAhead
+                        ? 'Cannot trust — strategy peeks into the future.'
+                        : 'Backtest result minus a 50% haircut for slippage, fees, and bad luck.'}
+                    >
+                      {r.looksAhead
+                        ? '—'
+                        : `${realisticEstimatePct(r.totalReturnPct) >= 0 ? '+' : ''}${realisticEstimatePct(r.totalReturnPct).toFixed(1)}%`}
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-dim tabular-nums">
                       {r.numTrades}

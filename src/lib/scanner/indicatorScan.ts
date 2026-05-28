@@ -37,6 +37,9 @@ export interface IndicatorScanRow {
   // backtest numbers above are unreliable — the strategy peeked into the
   // future. Surfaced with a ⚠ badge in the scanner UI.
   looksAhead?: boolean
+  // The lookback window (in days) used for this row's backtest. Used by the
+  // verdict to warn when the test was too short to be reliable.
+  lookbackDays?: number
 }
 
 export interface ScanProgress {
@@ -163,6 +166,7 @@ export async function runIndicatorScan(
           sharpeRatio: m.sharpeRatio,
           buyHoldReturnPct: m.buyHoldReturnPct,
           looksAhead: lookaheadCache.get(id) === true,
+          lookbackDays,
         })
       } catch {
         // one bad combo doesn't kill the scan
