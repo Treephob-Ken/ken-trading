@@ -4,12 +4,14 @@
 // labels) is intentionally omitted — the bot only needs buy/sell signals.
 
 import {
+  adx,
   bollinger,
   cci,
   crossDown,
   crossUp,
   donchian,
   ema,
+  ichimoku,
   macd,
   psar,
   rsi,
@@ -46,6 +48,8 @@ export type StrategyId =
   | 'williamsr'
   | 'elliott'
   | 'traderxo'
+  | 'adx'
+  | 'ichimoku'
 
 export interface ParamDef {
   key: string
@@ -213,6 +217,28 @@ export const STRATEGIES: StrategyMeta[] = [
       p('stochLen', 'Stoch Length', 2, 50, 1, 14),
     ],
   },
+  {
+    id: 'adx',
+    name: 'ADX / DMI',
+    category: 'Trend',
+    description: '+DI cross over -DI with ADX > threshold = trend confirmed. Filters out chop where DI crosses are noise.',
+    params: [
+      p('period', 'ADX Period', 5, 50, 1, 14),
+      p('threshold', 'ADX Threshold', 10, 40, 1, 20),
+    ],
+  },
+  {
+    id: 'ichimoku',
+    name: 'Ichimoku Cloud',
+    category: 'Trend',
+    description: 'Buy: Tenkan crosses above Kijun AND price above the Kumo. Sell: mirror. Cloud filter keeps you out of counter-trend trades.',
+    params: [
+      p('tenkan', 'Tenkan Period', 5, 30, 1, 9),
+      p('kijun', 'Kijun Period', 10, 60, 1, 26),
+      p('senkouB', 'Senkou B Period', 20, 120, 1, 52),
+      p('displacement', 'Displacement', 10, 60, 1, 26),
+    ],
+  },
 ]
 
 export function strategyMeta(id: StrategyId): StrategyMeta {
@@ -237,7 +263,11 @@ function buildSignals(
   return signals
 }
 
-interface EWPivot { idx: number; kind: 'high' | 'low' }
+// `confirmedIdx` is the bar where the pivot became visible in real time (the
+// bar that crossed the ZigZag threshold). -1 = provisional, not yet confirmed.
+// Signals must only fire on confirmed pivots, otherwise the strategy peeks
+// into the future and shows impossibly perfect entries in backtests.
+interface EWPivot { idx: number; kind: 'high' | 'low'; confirmedIdx: number }
 
 function ewZigZag(candles: Candle[], threshPct: number): EWPivot[] {
   const thresh = threshPct / 100
@@ -253,18 +283,18 @@ function ewZigZag(candles: Candle[], threshPct: number): EWPivot[] {
     if (dir === 'up') {
       if (high >= extPrice) { extPrice = high; extIdx = i }
       else if ((extPrice - low) / extPrice >= thresh) {
-        out.push({ idx: extIdx, kind: 'high' })
+        out.push({ idx: extIdx, kind: 'high', confirmedIdx: i })
         dir = 'down'; extPrice = low; extIdx = i
       }
     } else {
       if (low <= extPrice) { extPrice = low; extIdx = i }
       else if ((high - extPrice) / extPrice >= thresh) {
-        out.push({ idx: extIdx, kind: 'low' })
+        out.push({ idx: extIdx, kind: 'low', confirmedIdx: i })
         dir = 'up'; extPrice = high; extIdx = i
       }
     }
   }
-  out.push({ idx: extIdx, kind: dir === 'up' ? 'high' : 'low' })
+  out.push({ idx: extIdx, kind: dir === 'up' ? 'high' : 'low', confirmedIdx: -1 })
   return out
 }
 
@@ -361,8 +391,10 @@ export function generateSignals(
       const pivots = ewZigZag(candles, params.zigzag ?? 3)
       const signals: Signal[] = candles.map(() => null)
       for (const piv of pivots) {
-        const next = piv.idx + 1
-        if (next < n) signals[next] = piv.kind === 'low' ? 'buy' : 'sell'
+        // Only fire on confirmed pivots — using piv.idx would peek into the future.
+        if (piv.confirmedIdx < 0) continue
+        const fireAt = piv.confirmedIdx
+        if (fireAt < n) signals[fireAt] = piv.kind === 'low' ? 'buy' : 'sell'
       }
       return signals
     }
@@ -376,6 +408,36 @@ export function generateSignals(
         n,
         (i) => crossUp(fastEma, slowEma, i),
         (i) => crossDown(fastEma, slowEma, i),
+      )
+    }
+    case 'adx': {
+      const period = Math.max(2, params.period | 0)
+      const threshold = params.threshold ?? 20
+      const a = adx(highs, lows, closes, period)
+      return buildSignals(
+        n,
+        (i) => crossUp(a.plusDI, a.minusDI, i) && a.adx[i] >= threshold,
+        (i) => crossDown(a.plusDI, a.minusDI, i) && a.adx[i] >= threshold,
+      )
+    }
+    case 'ichimoku': {
+      const t = Math.max(2, params.tenkan | 0)
+      const k = Math.max(2, params.kijun | 0)
+      const b = Math.max(2, params.senkouB | 0)
+      const d = Math.max(1, params.displacement | 0)
+      const ich = ichimoku(highs, lows, closes, t, k, b, d)
+      const aboveCloud = (i: number): boolean => {
+        const top = Math.max(ich.senkouA[i], ich.senkouB[i])
+        return !Number.isNaN(top) && closes[i] > top
+      }
+      const belowCloud = (i: number): boolean => {
+        const bot = Math.min(ich.senkouA[i], ich.senkouB[i])
+        return !Number.isNaN(bot) && closes[i] < bot
+      }
+      return buildSignals(
+        n,
+        (i) => crossUp(ich.tenkan, ich.kijun, i) && aboveCloud(i),
+        (i) => crossDown(ich.tenkan, ich.kijun, i) && belowCloud(i),
       )
     }
   }
@@ -586,6 +648,38 @@ export function generateChartData(
           ],
           refLines: [20, 50, 80],
         },
+      }
+    }
+    case 'adx': {
+      const period = Math.max(2, params.period | 0)
+      const threshold = params.threshold ?? 20
+      const a = adx(highs, lows, closes, period)
+      return {
+        mainLines: [],
+        subPane: {
+          title: 'ADX / DMI',
+          lines: [
+            { id: 'plusDI',  color: '#22c55e', data: toLine(times, a.plusDI) },
+            { id: 'minusDI', color: '#ef4444', data: toLine(times, a.minusDI) },
+            { id: 'adx',     color: '#a78bfa', data: toLine(times, a.adx) },
+          ],
+          refLines: [threshold],
+        },
+      }
+    }
+    case 'ichimoku': {
+      const t = Math.max(2, params.tenkan | 0)
+      const k = Math.max(2, params.kijun | 0)
+      const b = Math.max(2, params.senkouB | 0)
+      const d = Math.max(1, params.displacement | 0)
+      const ich = ichimoku(highs, lows, closes, t, k, b, d)
+      return {
+        mainLines: [
+          { id: 'tenkan',  color: '#3b9eff', data: toLine(times, ich.tenkan) },
+          { id: 'kijun',   color: '#ff9f43', data: toLine(times, ich.kijun) },
+          { id: 'senkouA', color: 'rgba(34,197,94,0.6)', data: toLine(times, ich.senkouA) },
+          { id: 'senkouB', color: 'rgba(239,68,68,0.6)', data: toLine(times, ich.senkouB) },
+        ],
       }
     }
   }

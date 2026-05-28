@@ -489,7 +489,17 @@ export default function IndicatorScanTab({
                     </td>
                     <td className="px-3 py-2 font-mono text-text">{r.base}</td>
                     <td className="px-3 py-2 font-mono text-text">{r.timeframe}</td>
-                    <td className="px-3 py-2 text-text">{r.strategyName}</td>
+                    <td className="px-3 py-2 text-text">
+                      {r.strategyName}
+                      {r.looksAhead && (
+                        <span
+                          className="ml-1.5 rounded border border-warn/40 bg-warn/10 px-1 py-0.5 text-[8px] font-bold uppercase text-warn"
+                          title="Look-ahead detected — this strategy uses information not available in real time. Backtest numbers are not realistic."
+                        >
+                          ⚠ peeks
+                        </span>
+                      )}
+                    </td>
                     <td
                       className={`px-3 py-2 text-right font-mono tabular-nums ${
                         r.totalReturnPct >= 0 ? 'text-gain' : 'text-loss'

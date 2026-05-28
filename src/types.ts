@@ -24,6 +24,8 @@ export type StrategyId =
   | 'williamsr'
   | 'elliott'
   | 'traderxo'
+  | 'adx'
+  | 'ichimoku'
 
 // Which side(s) the backtest is allowed to take.
 export type Direction = 'long' | 'short' | 'both'

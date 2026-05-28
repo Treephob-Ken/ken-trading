@@ -9,6 +9,7 @@ import type { SymbolInfo } from '@/lib/binance'
 import { fetchKlines } from '@/lib/binance'
 import { defaultParams, generateSignals, STRATEGIES } from '@/lib/strategies'
 import { runBacktest } from '@/lib/backtest'
+import { checkLookahead } from '@/lib/scanner/lookaheadCheck'
 
 export interface IndicatorScanOptions {
   timeframes: string[]            // e.g. ['1h', '4h']
@@ -32,6 +33,10 @@ export interface IndicatorScanRow {
   maxDrawdownPct: number
   sharpeRatio: number
   buyHoldReturnPct: number
+  // True if the look-ahead detector flagged this strategy. When true, the
+  // backtest numbers above are unreliable — the strategy peeked into the
+  // future. Surfaced with a ⚠ badge in the scanner UI.
+  looksAhead?: boolean
 }
 
 export interface ScanProgress {
@@ -107,6 +112,10 @@ export async function runIndicatorScan(
   const total = fetchJobs.length * strategies.length
   let done = 0
   const rows: IndicatorScanRow[] = []
+  // Look-ahead check is run ONCE per strategy on the first usable candle set
+  // we see, then cached. A strategy that peeks behaves the same way on any
+  // history, so no need to re-check per symbol/timeframe.
+  const lookaheadCache = new Map<StrategyId, boolean>()
 
   for (const { job, candles } of candleSets) {
     if (signal?.aborted) break
@@ -133,6 +142,14 @@ export async function runIndicatorScan(
           1.5,
         )
         const m = result.metrics
+        if (!lookaheadCache.has(id)) {
+          try {
+            const rep = checkLookahead(id, candles)
+            lookaheadCache.set(id, !rep.ok)
+          } catch {
+            lookaheadCache.set(id, false)
+          }
+        }
         rows.push({
           symbol: job.sym.symbol,
           base: job.sym.base,
@@ -145,6 +162,7 @@ export async function runIndicatorScan(
           maxDrawdownPct: m.maxDrawdownPct,
           sharpeRatio: m.sharpeRatio,
           buyHoldReturnPct: m.buyHoldReturnPct,
+          looksAhead: lookaheadCache.get(id) === true,
         })
       } catch {
         // one bad combo doesn't kill the scan

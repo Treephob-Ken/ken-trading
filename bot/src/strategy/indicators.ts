@@ -410,6 +410,84 @@ export function donchian(
   return { upper, lower }
 }
 
+// ADX + Directional Movement Index. Mirrors src/lib/indicators.ts (web).
+export interface AdxResult { plusDI: number[]; minusDI: number[]; adx: number[] }
+export function adx(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number,
+): AdxResult {
+  const n = highs.length
+  const tr = new Array<number>(n).fill(NaN)
+  const plusDM = new Array<number>(n).fill(0)
+  const minusDM = new Array<number>(n).fill(0)
+  for (let i = 0; i < n; i++) {
+    if (i === 0) { tr[i] = highs[i] - lows[i]; continue }
+    tr[i] = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1]),
+    )
+    const upMove = highs[i] - highs[i - 1]
+    const downMove = lows[i - 1] - lows[i]
+    plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0
+    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0
+  }
+  const atrSm = rma(tr, period)
+  const plusDMSm = rma(plusDM, period)
+  const minusDMSm = rma(minusDM, period)
+  const plusDI = atrSm.map((a, i) => (a > 0 ? 100 * (plusDMSm[i] / a) : NaN))
+  const minusDI = atrSm.map((a, i) => (a > 0 ? 100 * (minusDMSm[i] / a) : NaN))
+  const dx = plusDI.map((pdi, i) => {
+    const sum = pdi + minusDI[i]
+    if (sum <= 0 || Number.isNaN(sum)) return NaN
+    return 100 * Math.abs(pdi - minusDI[i]) / sum
+  })
+  const adxLine = rma(dx, period)
+  return { plusDI, minusDI, adx: adxLine }
+}
+
+// Ichimoku Cloud. Senkou A/B at bar i = the value from `displacement` bars ago
+// (so the cloud at the current bar is computed from past data only).
+export interface IchimokuResult {
+  tenkan: number[]; kijun: number[]; senkouA: number[]; senkouB: number[]; chikou: number[]
+}
+export function ichimoku(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  tenkanPeriod = 9,
+  kijunPeriod = 26,
+  senkouBPeriod = 52,
+  displacement = 26,
+): IchimokuResult {
+  const n = highs.length
+  const mid = (h: number[], l: number[], p: number, idx: number): number => {
+    if (idx + 1 < p) return NaN
+    let hi = -Infinity, lo = Infinity
+    for (let k = idx - p + 1; k <= idx; k++) {
+      if (h[k] > hi) hi = h[k]
+      if (l[k] < lo) lo = l[k]
+    }
+    return (hi + lo) / 2
+  }
+  const tenkan = new Array<number>(n).fill(NaN)
+  const kijun = new Array<number>(n).fill(NaN)
+  const senkouARaw = new Array<number>(n).fill(NaN)
+  const senkouBRaw = new Array<number>(n).fill(NaN)
+  for (let i = 0; i < n; i++) {
+    tenkan[i] = mid(highs, lows, tenkanPeriod, i)
+    kijun[i] = mid(highs, lows, kijunPeriod, i)
+    senkouARaw[i] = !Number.isNaN(tenkan[i]) && !Number.isNaN(kijun[i]) ? (tenkan[i] + kijun[i]) / 2 : NaN
+    senkouBRaw[i] = mid(highs, lows, senkouBPeriod, i)
+  }
+  const senkouA = senkouARaw.map((_, i) => (i - displacement >= 0 ? senkouARaw[i - displacement] : NaN))
+  const senkouB = senkouBRaw.map((_, i) => (i - displacement >= 0 ? senkouBRaw[i - displacement] : NaN))
+  const chikou = closes.map((_, i) => (i - displacement >= 0 ? closes[i - displacement] : NaN))
+  return { tenkan, kijun, senkouA, senkouB, chikou }
+}
+
 export function crossUp(a: number[], b: number[], i: number): boolean {
   if (i < 1) return false
   const a0 = a[i - 1]

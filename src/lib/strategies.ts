@@ -1,11 +1,13 @@
 import type { Candle, Signal, StrategyId } from '@/types'
 import {
+  adx,
   bollinger,
   cci,
   crossDown,
   crossUp,
   donchian,
   ema,
+  ichimoku,
   macd,
   psar,
   rsi,
@@ -195,6 +197,30 @@ export const STRATEGIES: StrategyMeta[] = [
       p('stochLen', 'Stoch Length', 2, 50, 1, 14),
     ],
   },
+  {
+    id: 'adx',
+    name: 'ADX / DMI',
+    category: 'Trend',
+    description:
+      'Wilder’s directional movement system. Buys when +DI crosses above -DI while ADX > threshold (real trend, not chop). Sells on the mirror cross. The ADX filter avoids whipsaws during sideways regimes.',
+    params: [
+      p('period', 'ADX Period', 5, 50, 1, 14),
+      p('threshold', 'ADX Threshold', 10, 40, 1, 20),
+    ],
+  },
+  {
+    id: 'ichimoku',
+    name: 'Ichimoku Cloud',
+    category: 'Trend',
+    description:
+      'Japanese trend system. Buys when Tenkan crosses above Kijun while price is above the Kumo (cloud). Sells on the mirror. The cloud filter keeps you out of counter-trend trades.',
+    params: [
+      p('tenkan', 'Tenkan Period', 5, 30, 1, 9),
+      p('kijun', 'Kijun Period', 10, 60, 1, 26),
+      p('senkouB', 'Senkou B Period', 20, 120, 1, 52),
+      p('displacement', 'Displacement', 10, 60, 1, 26),
+    ],
+  },
 ]
 
 export function strategyMeta(id: StrategyId): StrategyMeta {
@@ -271,7 +297,11 @@ function buildSignals(
 
 // ── Elliott Wave helpers ─────────────────────────────────────────────────────
 
-interface EWPivot { idx: number; time: number; price: number; kind: 'high' | 'low' }
+// `confirmedIdx` is the bar at which the pivot became visible to a real-time
+// observer (the bar that crossed the ZigZag threshold). A sentinel value of
+// -1 means the pivot is provisional (current extreme, not yet confirmed) —
+// signals must NOT fire on those, otherwise the strategy peeks into the future.
+interface EWPivot { idx: number; time: number; price: number; kind: 'high' | 'low'; confirmedIdx: number }
 interface EWImpulse { pivots: EWPivot[]; dir: 'up' | 'down'; w1: number; w3: number; w5: number }
 
 function ewZigZag(candles: Candle[], threshPct: number): EWPivot[] {
@@ -288,19 +318,19 @@ function ewZigZag(candles: Candle[], threshPct: number): EWPivot[] {
     if (dir === 'up') {
       if (high >= extPrice) { extPrice = high; extIdx = i }
       else if ((extPrice - low) / extPrice >= thresh) {
-        out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: 'high' })
+        out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: 'high', confirmedIdx: i })
         dir = 'down'; extPrice = low; extIdx = i
       }
     } else {
       if (low <= extPrice) { extPrice = low; extIdx = i }
       else if ((high - extPrice) / extPrice >= thresh) {
-        out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: 'low' })
+        out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: 'low', confirmedIdx: i })
         dir = 'up'; extPrice = high; extIdx = i
       }
     }
   }
-  // Add the current extreme as a provisional unconfirmed pivot
-  out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: dir === 'up' ? 'high' : 'low' })
+  // Add the current extreme as a provisional unconfirmed pivot (confirmedIdx=-1).
+  out.push({ idx: extIdx, time: candles[extIdx].time, price: extPrice, kind: dir === 'up' ? 'high' : 'low', confirmedIdx: -1 })
   return out
 }
 
@@ -652,11 +682,16 @@ export function generateSignals(
       // Fibonacci levels based on the impulse structure
       const priceLines: PriceLine[] = impulse ? ewFibLines(impulse) : []
 
-      // Signals: buy at confirmed zigzag lows (wave 2/4), sell at highs (wave 3/5)
+      // Signals: buy at confirmed zigzag lows (wave 2/4), sell at highs (wave 3/5).
+      // Fire ON the confirmation bar (when the pivot becomes visible) — using
+      // p.idx would peek into the future since pivots are only known after price
+      // has retraced N% from them. The provisional last pivot (confirmedIdx=-1)
+      // is skipped entirely.
       const signals: Signal[] = candles.map(() => null)
       for (const p of pivots) {
-        const next = p.idx + 1
-        if (next < n) signals[next] = p.kind === 'low' ? 'buy' : 'sell'
+        if (p.confirmedIdx < 0) continue
+        const fireAt = p.confirmedIdx
+        if (fireAt < n) signals[fireAt] = p.kind === 'low' ? 'buy' : 'sell'
       }
 
       return {
@@ -694,6 +729,60 @@ export function generateSignals(
           ],
           refLines: [20, 50, 80],
         },
+      }
+    }
+
+    case 'adx': {
+      const period = Math.max(2, params.period | 0)
+      const threshold = params.threshold ?? 20
+      const a = adx(highs, lows, closes, period)
+      return {
+        signals: buildSignals(
+          n,
+          (i) => crossUp(a.plusDI, a.minusDI, i) && a.adx[i] >= threshold,
+          (i) => crossDown(a.plusDI, a.minusDI, i) && a.adx[i] >= threshold,
+        ),
+        mainLines: [],
+        subPane: {
+          title: 'ADX / DMI',
+          lines: [
+            { id: 'plusDI', color: '#22c55e', data: toLine(times, a.plusDI) },
+            { id: 'minusDI', color: '#ef4444', data: toLine(times, a.minusDI) },
+            { id: 'adx', color: '#a78bfa', data: toLine(times, a.adx) },
+          ],
+          refLines: [threshold],
+        },
+      }
+    }
+
+    case 'ichimoku': {
+      const t = Math.max(2, params.tenkan | 0)
+      const k = Math.max(2, params.kijun | 0)
+      const b = Math.max(2, params.senkouB | 0)
+      const d = Math.max(1, params.displacement | 0)
+      const ich = ichimoku(highs, lows, closes, t, k, b, d)
+      // Long when Tenkan crosses above Kijun AND close is above the cloud
+      // (above both Senkou A and Senkou B). Short on the mirror.
+      const aboveCloud = (i: number): boolean => {
+        const top = Math.max(ich.senkouA[i], ich.senkouB[i])
+        return !Number.isNaN(top) && closes[i] > top
+      }
+      const belowCloud = (i: number): boolean => {
+        const bot = Math.min(ich.senkouA[i], ich.senkouB[i])
+        return !Number.isNaN(bot) && closes[i] < bot
+      }
+      return {
+        signals: buildSignals(
+          n,
+          (i) => crossUp(ich.tenkan, ich.kijun, i) && aboveCloud(i),
+          (i) => crossDown(ich.tenkan, ich.kijun, i) && belowCloud(i),
+        ),
+        mainLines: [
+          { id: 'tenkan',  color: '#3b9eff', data: toLine(times, ich.tenkan) },
+          { id: 'kijun',   color: '#ff9f43', data: toLine(times, ich.kijun) },
+          { id: 'senkouA', color: 'rgba(34,197,94,0.6)', data: toLine(times, ich.senkouA) },
+          { id: 'senkouB', color: 'rgba(239,68,68,0.6)', data: toLine(times, ich.senkouB) },
+        ],
       }
     }
   }

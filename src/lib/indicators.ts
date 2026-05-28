@@ -417,6 +417,97 @@ export function donchian(
 }
 
 // True when series `a` crosses from at-or-below `b` to strictly above it.
+// ADX + Directional Movement Index. Wilder's classic trend-strength indicator.
+// adx > 20 indicates a real trend; +di > -di = uptrend, -di > +di = downtrend.
+export interface AdxResult { plusDI: number[]; minusDI: number[]; adx: number[] }
+export function adx(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number,
+): AdxResult {
+  const n = highs.length
+  const tr = new Array<number>(n).fill(NaN)
+  const plusDM = new Array<number>(n).fill(0)
+  const minusDM = new Array<number>(n).fill(0)
+  for (let i = 0; i < n; i++) {
+    if (i === 0) { tr[i] = highs[i] - lows[i]; continue }
+    tr[i] = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1]),
+    )
+    const upMove = highs[i] - highs[i - 1]
+    const downMove = lows[i - 1] - lows[i]
+    plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0
+    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0
+  }
+  const atrSm = rma(tr, period)
+  const plusDMSm = rma(plusDM, period)
+  const minusDMSm = rma(minusDM, period)
+  const plusDI = atrSm.map((a, i) => (a > 0 ? 100 * (plusDMSm[i] / a) : NaN))
+  const minusDI = atrSm.map((a, i) => (a > 0 ? 100 * (minusDMSm[i] / a) : NaN))
+  const dx = plusDI.map((pdi, i) => {
+    const sum = pdi + minusDI[i]
+    if (sum <= 0 || Number.isNaN(sum)) return NaN
+    return 100 * Math.abs(pdi - minusDI[i]) / sum
+  })
+  const adxLine = rma(dx, period)
+  return { plusDI, minusDI, adx: adxLine }
+}
+
+// Ichimoku Cloud — Tenkan-sen (conversion line), Kijun-sen (base line),
+// Senkou A/B (cloud top/bottom), Chikou (lagging). Values past the current bar
+// (the cloud is plotted `displacement` bars into the future) are NOT included
+// in the returned arrays at the current index — they're real cloud values
+// computed from history N bars ago.
+export interface IchimokuResult {
+  tenkan: number[]      // (period highest+lowest)/2 over `tenkanPeriod`
+  kijun: number[]       // same over `kijunPeriod`
+  senkouA: number[]     // (tenkan+kijun)/2, plotted `displacement` bars forward — here, the cloud value AT this bar (computed from `displacement` bars ago)
+  senkouB: number[]     // (period highest+lowest)/2 over `senkouBPeriod`, plotted `displacement` bars forward
+  chikou: number[]      // closes, plotted `displacement` bars back — here, close from `displacement` bars ago
+}
+export function ichimoku(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  tenkanPeriod = 9,
+  kijunPeriod = 26,
+  senkouBPeriod = 52,
+  displacement = 26,
+): IchimokuResult {
+  const n = highs.length
+  const mid = (h: number[], l: number[], p: number, idx: number): number => {
+    if (idx + 1 < p) return NaN
+    let hi = -Infinity, lo = Infinity
+    for (let k = idx - p + 1; k <= idx; k++) {
+      if (h[k] > hi) hi = h[k]
+      if (l[k] < lo) lo = l[k]
+    }
+    return (hi + lo) / 2
+  }
+  const tenkan = new Array<number>(n).fill(NaN)
+  const kijun = new Array<number>(n).fill(NaN)
+  const senkouARaw = new Array<number>(n).fill(NaN)
+  const senkouBRaw = new Array<number>(n).fill(NaN)
+  for (let i = 0; i < n; i++) {
+    tenkan[i] = mid(highs, lows, tenkanPeriod, i)
+    kijun[i] = mid(highs, lows, kijunPeriod, i)
+    senkouARaw[i] = !Number.isNaN(tenkan[i]) && !Number.isNaN(kijun[i]) ? (tenkan[i] + kijun[i]) / 2 : NaN
+    senkouBRaw[i] = mid(highs, lows, senkouBPeriod, i)
+  }
+  // Shift senkou forward by `displacement` — the cloud value AT bar i is the
+  // value computed `displacement` bars ago. Backtest-safe (uses past data only).
+  const senkouA = senkouARaw.map((_, i) => (i - displacement >= 0 ? senkouARaw[i - displacement] : NaN))
+  const senkouB = senkouBRaw.map((_, i) => (i - displacement >= 0 ? senkouBRaw[i - displacement] : NaN))
+  // Chikou shifted back: at bar i, chikou is the close from `displacement` bars later.
+  // For real-time use we expose it as the close from `displacement` bars ago so it's
+  // always defined for past bars and never peeks into the future.
+  const chikou = closes.map((_, i) => (i - displacement >= 0 ? closes[i - displacement] : NaN))
+  return { tenkan, kijun, senkouA, senkouB, chikou }
+}
+
 export function crossUp(a: number[], b: number[], i: number): boolean {
   if (i < 1) return false
   const a0 = a[i - 1]
