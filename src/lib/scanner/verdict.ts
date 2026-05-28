@@ -63,6 +63,10 @@ export function gradeBg(g: Grade): string {
 }
 
 // ── Indicator Scanner ─────────────────────────────────────────────────────
+// Grades a row based on its Quality Score (0–100) which already combines
+// risk-adjusted return, beats-buy-hold, trade count quality, realistic guess,
+// HTF confluence, and funding penalty. The reason string explains in plain
+// words WHY the row got that score so the user can sanity-check it.
 export function gradeIndicatorRow(r: IndicatorScanRow): Verdict {
   // Look-ahead trumps everything else — the numbers are not real.
   if (r.looksAhead) {
@@ -87,34 +91,51 @@ export function gradeIndicatorRow(r: IndicatorScanRow): Verdict {
     }
   }
 
-  const parts: string[] = []
-  if (r.totalReturnPct >= 30) parts.push(`outstanding +${r.totalReturnPct.toFixed(1)}% return`)
-  else if (r.totalReturnPct >= 15) parts.push(`strong +${r.totalReturnPct.toFixed(1)}% return`)
-  else if (r.totalReturnPct >= 5) parts.push(`decent +${r.totalReturnPct.toFixed(1)}% return`)
-  else parts.push(`modest +${r.totalReturnPct.toFixed(1)}% return`)
-
-  if (r.winRate >= 60) parts.push(`${r.winRate.toFixed(0)}% win rate`)
-  else if (r.winRate < 40) parts.push(`low ${r.winRate.toFixed(0)}% win rate`)
-
-  if (r.maxDrawdownPct > Math.max(10, r.totalReturnPct * 1.5)) {
-    parts.push(`but ${r.maxDrawdownPct.toFixed(1)}% drawdown`)
-  }
-
-  if (r.sharpeRatio >= 1.5) parts.push(`Sharpe ${r.sharpeRatio.toFixed(2)}`)
+  // Score-driven grade. Falls back to old return-based thresholds when
+  // Quality Score isn't available (e.g. legacy persisted rows).
+  const score = typeof r.qualityScore === 'number' ? r.qualityScore : null
 
   let grade: Grade
   let label: string
-  if (r.totalReturnPct >= 20 && r.numTrades >= 10 && r.winRate >= 45) {
-    grade = 'great'; label = 'Strong'
-  } else if (r.totalReturnPct >= 8 && r.numTrades >= 8) {
-    grade = 'good'; label = 'Good'
-  } else if (r.totalReturnPct >= 3) {
-    grade = 'ok'; label = 'OK'
+  if (score !== null) {
+    if (score >= 75)       { grade = 'great';   label = 'Strong' }
+    else if (score >= 55)  { grade = 'good';    label = 'Good' }
+    else if (score >= 35)  { grade = 'ok';      label = 'OK' }
+    else if (score >= 15)  { grade = 'caution'; label = 'Marginal' }
+    else                    { grade = 'skip';    label = 'Skip' }
   } else {
-    grade = 'caution'; label = 'Marginal'
+    if (r.totalReturnPct >= 20 && r.numTrades >= 10 && r.winRate >= 45) {
+      grade = 'great'; label = 'Strong'
+    } else if (r.totalReturnPct >= 8 && r.numTrades >= 8) {
+      grade = 'good'; label = 'Good'
+    } else if (r.totalReturnPct >= 3) {
+      grade = 'ok'; label = 'OK'
+    } else {
+      grade = 'caution'; label = 'Marginal'
+    }
   }
 
-  return { grade, label, reason: parts.join(', ') }
+  // Plain-language reason — listing the most important drivers.
+  const parts: string[] = []
+  if (r.totalReturnPct > r.buyHoldReturnPct) parts.push(`beats buy-hold`)
+  else parts.push(`lost to buy-hold (${r.totalReturnPct.toFixed(1)}% vs ${r.buyHoldReturnPct.toFixed(1)}%)`)
+
+  const calmar = r.calmar
+  if (typeof calmar === 'number' && Number.isFinite(calmar)) {
+    if (calmar >= 2) parts.push(`strong risk-reward (calmar ${calmar.toFixed(1)})`)
+    else if (calmar >= 1) parts.push(`fair risk-reward (calmar ${calmar.toFixed(1)})`)
+    else parts.push(`weak risk-reward (calmar ${calmar.toFixed(1)})`)
+  }
+
+  if (r.confluence === 'aligned') parts.push(`higher TF agrees`)
+  else if (r.confluence === 'conflicting') parts.push(`higher TF disagrees`)
+
+  if (typeof r.fundingApr === 'number' && Number.isFinite(r.fundingApr)) {
+    if (r.fundingApr > 50) parts.push(`crowded longs (funding +${r.fundingApr.toFixed(0)}% APR)`)
+    else if (r.fundingApr < -50) parts.push(`crowded shorts (funding ${r.fundingApr.toFixed(0)}% APR)`)
+  }
+
+  return { grade, label, reason: parts.join(' · ') }
 }
 
 // ── Grid Scanner ──────────────────────────────────────────────────────────

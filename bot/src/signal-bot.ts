@@ -96,6 +96,13 @@ export interface SignalBotConfig {
   // more than this %. Catches Binance↔HL divergence during fast moves where
   // the bot would otherwise enter at an adverse HL price. Default 0.30%.
   maxDivergencePct?: number
+  // Catch-up on start — when true, if the most-recently-closed bar already
+  // has a signal and the current live price is still on the favorable side
+  // of the signal close (buy: live <= signal close; sell: live >= signal
+  // close), fire the trade on the very first poll instead of waiting for
+  // the next bar to close. Default off — opt-in to avoid surprising users
+  // whose bots auto-restart on server reboot.
+  catchUpOnStart?: boolean
 }
 
 export interface SignalBotStatus {
@@ -251,6 +258,8 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const maxDivergencePct =
     typeof mdRaw === 'number' && mdRaw > 0 && mdRaw <= 10 ? mdRaw : undefined
 
+  const catchUpOnStart = b.catchUpOnStart === true
+
   const tpRaw = typeof b.tpPct === 'string' ? Number(b.tpPct) : b.tpPct
   const tpPct = typeof tpRaw === 'number' && tpRaw > 0 ? tpRaw : undefined
   const slRaw = typeof b.slPct === 'string' ? Number(b.slPct) : b.slPct
@@ -266,6 +275,7 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ...(mtfEnabled && mtfTimeframe ? { mtfEnabled, mtfTimeframe } : {}),
     ...(dailyLossLimitPct !== undefined ? { dailyLossLimitPct } : {}),
     ...(maxDivergencePct !== undefined ? { maxDivergencePct } : {}),
+    ...(catchUpOnStart ? { catchUpOnStart } : {}),
   }
 }
 
@@ -525,11 +535,66 @@ class SignalBot {
 
       if (!this.primed) {
         this.primed = true
-        this.lastClosedBarTime = closedBar.time
-        this.log.info(
-          `Watching — first signal will be evaluated on the next ${cfg.timeframe} close`,
-        )
-        return
+
+        // Catch-up on start: if the most-recently-closed bar already fired a
+        // signal AND the live price is still on the favorable side (buy:
+        // live <= signal close; sell: live >= signal close), don't wait for
+        // the next bar — fall through and let the main loop process this
+        // signal immediately. Ensemble mode is supported too: signals[]
+        // gets re-evaluated below; here we only need to decide whether to
+        // continue or return.
+        let catchUp = false
+        if (cfg.catchUpOnStart) {
+          try {
+            let s: Signal = null
+            if (cfg.ensembleMode && cfg.ensembleStrategyIds && cfg.ensembleStrategyIds.length >= 2) {
+              let buy = 0, sell = 0
+              for (const stratId of cfg.ensembleStrategyIds) {
+                const sigs = generateSignals(stratId, candles, defaultParams(stratId))
+                const sv = sigs[closedIdx]
+                if (sv === 'buy') buy++
+                else if (sv === 'sell') sell++
+              }
+              const threshold = cfg.ensembleThreshold ?? Math.ceil(cfg.ensembleStrategyIds.length / 2)
+              s = buy >= threshold ? 'buy' : sell >= threshold ? 'sell' : null
+            } else {
+              const signals = generateSignals(cfg.strategyId, candles, cfg.params)
+              s = signals[closedIdx]
+            }
+            const sigPx = closedBar.close
+            const livePx = candles[candles.length - 1].close
+            const favorable =
+              (s === 'buy' && livePx <= sigPx) ||
+              (s === 'sell' && livePx >= sigPx)
+            if (s && favorable) {
+              catchUp = true
+              this.log.info(
+                `Catch-up on start: ${s.toUpperCase()} signal on most-recent ${cfg.timeframe} bar` +
+                  ` @ ${sigPx.toFixed(4)} · live ${livePx.toFixed(4)} (favorable) — taking immediately`,
+              )
+            } else if (s && !favorable) {
+              this.log.info(
+                `Catch-up on start: skipping ${s.toUpperCase()} signal` +
+                  ` @ ${sigPx.toFixed(4)} — live ${livePx.toFixed(4)} no longer favorable`,
+              )
+            }
+          } catch (e) {
+            this.log.warn(`Catch-up check failed: ${(e as Error).message}`)
+          }
+        }
+
+        if (catchUp) {
+          // Force the "no new bar yet" guard below to pass by pretending the
+          // last evaluated bar was the one before this. Fall through to the
+          // main signal evaluation so MTF / slippage / sizing all apply.
+          this.lastClosedBarTime = closedBar.time - 1
+        } else {
+          this.lastClosedBarTime = closedBar.time
+          this.log.info(
+            `Watching — first signal will be evaluated on the next ${cfg.timeframe} close`,
+          )
+          return
+        }
       }
 
       if (closedBar.time === this.lastClosedBarTime) return // no new bar yet

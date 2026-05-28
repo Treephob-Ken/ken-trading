@@ -3,6 +3,35 @@ import type { Candle } from '@/types'
 // Binance public market-data endpoints (CORS-enabled, no API key required).
 const REST = 'https://data-api.binance.vision/api/v3'
 const WS = 'wss://data-stream.binance.vision/ws'
+// Binance Futures (perpetual) endpoint — for funding rate. Public, no key.
+const FUTURES = 'https://fapi.binance.com/fapi/v1'
+
+// Funding rate cache — Binance funds every 8h so a 5-min TTL is plenty.
+const FUNDING_CACHE = new Map<string, { apr: number; expiresAt: number }>()
+const FUNDING_TTL_MS = 5 * 60 * 1000
+
+// Fetches the latest funding rate for a Binance perpetual and annualises it.
+// Returns +12.5 for a perpetual paying +12.5% APR (longs pay shorts at this
+// rate). Returns NaN if the perp isn't on Binance (some HL coins aren't) or
+// the request fails — callers should handle NaN as "unknown".
+export async function fetchFundingRate(symbol: string): Promise<number> {
+  const now = Date.now()
+  const cached = FUNDING_CACHE.get(symbol)
+  if (cached && cached.expiresAt > now) return cached.apr
+  try {
+    const res = await fetch(`${FUTURES}/premiumIndex?symbol=${symbol}`)
+    if (!res.ok) return NaN
+    const d = (await res.json()) as { lastFundingRate?: string }
+    const rate = Number(d.lastFundingRate)
+    if (!Number.isFinite(rate)) return NaN
+    // Binance funds every 8h → 3× per day → ×365 = annualised. ×100 for %.
+    const apr = rate * 3 * 365 * 100
+    FUNDING_CACHE.set(symbol, { apr, expiresAt: now + FUNDING_TTL_MS })
+    return apr
+  } catch {
+    return NaN
+  }
+}
 
 export const MAX_BARS = 20000
 

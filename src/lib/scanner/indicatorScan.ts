@@ -6,10 +6,13 @@
 
 import type { Candle, Direction, StrategyId } from '@/types'
 import type { SymbolInfo } from '@/lib/binance'
-import { fetchKlines } from '@/lib/binance'
+import { fetchFundingRate, fetchKlines } from '@/lib/binance'
 import { defaultParams, generateSignals, STRATEGIES } from '@/lib/strategies'
 import { runBacktest } from '@/lib/backtest'
 import { checkLookahead } from '@/lib/scanner/lookaheadCheck'
+import { analyzeRegime, type RegimeLabel } from '@/lib/markov'
+import { TF_HIERARCHY } from '@/lib/multiTF'
+import { qualityScore, type QualityBreakdown } from '@/lib/scanner/qualityScore'
 
 export interface IndicatorScanOptions {
   timeframes: string[]            // e.g. ['1h', '4h']
@@ -40,6 +43,25 @@ export interface IndicatorScanRow {
   // The lookback window (in days) used for this row's backtest. Used by the
   // verdict to warn when the test was too short to be reliable.
   lookbackDays?: number
+
+  // ── Quality Score & enrichment fields ────────────────────────────────────
+  // 0-100 composite of calmar, sharpe, beats-BH, trade count, realistic guess,
+  // confluence, funding penalty. Look-ahead forces 0.
+  qualityScore?: number
+  qualityBreakdown?: QualityBreakdown
+  // Calmar ratio (annualised return ÷ max drawdown %). Pulled from runBacktest.
+  calmar?: number
+  // Current regime + conviction for (symbol, timeframe). Shared across all
+  // strategies on the same pair (regime doesn't depend on strategy).
+  regimeLabel?: RegimeLabel | null
+  regimeConviction?: number
+  // Higher-TF confluence — comparing this row's TF regime vs the next-tier TF.
+  // 'aligned' = same regime; 'conflicting' = opposite; 'neutral' = mixed; null = no HTF.
+  confluence?: 'aligned' | 'conflicting' | 'neutral' | null
+  higherTimeframe?: string | null
+  // Annualised funding APR for the perp on Binance, e.g. 12.5 = +12.5% APR.
+  // NaN if the symbol isn't on Binance futures or the fetch failed.
+  fundingApr?: number
 }
 
 export interface ScanProgress {
@@ -112,6 +134,60 @@ export async function runIndicatorScan(
     }
   })
 
+  // Enrichment pass — for each (sym, tf) compute regime, fetch funding, fetch
+  // HTF candles + regime. Done ONCE per pair (not per strategy) since these
+  // don't depend on the strategy. Parallelised through the same pool.
+  interface Enrichment {
+    regimeLabel: RegimeLabel | null
+    regimeConviction: number
+    confluence: 'aligned' | 'conflicting' | 'neutral' | null
+    higherTimeframe: string | null
+    fundingApr: number
+  }
+  const enrichKey = (sym: string, tf: string): string => `${sym}|${tf}`
+  const enrichMap = new Map<string, Enrichment>()
+  await pool(candleSets, concurrency, async ({ job, candles }) => {
+    if (signal?.aborted) return null
+    const key = enrichKey(job.sym.symbol, job.tf)
+    if (candles.length < 30) {
+      enrichMap.set(key, {
+        regimeLabel: null, regimeConviction: 0,
+        confluence: null, higherTimeframe: null, fundingApr: NaN,
+      })
+      return null
+    }
+    // Run the three sub-tasks in parallel — funding is a network fetch, HTF
+    // is a network fetch + regime calc, current regime is local CPU.
+    const htfName = TF_HIERARCHY[job.tf] ?? null
+    const [funding, htfCandles] = await Promise.all([
+      fetchFundingRate(job.sym.symbol).catch(() => NaN),
+      htfName
+        ? fetchKlines({ symbol: job.sym.symbol, interval: htfName, startTime })
+            .catch(() => [] as Candle[])
+        : Promise.resolve([] as Candle[]),
+    ])
+    const curr = analyzeRegime(candles)
+    let confluence: 'aligned' | 'conflicting' | 'neutral' | null = null
+    if (htfCandles.length >= 30) {
+      const high = analyzeRegime(htfCandles)
+      const c = curr.currentLabel
+      const h = high.currentLabel
+      if (c && h) {
+        if (c === h) confluence = 'aligned'
+        else if ((c === 'Bull' && h === 'Bear') || (c === 'Bear' && h === 'Bull')) confluence = 'conflicting'
+        else confluence = 'neutral'
+      }
+    }
+    enrichMap.set(key, {
+      regimeLabel: curr.currentLabel,
+      regimeConviction: Number.isFinite(curr.conviction) ? curr.conviction : 0,
+      confluence,
+      higherTimeframe: htfName,
+      fundingApr: funding,
+    })
+    return null
+  })
+
   const total = fetchJobs.length * strategies.length
   let done = 0
   const rows: IndicatorScanRow[] = []
@@ -128,6 +204,7 @@ export async function runIndicatorScan(
       onProgress?.({ done, total })
       continue
     }
+    const enrich = enrichMap.get(enrichKey(job.sym.symbol, job.tf))
     for (const id of strategies) {
       if (signal?.aborted) break
       try {
@@ -153,7 +230,7 @@ export async function runIndicatorScan(
             lookaheadCache.set(id, false)
           }
         }
-        rows.push({
+        const row: IndicatorScanRow = {
           symbol: job.sym.symbol,
           base: job.sym.base,
           timeframe: job.tf,
@@ -167,7 +244,17 @@ export async function runIndicatorScan(
           buyHoldReturnPct: m.buyHoldReturnPct,
           looksAhead: lookaheadCache.get(id) === true,
           lookbackDays,
-        })
+          calmar: m.calmarRatio,
+          regimeLabel: enrich?.regimeLabel ?? null,
+          regimeConviction: enrich?.regimeConviction ?? 0,
+          confluence: enrich?.confluence ?? null,
+          higherTimeframe: enrich?.higherTimeframe ?? null,
+          fundingApr: enrich?.fundingApr,
+        }
+        const q = qualityScore(row)
+        row.qualityScore = q.total
+        row.qualityBreakdown = q
+        rows.push(row)
       } catch {
         // one bad combo doesn't kill the scan
       }

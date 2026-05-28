@@ -24,7 +24,9 @@ interface Props {
 }
 
 type SortKey =
+  | 'qualityScore'
   | 'totalReturnPct'
+  | 'calmar'
   | 'numTrades'
   | 'winRate'
   | 'maxDrawdownPct'
@@ -111,7 +113,7 @@ export default function IndicatorScanTab({
     } catch {}
     return Object.fromEntries(ALL_STRATS.map((s) => [s, true])) as Record<StrategyId, boolean>
   })
-  const [sortKey, setSortKey] = useState<SortKey>('totalReturnPct')
+  const [sortKey, setSortKey] = useState<SortKey>('qualityScore')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   useEffect(() => { localStorage.setItem('scn_ind_minTrades', String(minTrades)) }, [minTrades])
@@ -184,7 +186,11 @@ export default function IndicatorScanTab({
         stratFilter[r.strategyId],
     )
     const dir = sortDir === 'desc' ? -1 : 1
-    filtered.sort((a, b) => (a[sortKey] - b[sortKey]) * dir)
+    filtered.sort((a, b) => {
+      const av = (a[sortKey] ?? -Infinity) as number
+      const bv = (b[sortKey] ?? -Infinity) as number
+      return (av - bv) * dir
+    })
     return filtered.map((r) => ({ row: r, verdict: gradeIndicatorRow(r) }))
   }, [rows, minTrades, tfFilter, stratFilter, sortKey, sortDir])
 
@@ -416,8 +422,16 @@ export default function IndicatorScanTab({
             <span className="font-mono text-lg font-bold">
               {bestPick.row.base} · {bestPick.row.timeframe} · {bestPick.row.strategyName}
             </span>
+            {typeof bestPick.row.qualityScore === 'number' && (
+              <span
+                className="font-mono text-base font-bold"
+                title="Composite Quality Score (0–100). Combines risk-adjusted return, beats buy-hold, sensible trade count, multi-TF agreement, and funding penalty."
+              >
+                Q: {Math.round(bestPick.row.qualityScore)}/100
+              </span>
+            )}
             <span
-              className={`font-mono text-base font-bold ${
+              className={`font-mono text-sm ${
                 bestPick.row.totalReturnPct >= 0 ? 'text-gain' : 'text-loss'
               }`}
             >
@@ -503,9 +517,28 @@ export default function IndicatorScanTab({
                 <tr>
                   <th className="px-3 py-2 text-left">#</th>
                   <th className="px-3 py-2 text-left">Pick</th>
+                  <th
+                    className="px-3 py-2 text-right cursor-pointer hover:text-text"
+                    onClick={() => headerClick('qualityScore')}
+                    title="Composite 0–100 score: risk-adjusted return + beats buy-hold + sensible trade count + multi-TF agreement + funding penalty. Higher is better."
+                  >
+                    Quality{sortArrow('qualityScore')}
+                  </th>
                   <th className="px-3 py-2 text-left">Symbol</th>
                   <th className="px-3 py-2 text-left">TF</th>
+                  <th
+                    className="px-3 py-2 text-left"
+                    title="Current market regime for this (symbol, timeframe). Bull = trending up, Sideways = chop, Bear = trending down. Conviction near +1 means strong bullish bias."
+                  >
+                    Regime
+                  </th>
                   <th className="px-3 py-2 text-left">Strategy</th>
+                  <th
+                    className="px-3 py-2 text-left"
+                    title="Does the next-higher timeframe agree with the current one? Aligned = good. Conflict = wait or skip."
+                  >
+                    HTF
+                  </th>
                   <th
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
                     onClick={() => headerClick('totalReturnPct')}
@@ -519,16 +552,23 @@ export default function IndicatorScanTab({
                     Real-money guess
                   </th>
                   <th
+                    className="px-3 py-2 text-right"
+                    title="Annualised funding rate on Binance perp. Red if > +50% (crowded longs paying shorts) — strategy will bleed funding even if backtest looks good."
+                  >
+                    Funding
+                  </th>
+                  <th
+                    className="px-3 py-2 text-right cursor-pointer hover:text-text"
+                    onClick={() => headerClick('calmar')}
+                    title="Calmar ratio = annualised return ÷ max drawdown. Higher = more return per unit of pain. >1 is good, >2 is strong."
+                  >
+                    Calmar{sortArrow('calmar')}
+                  </th>
+                  <th
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
                     onClick={() => headerClick('numTrades')}
                   >
                     Trades{sortArrow('numTrades')}
-                  </th>
-                  <th
-                    className="px-3 py-2 text-right cursor-pointer hover:text-text"
-                    onClick={() => headerClick('winRate')}
-                  >
-                    Win %{sortArrow('winRate')}
                   </th>
                   <th
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
@@ -558,8 +598,37 @@ export default function IndicatorScanTab({
                         {v.label}
                       </span>
                     </td>
+                    <td
+                      className={`px-3 py-2 text-right font-mono tabular-nums font-bold ${
+                        (r.qualityScore ?? 0) >= 75 ? 'text-gain'
+                          : (r.qualityScore ?? 0) >= 55 ? 'text-brand'
+                          : (r.qualityScore ?? 0) >= 35 ? 'text-text'
+                          : (r.qualityScore ?? 0) >= 15 ? 'text-warn'
+                          : 'text-loss'
+                      }`}
+                    >
+                      {typeof r.qualityScore === 'number' ? Math.round(r.qualityScore) : '—'}
+                    </td>
                     <td className="px-3 py-2 font-mono text-text">{r.base}</td>
                     <td className="px-3 py-2 font-mono text-text">{r.timeframe}</td>
+                    <td className="px-3 py-2">
+                      {r.regimeLabel ? (
+                        <span
+                          className={`font-mono text-[11px] ${
+                            r.regimeLabel === 'Bull' ? 'text-gain'
+                              : r.regimeLabel === 'Bear' ? 'text-loss'
+                              : 'text-dim'
+                          }`}
+                          title={`Markov regime label · conviction ${(r.regimeConviction ?? 0).toFixed(2)} (range −1…+1)`}
+                        >
+                          {r.regimeLabel} {typeof r.regimeConviction === 'number'
+                            ? `${r.regimeConviction >= 0 ? '+' : ''}${r.regimeConviction.toFixed(1)}`
+                            : ''}
+                        </span>
+                      ) : (
+                        <span className="text-dim">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-text">
                       {r.strategyName}
                       {r.looksAhead && (
@@ -569,6 +638,51 @@ export default function IndicatorScanTab({
                         >
                           ⚠ Looks fake
                         </span>
+                      )}
+                      {!r.looksAhead && r.totalReturnPct > r.buyHoldReturnPct && (
+                        <span
+                          className="ml-1.5 rounded border border-gain/40 bg-gain/10 px-1 py-0.5 text-[8px] font-bold uppercase text-gain"
+                          title={`Strategy +${r.totalReturnPct.toFixed(1)}% vs Buy & Hold +${r.buyHoldReturnPct.toFixed(1)}% — strategy is adding value.`}
+                        >
+                          ✓ Beats BH
+                        </span>
+                      )}
+                      {!r.looksAhead && r.totalReturnPct <= r.buyHoldReturnPct && r.totalReturnPct > 0 && (
+                        <span
+                          className="ml-1.5 rounded border border-warn/40 bg-warn/5 px-1 py-0.5 text-[8px] font-bold uppercase text-warn"
+                          title={`Strategy +${r.totalReturnPct.toFixed(1)}% vs Buy & Hold +${r.buyHoldReturnPct.toFixed(1)}% — you'd have made more by just holding.`}
+                        >
+                          ✗ Lost to BH
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {r.confluence === 'aligned' && (
+                        <span
+                          className="rounded border border-gain/40 bg-gain/10 px-1 py-0.5 text-[9px] font-bold uppercase text-gain"
+                          title={`Higher TF (${r.higherTimeframe ?? ''}) regime agrees`}
+                        >
+                          ✓ Aligned
+                        </span>
+                      )}
+                      {r.confluence === 'conflicting' && (
+                        <span
+                          className="rounded border border-loss/40 bg-loss/10 px-1 py-0.5 text-[9px] font-bold uppercase text-loss"
+                          title={`Higher TF (${r.higherTimeframe ?? ''}) regime conflicts`}
+                        >
+                          ✗ Conflict
+                        </span>
+                      )}
+                      {r.confluence === 'neutral' && (
+                        <span
+                          className="rounded border border-border bg-panel-2 px-1 py-0.5 text-[9px] font-bold uppercase text-dim"
+                          title={`Higher TF (${r.higherTimeframe ?? ''}) is mixed`}
+                        >
+                          ~ Mixed
+                        </span>
+                      )}
+                      {r.confluence == null && (
+                        <span className="text-dim text-[10px]">—</span>
                       )}
                     </td>
                     <td
@@ -591,11 +705,28 @@ export default function IndicatorScanTab({
                         ? '—'
                         : `${realisticEstimatePct(r.totalReturnPct) >= 0 ? '+' : ''}${realisticEstimatePct(r.totalReturnPct).toFixed(1)}%`}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono text-dim tabular-nums">
-                      {r.numTrades}
+                    <td
+                      className={`px-3 py-2 text-right font-mono tabular-nums ${
+                        typeof r.fundingApr !== 'number' || Number.isNaN(r.fundingApr) ? 'text-dim'
+                          : Math.abs(r.fundingApr) >= 50 ? 'text-loss'
+                          : Math.abs(r.fundingApr) >= 15 ? 'text-warn'
+                          : 'text-text'
+                      }`}
+                      title={typeof r.fundingApr === 'number' && Number.isFinite(r.fundingApr)
+                        ? `Annualised Binance perp funding rate. |APR| > 50% means perps are crowded and the bot will pay funding every 8h.`
+                        : 'Funding rate unavailable for this symbol.'}
+                    >
+                      {typeof r.fundingApr === 'number' && Number.isFinite(r.fundingApr)
+                        ? `${r.fundingApr >= 0 ? '+' : ''}${r.fundingApr.toFixed(0)}%`
+                        : '—'}
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-text tabular-nums">
-                      {r.winRate.toFixed(1)}%
+                      {typeof r.calmar === 'number' && Number.isFinite(r.calmar)
+                        ? r.calmar.toFixed(2)
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-dim tabular-nums">
+                      {r.numTrades}
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-loss tabular-nums">
                       -{r.maxDrawdownPct.toFixed(1)}%

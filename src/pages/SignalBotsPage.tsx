@@ -76,6 +76,10 @@ interface SignalBotConfig {
   dailyLossLimitPct?: number
   // Slippage gate — abort if HL mid differs from Binance signal close by more than this %.
   maxDivergencePct?: number
+  // Catch-up on start — if the most-recent closed bar already fired a signal
+  // AND the live price is still favorable, enter immediately on bot start
+  // instead of waiting for the next bar.
+  catchUpOnStart?: boolean
 }
 interface BotSummary {
   id: string; name: string; running: boolean; strategyId: string
@@ -1262,6 +1266,36 @@ export default function SignalBotsPage() {
                 {cfg.maxDivergencePct
                   ? `Slippage gate ON — trade aborted if Hyperliquid's price differs from the Binance signal close by more than ${cfg.maxDivergencePct}%. Protects against Binance↔HL price drift during fast moves.`
                   : 'Slippage gate OFF — trades always execute regardless of HL price drift from signal close.'}
+              </p>
+
+              {/* ── Catch-up on start — enter on a fresh pre-startup signal if price still favorable ── */}
+              <div className="my-1 h-px bg-border" />
+              <button
+                type="button"
+                disabled={running}
+                onClick={() => patch({ catchUpOnStart: !cfg.catchUpOnStart })}
+                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                  cfg.catchUpOnStart
+                    ? 'border-brand/50 bg-brand/10 text-brand'
+                    : 'border-border bg-panel-2 text-muted hover:text-text'
+                } disabled:opacity-50`}
+              >
+                <span className="flex items-center gap-2">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      cfg.catchUpOnStart ? 'bg-brand shadow-[0_0_6px_hsl(var(--brand))]' : 'bg-dim'
+                    }`}
+                  />
+                  {cfg.catchUpOnStart ? 'Catch-up on start: ON' : 'Catch-up on start: OFF'}
+                </span>
+                <span className="font-mono text-[10px] text-dim">
+                  {cfg.catchUpOnStart ? 'enter immediately' : 'wait for next bar'}
+                </span>
+              </button>
+              <p className="text-[10px] text-dim leading-snug">
+                {cfg.catchUpOnStart
+                  ? `If the most-recent closed bar already fired a signal AND the live price is still on the favorable side (buy: live ≤ signal close; sell: live ≥ signal close), the bot enters immediately on start instead of waiting for the next bar to close.`
+                  : `Bot ignores any signal that fired before you pressed Start — it waits for a fresh signal on the next bar close.`}
               </p>
 
               {/* ── MTF filter — block trades whose direction conflicts with HTF ── */}
