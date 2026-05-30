@@ -1495,7 +1495,7 @@ export default function SignalBotsPage() {
               <div className="my-1 h-px bg-border" />
               <div className="rounded-lg border border-border bg-panel-2 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-text">Suggested TP (MFE median)</span>
+                  <span className="text-xs font-semibold text-text">Suggested TP (MFE P75)</span>
                   <button
                     type="button"
                     onClick={() => toggleSuggestedTp(!cfg.useSuggestedTp)}
@@ -1511,8 +1511,9 @@ export default function SignalBotsPage() {
                 </div>
                 <p className="mb-2 text-[10px] text-dim leading-snug">
                   Looks back 500 bars, finds every past signal, and measures how far price ran
-                  before reversal. Sets TP at the <strong>median</strong> of that distribution —
-                  about half of past trades would have hit TP. Good for sideways; turn OFF in trends.
+                  before reversal. Sets TP at the <strong>P75</strong> of that distribution — far
+                  enough from fill to avoid HL "trigger condition met" rejections, but still
+                  within the strategy's typical reach. Good for sideways; turn OFF in trends.
                 </p>
 
                 {status?.tpSuggestion ? (

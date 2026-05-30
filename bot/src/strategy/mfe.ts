@@ -4,11 +4,11 @@
 // for each entry signal measures how far price ran in the trade's favor
 // before the next opposite signal (the "max favorable excursion").
 //
-// The TP suggestion is the median (P50) of that distribution: setting TP
-// there means roughly half of past trades would have hit the target, which
-// is a reasonable middle-ground between "lock profit quickly" and "let it
-// run". The full distribution (avg / median / P25 / P75) is returned so
-// the UI can show users the spread instead of a single magic number.
+// The TP suggestion is the P75 of that distribution — far enough from the
+// fill that the trigger won't be hit immediately (avoiding HL's "trigger
+// condition met" rejection), but still well within the historical reach of
+// the strategy. The full distribution (avg / median / P25 / P75) is returned
+// so the UI can show users the spread instead of a single magic number.
 
 import { fetchKlines } from './market-data.js'
 import { generateSignals, type StrategyId, type Candle, type Signal } from './strategies.js'
@@ -103,7 +103,7 @@ function summarize(xs: number[]): MfeStats | null {
   const median = pct(sorted, 0.5)
   const p25 = pct(sorted, 0.25)
   const p75 = pct(sorted, 0.75)
-  const suggestion = n >= MIN_SIGNALS ? round(median) : null
+  const suggestion = n >= MIN_SIGNALS ? round(p75) : null
   return {
     count: n,
     avg: round(avg),
