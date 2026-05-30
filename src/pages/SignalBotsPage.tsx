@@ -80,6 +80,8 @@ interface SignalBotConfig {
   // AND the live price is still favorable, enter immediately on bot start
   // instead of waiting for the next bar.
   catchUpOnStart?: boolean
+  // Suggested-TP mode — when true, bot uses MFE-median as TP instead of tpPct
+  useSuggestedTp?: boolean
 }
 interface BotSummary {
   id: string; name: string; running: boolean; strategyId: string
@@ -116,6 +118,20 @@ interface SignalBotStatus {
   // Auto-pause reason if the bot stopped itself after 3+ failed orders
   // (e.g. insufficient margin). Null when healthy.
   autoPausedReason?: string | null
+  // MFE-based TP suggestion (populated when useSuggestedTp is on or after
+  // a manual refresh). null = never computed for this bot.
+  tpSuggestion?: TpSuggestion | null
+}
+
+interface TpSuggestionStats {
+  count: number; avg: number; median: number; p25: number; p75: number
+  suggestion: number | null
+}
+interface TpSuggestion {
+  buy: TpSuggestionStats | null
+  sell: TpSuggestionStats | null
+  symbol: string; timeframe: string; strategyId: string
+  lookbackBars: number; computedAt: number
 }
 interface TradeRecord {
   time: number; side: 'buy' | 'sell'; asset: string; size: number; price: number | null
@@ -776,6 +792,40 @@ export default function SignalBotsPage() {
     } finally { setBusy(false) }
   }
 
+  // Toggle the MFE-based TP suggestion mode without stopping the bot.
+  const toggleSuggestedTp = async (enabled: boolean) => {
+    if (!selectedId) return
+    setBusy(true); setNotice(null)
+    try {
+      const res = await apiFetch(`/api/signal/bots/${selectedId}/use-suggested-tp`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      const data = (await res.json()) as { useSuggestedTp?: boolean; error?: string }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setCfg(prev => prev ? { ...prev, useSuggestedTp: enabled } : prev)
+      setNotice({ text: `Suggested TP ${enabled ? 'ON' : 'OFF'}`, ok: true })
+    } catch (e) {
+      setNotice({ text: `Toggle failed: ${(e as Error).message}`, ok: false })
+    } finally { setBusy(false) }
+  }
+
+  // Force-recompute the MFE-based TP suggestion immediately.
+  const refreshTpSuggestion = async () => {
+    if (!selectedId) return
+    setBusy(true); setNotice(null)
+    try {
+      const res = await apiFetch(`/api/signal/bots/${selectedId}/tp-suggestion/refresh`, { method: 'POST' })
+      const data = (await res.json()) as TpSuggestion | { error?: string }
+      if (!res.ok) throw new Error(('error' in data ? data.error : '') || `HTTP ${res.status}`)
+      setStatus(prev => prev ? { ...prev, tpSuggestion: data as TpSuggestion } : prev)
+      setNotice({ text: 'TP suggestion refreshed', ok: true })
+    } catch (e) {
+      setNotice({ text: `Refresh failed: ${(e as Error).message}`, ok: false })
+    } finally { setBusy(false) }
+  }
+
   const deleteBot = async () => {
     if (!selectedId) return
     if (!confirm('Delete this bot?')) return
@@ -1267,6 +1317,84 @@ export default function SignalBotsPage() {
                   ? `Slippage gate ON — trade aborted if Hyperliquid's price differs from the Binance signal close by more than ${cfg.maxDivergencePct}%. Protects against Binance↔HL price drift during fast moves.`
                   : 'Slippage gate OFF — trades always execute regardless of HL price drift from signal close.'}
               </p>
+
+              {/* ── Suggested TP (MFE median) — toggleable live ─────────────── */}
+              <div className="my-1 h-px bg-border" />
+              <div className="rounded-lg border border-border bg-panel-2 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-text">Suggested TP (MFE median)</span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSuggestedTp(!cfg.useSuggestedTp)}
+                    disabled={busy}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      cfg.useSuggestedTp
+                        ? 'bg-brand/20 text-brand border border-brand/40'
+                        : 'bg-panel border border-border text-dim hover:text-text'
+                    }`}
+                  >
+                    {cfg.useSuggestedTp ? '● ON' : '○ OFF'}
+                  </button>
+                </div>
+                <p className="mb-2 text-[10px] text-dim leading-snug">
+                  Looks back 500 bars, finds every past signal, and measures how far price ran
+                  before reversal. Sets TP at the <strong>median</strong> of that distribution —
+                  about half of past trades would have hit TP. Good for sideways; turn OFF in trends.
+                </p>
+
+                {status?.tpSuggestion ? (
+                  <div className="space-y-2 text-[10px]">
+                    {(['buy', 'sell'] as const).map((side) => {
+                      const s = status.tpSuggestion?.[side]
+                      if (!s) return null
+                      const using = cfg.useSuggestedTp && s.suggestion && s.suggestion > 0
+                      return (
+                        <div key={side} className="rounded-md bg-panel px-2 py-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className={`font-mono font-semibold uppercase ${side === 'buy' ? 'text-gain' : 'text-loss'}`}>{side}</span>
+                            <span className="text-dim">n={s.count}</span>
+                          </div>
+                          <div className="mt-1 grid grid-cols-4 gap-1 font-mono text-[10px]">
+                            <div><span className="text-dim">P25</span> {s.p25}%</div>
+                            <div><span className="text-dim">Median</span> {s.median}%</div>
+                            <div><span className="text-dim">P75</span> {s.p75}%</div>
+                            <div><span className="text-dim">Avg</span> {s.avg}%</div>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between">
+                            <span className="text-dim">Suggested TP</span>
+                            <span className={`font-mono font-semibold ${using ? 'text-brand' : 'text-text'}`}>
+                              {s.suggestion ? `${s.suggestion}%` : `— (need ≥10 signals)`}
+                              {using ? ' ← active' : ''}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {!status.tpSuggestion.buy && !status.tpSuggestion.sell && (
+                      <p className="text-warn">No signals found in lookback window.</p>
+                    )}
+                    <p className="text-[9px] text-dim">
+                      Computed {new Date(status.tpSuggestion.computedAt).toLocaleTimeString()}
+                      {' · '}{status.tpSuggestion.lookbackBars} bars
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-dim italic">
+                    No suggestion computed yet. {cfg.useSuggestedTp
+                      ? 'Will compute on next bot start.'
+                      : 'Click Refresh to preview the suggestion.'}
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={refreshTpSuggestion}
+                  disabled={busy}
+                  className="mt-2 w-full rounded-md border border-border bg-panel px-2.5 py-1.5 text-[11px] text-dim hover:text-text hover:border-brand/40 transition-colors disabled:opacity-40"
+                >
+                  Refresh suggestion
+                </button>
+              </div>
 
               {/* ── Catch-up on start — enter on a fresh pre-startup signal if price still favorable ── */}
               <div className="my-1 h-px bg-border" />

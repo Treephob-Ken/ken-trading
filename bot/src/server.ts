@@ -1179,6 +1179,31 @@ app.get('/api/signal/bots/:id/logs', requireAuth, (req: Request, res: Response) 
   res.json(getLogBuffer('signal-' + req.params.id))
 })
 
+// Force-recompute the MFE-based TP suggestion for a bot. UI calls this on
+// the "Refresh" button so the user doesn't have to wait for the next 30-min
+// auto refresh after toggling suggested-TP on.
+app.post('/api/signal/bots/:id/tp-suggestion/refresh', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const bot = getSignalBot(req.params.id, userId(req))
+    const result = await bot.refreshTpSuggestion()
+    res.json(result ?? { error: 'No suggestion available' })
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
+  }
+})
+
+// Toggle suggested-TP mode live without stopping the bot. Body: { enabled: boolean }
+app.put('/api/signal/bots/:id/use-suggested-tp', requireAuth, (req: Request, res: Response) => {
+  try {
+    const enabled = Boolean((req.body ?? {}).enabled)
+    const bot = getSignalBot(req.params.id, userId(req))
+    const newState = bot.setUseSuggestedTp(enabled)
+    res.json({ useSuggestedTp: newState })
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message })
+  }
+})
+
 // Returns the bot's trade history for chart marker rendering. Reads from HL's
 // fill history (so it survives bot restarts / deploys), filtered to this bot's
 // asset. Falls back to the in-memory list if creds aren't set.

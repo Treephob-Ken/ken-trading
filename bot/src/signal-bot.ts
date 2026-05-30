@@ -31,6 +31,7 @@ import {
   type StrategyId,
 } from './strategy/strategies.js'
 import { cancelOrdersByOid, getAccountState, getAssetInfo, placeOrder, snapshotAssetOrderOids } from './trade.js'
+import { computeMfeStats, type MfeResult } from './strategy/mfe.js'
 import { MULTI_USER } from './auth.js'
 import type { EnvConfig } from './config.js'
 
@@ -103,6 +104,12 @@ export interface SignalBotConfig {
   // the next bar to close. Default off — opt-in to avoid surprising users
   // whose bots auto-restart on server reboot.
   catchUpOnStart?: boolean
+  // Suggested-TP mode — when true, the bot recomputes the strategy's
+  // historical max favorable excursion every ~30 minutes and uses the
+  // median of that distribution as the effective TP %, overriding `tpPct`.
+  // Toggleable live via API. Falls back to manual `tpPct` if there aren't
+  // enough historical signals (< 10) to suggest reliably.
+  useSuggestedTp?: boolean
 }
 
 export interface SignalBotStatus {
@@ -136,6 +143,10 @@ export interface SignalBotStatus {
   blockedByEnsemble: number    // ensemble had votes but didn't reach threshold
   blockedBySlippage: number    // HL price drifted too far from Binance signal price
   lastTradeAt: number          // 0 if never traded this session
+  // Last computed MFE-based TP suggestion. Null until the bot has been
+  // started with useSuggestedTp at least once. UI uses this to show the
+  // distribution + the chosen TP %.
+  tpSuggestion: MfeResult | null
 }
 
 export interface SignalBotSummary {
@@ -259,6 +270,7 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     typeof mdRaw === 'number' && mdRaw > 0 && mdRaw <= 10 ? mdRaw : undefined
 
   const catchUpOnStart = b.catchUpOnStart === true
+  const useSuggestedTp = b.useSuggestedTp === true
 
   const tpRaw = typeof b.tpPct === 'string' ? Number(b.tpPct) : b.tpPct
   const tpPct = typeof tpRaw === 'number' && tpRaw > 0 ? tpRaw : undefined
@@ -276,6 +288,7 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ...(dailyLossLimitPct !== undefined ? { dailyLossLimitPct } : {}),
     ...(maxDivergencePct !== undefined ? { maxDivergencePct } : {}),
     ...(catchUpOnStart ? { catchUpOnStart } : {}),
+    ...(useSuggestedTp ? { useSuggestedTp } : {}),
   }
 }
 
@@ -337,6 +350,13 @@ class SignalBot {
   private blockedByDailyPause = 0
   private blockedByEnsemble = 0
   private blockedBySlippage = 0
+
+  // Suggested-TP cache — refreshed by a separate interval timer when
+  // `config.useSuggestedTp` is true. Stays around even when toggled off so
+  // the UI can keep showing the last computed numbers.
+  private tpSuggestion: MfeResult | null = null
+  private tpSuggestionTimer: NodeJS.Timeout | null = null
+  private tpSuggestionInFlight = false
 
   constructor(
     id: string,
@@ -403,7 +423,76 @@ class SignalBot {
       blockedByEnsemble: this.blockedByEnsemble,
       blockedBySlippage: this.blockedBySlippage,
       lastTradeAt: this.lastTradeAt,
+      tpSuggestion: this.tpSuggestion,
     }
+  }
+
+  // Compute MFE stats and cache them. Idempotent in-flight guard so a
+  // recompute cycle never overlaps another. Errors are swallowed and logged —
+  // we never want a Binance fetch failure to crash the bot.
+  async refreshTpSuggestion(): Promise<MfeResult | null> {
+    if (this.tpSuggestionInFlight) return this.tpSuggestion
+    this.tpSuggestionInFlight = true
+    try {
+      const cfg = this.config
+      const result = await computeMfeStats(cfg.symbol, cfg.timeframe, cfg.strategyId, cfg.params)
+      this.tpSuggestion = result
+      const buyN = result.buy?.count ?? 0
+      const sellN = result.sell?.count ?? 0
+      const buyS = result.buy?.suggestion
+      const sellS = result.sell?.suggestion
+      this.log.info(
+        `TP suggestion refreshed: buy=${buyS ?? '—'}% (n=${buyN}) sell=${sellS ?? '—'}% (n=${sellN})`,
+      )
+      return result
+    } catch (e) {
+      this.log.warn(`TP suggestion refresh failed: ${(e as Error).message}`)
+      return this.tpSuggestion
+    } finally {
+      this.tpSuggestionInFlight = false
+    }
+  }
+
+  // Toggle the suggested-TP mode while the bot is running. Returns the new
+  // state. Triggers an immediate recompute on enable so the cache is fresh
+  // by the time the next signal fires.
+  setUseSuggestedTp(enabled: boolean): boolean {
+    this.config = { ...this.config, useSuggestedTp: enabled }
+    this.persist()
+    if (enabled) {
+      void this.refreshTpSuggestion()
+      this.ensureTpSuggestionTimer()
+    } else {
+      this.clearTpSuggestionTimer()
+    }
+    this.log.info(`useSuggestedTp = ${enabled}`)
+    return enabled
+  }
+
+  private ensureTpSuggestionTimer(): void {
+    if (this.tpSuggestionTimer) return
+    // Recompute every 30 minutes — frequent enough to track regime shifts,
+    // rare enough to keep the Binance/HL fetch budget tiny.
+    this.tpSuggestionTimer = setInterval(() => { void this.refreshTpSuggestion() }, 30 * 60 * 1000)
+  }
+
+  private clearTpSuggestionTimer(): void {
+    if (this.tpSuggestionTimer) {
+      clearInterval(this.tpSuggestionTimer)
+      this.tpSuggestionTimer = null
+    }
+  }
+
+  // Pick the TP % to send with the next order. If `useSuggestedTp` is on AND
+  // a fresh suggestion exists for this side, use it; otherwise fall back to
+  // the user's manual `tpPct`. Falling back silently is intentional — early
+  // in a bot's life there won't be 10+ historical signals to suggest from.
+  private resolveTpPct(side: 'buy' | 'sell'): number | undefined {
+    const cfg = this.config
+    if (!cfg.useSuggestedTp) return cfg.tpPct
+    const stats = side === 'buy' ? this.tpSuggestion?.buy : this.tpSuggestion?.sell
+    if (stats?.suggestion && stats.suggestion > 0) return stats.suggestion
+    return cfg.tpPct
   }
 
   getTrades(): TradeRecord[] {
@@ -481,11 +570,19 @@ class SignalBot {
     }
     void this.tick()
     this.timer = setInterval(() => void this.tick(), POLL_MS)
+    // Kick off MFE recompute if suggested-TP is enabled. First compute is
+    // immediate so the cache is ready before any signal fires; afterwards
+    // the recurring timer keeps it fresh.
+    if (cfg.useSuggestedTp) {
+      void this.refreshTpSuggestion()
+      this.ensureTpSuggestionTimer()
+    }
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    this.clearTpSuggestionTimer()
     if (this.running) this.log.warn('Stopped')
     this.running = false
     this.startedAt = null
@@ -824,13 +921,19 @@ class SignalBot {
 
         // Open the new position with SL (and optional TP) bracket.
         this.lastTradeAt = Date.now()
+        // TP overrides per-side: suggested mode picks median MFE when fresh,
+        // otherwise falls back to cfg.tpPct. SL is unaffected.
+        const effectiveTpPct = this.resolveTpPct(openSide)
+        if (cfg.useSuggestedTp && effectiveTpPct !== cfg.tpPct) {
+          this.log.info(`Using suggested TP ${effectiveTpPct}% (manual was ${cfg.tpPct ?? '—'}%)`)
+        }
         const result = await placeOrder({
           asset: cfg.asset,
           side: openSide,
           size: tradeSize,
           orderType: 'market',
           maxSlippagePct: cfg.slippagePct,
-          tpPct: cfg.tpPct,
+          tpPct: effectiveTpPct,
           slPct: cfg.slPct,
         }, this.creds)
         if (result.filled) {
