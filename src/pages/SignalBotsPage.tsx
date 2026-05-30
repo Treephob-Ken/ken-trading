@@ -674,6 +674,11 @@ export default function SignalBotsPage() {
     netPnl: number; roundTrips: number; winRate: number
   } | null>(null)
   const [maxLeverage, setMaxLeverage] = useState<number | null>(null)
+  // Live SL/TP for the bot's asset (when a position is open on HL).
+  // Polled together with status. null = not yet fetched; { slPx: null, tpPx: null } = no brackets.
+  const [brackets, setBrackets] = useState<{ slPx: number | null; tpPx: number | null } | null>(null)
+  // Bracket edit form state — `null` = view mode, object = editing
+  const [bracketEdit, setBracketEdit] = useState<{ slPrice: string; tpPrice: string } | null>(null)
 
   // Position-source map (keyed by asset, e.g. ETH) — used to detect stranded
   // positions (stopped bot + open exchange position on same asset).
@@ -811,6 +816,64 @@ export default function SignalBotsPage() {
     } finally { setBusy(false) }
   }
 
+  // Cancel the live SL/TP brackets on the bot's open position.
+  const cancelBrackets = async () => {
+    const asset = (cfg?.asset || '').trim().toUpperCase()
+    if (!asset) return
+    if (!confirm(`Cancel SL and TP orders for ${asset}?\n\nThe position will be left NAKED — no automatic stop loss.`)) return
+    setBusy(true); setNotice(null)
+    try {
+      const res = await apiFetch(`/api/positions/${encodeURIComponent(asset)}/brackets`, { method: 'DELETE' })
+      const data = (await res.json()) as { cancelled?: number; error?: string }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setBrackets({ slPx: null, tpPx: null })
+      setNotice({ text: `Cancelled ${data.cancelled ?? 0} bracket order(s)`, ok: true })
+    } catch (e) {
+      setNotice({ text: `Cancel failed: ${(e as Error).message}`, ok: false })
+    } finally { setBusy(false) }
+  }
+
+  // Replace the live SL/TP brackets with user-entered prices.
+  const saveBrackets = async () => {
+    const asset = (cfg?.asset || '').trim().toUpperCase()
+    if (!asset || !bracketEdit) return
+    const slPrice = bracketEdit.slPrice === '' ? null : Number(bracketEdit.slPrice)
+    const tpPrice = bracketEdit.tpPrice === '' ? null : Number(bracketEdit.tpPrice)
+    if (slPrice === null && tpPrice === null) {
+      setNotice({ text: 'Enter at least one of SL or TP price', ok: false }); return
+    }
+    if (slPrice !== null && (!Number.isFinite(slPrice) || slPrice <= 0)) {
+      setNotice({ text: 'SL price must be a positive number', ok: false }); return
+    }
+    if (tpPrice !== null && (!Number.isFinite(tpPrice) || tpPrice <= 0)) {
+      setNotice({ text: 'TP price must be a positive number', ok: false }); return
+    }
+    setBusy(true); setNotice(null)
+    try {
+      const body: Record<string, number> = {}
+      if (slPrice !== null) body.slPrice = slPrice
+      if (tpPrice !== null) body.tpPrice = tpPrice
+      const res = await apiFetch(`/api/positions/${encodeURIComponent(asset)}/brackets`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = (await res.json()) as {
+        slPlaced?: boolean; tpPlaced?: boolean; cancelled?: number; error?: string
+      }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const tags: string[] = []
+      if (slPrice !== null) tags.push(data.slPlaced ? 'SL ✓' : 'SL ✗')
+      if (tpPrice !== null) tags.push(data.tpPlaced ? 'TP ✓' : 'TP ✗')
+      const allOk = (slPrice === null || data.slPlaced) && (tpPrice === null || data.tpPlaced)
+      setNotice({ text: `Updated brackets (${tags.join(', ')})`, ok: !!allOk })
+      setBrackets({ slPx: slPrice ?? brackets?.slPx ?? null, tpPx: tpPrice ?? brackets?.tpPx ?? null })
+      setBracketEdit(null)
+    } catch (e) {
+      setNotice({ text: `Update failed: ${(e as Error).message}`, ok: false })
+    } finally { setBusy(false) }
+  }
+
   // Force-recompute the MFE-based TP suggestion immediately.
   const refreshTpSuggestion = async () => {
     if (!selectedId) return
@@ -860,6 +923,17 @@ export default function SignalBotsPage() {
         // while this poll was in flight (response is now stale).
         const staleByRace = saveTokenRef.current !== tokenAtStart
         if ((!dirtyRef.current && !staleByRace) || st.running) setCfg(st.config)
+        // Fetch live brackets for this bot's asset — fire-and-forget so a
+        // slow HL response doesn't block the status update.
+        const asset = (st.config?.asset || '').trim().toUpperCase()
+        if (asset) {
+          apiFetch(`/api/positions/${encodeURIComponent(asset)}/brackets`)
+            .then((r) => r.ok ? r.json() : { slPx: null, tpPx: null })
+            .then((d: { slPx: number | null; tpPx: number | null }) => setBrackets(d))
+            .catch(() => setBrackets({ slPx: null, tpPx: null }))
+        } else {
+          setBrackets(null)
+        }
       }
       if (logRes.ok) setLogs(await logRes.json())
     } catch { /* silently skip — server may be restarting */ }
@@ -1317,6 +1391,105 @@ export default function SignalBotsPage() {
                   ? `Slippage gate ON — trade aborted if Hyperliquid's price differs from the Binance signal close by more than ${cfg.maxDivergencePct}%. Protects against Binance↔HL price drift during fast moves.`
                   : 'Slippage gate OFF — trades always execute regardless of HL price drift from signal close.'}
               </p>
+
+              {/* ── Live brackets on HL — view + edit + cancel ─────────────── */}
+              <div className="my-1 h-px bg-border" />
+              <div className="rounded-lg border border-border bg-panel-2 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-text">
+                    Live brackets {cfg.asset ? `(${cfg.asset})` : ''}
+                  </span>
+                  {brackets && (brackets.slPx || brackets.tpPx) && !bracketEdit && (
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setBracketEdit({
+                          slPrice: brackets.slPx?.toString() ?? '',
+                          tpPrice: brackets.tpPx?.toString() ?? '',
+                        })}
+                        disabled={busy}
+                        className="rounded-md border border-border bg-panel px-2 py-1 text-[10px] text-dim hover:text-text hover:border-brand/40 transition-colors disabled:opacity-40"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelBrackets}
+                        disabled={busy}
+                        className="rounded-md border border-loss/40 bg-loss/10 px-2 py-1 text-[10px] font-semibold text-loss hover:bg-loss/20 transition-colors disabled:opacity-40"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {!brackets ? (
+                  <p className="text-[10px] text-dim italic">Loading…</p>
+                ) : bracketEdit ? (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-dim leading-snug">
+                      Enter new <strong>trigger prices</strong>. Leave blank to skip placing
+                      that leg. Existing brackets will be cancelled first. Requires an open
+                      position on the exchange.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="mb-0.5 block text-[10px] text-loss font-semibold">New SL price ($)</label>
+                        <input type="number" step="any" min="0" placeholder="blank to skip"
+                          value={bracketEdit.slPrice}
+                          onChange={(e) => setBracketEdit({ ...bracketEdit, slPrice: e.target.value })}
+                          className={inputCls} />
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[10px] text-gain font-semibold">New TP price ($)</label>
+                        <input type="number" step="any" min="0" placeholder="blank to skip"
+                          value={bracketEdit.tpPrice}
+                          onChange={(e) => setBracketEdit({ ...bracketEdit, tpPrice: e.target.value })}
+                          className={inputCls} />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={saveBrackets}
+                        disabled={busy}
+                        className="flex-1 rounded-md bg-brand px-2.5 py-1.5 text-[11px] font-semibold text-black hover:opacity-90 disabled:opacity-40"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBracketEdit(null)}
+                        disabled={busy}
+                        className="flex-1 rounded-md border border-border bg-panel px-2.5 py-1.5 text-[11px] text-dim hover:text-text disabled:opacity-40"
+                      >
+                        Discard
+                      </button>
+                    </div>
+                  </div>
+                ) : brackets.slPx === null && brackets.tpPx === null ? (
+                  <p className="text-[10px] text-dim italic">
+                    No active SL/TP on Hyperliquid for {cfg.asset || 'this asset'}.
+                    {' '}Will appear here after the bot fires the next entry.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 text-[10px]">
+                    <div className="flex justify-between rounded-md bg-panel px-2 py-1.5">
+                      <span className="font-semibold text-loss">SL</span>
+                      <span className="font-mono text-text">
+                        {brackets.slPx ? `$${brackets.slPx.toFixed(6).replace(/\.?0+$/, '')}` : '— (not set)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between rounded-md bg-panel px-2 py-1.5">
+                      <span className="font-semibold text-gain">TP</span>
+                      <span className="font-mono text-text">
+                        {brackets.tpPx ? `$${brackets.tpPx.toFixed(6).replace(/\.?0+$/, '')}` : '— (not set)'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* ── Suggested TP (MFE median) — toggleable live ─────────────── */}
               <div className="my-1 h-px bg-border" />

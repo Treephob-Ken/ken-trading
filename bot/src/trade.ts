@@ -676,6 +676,98 @@ export interface PositionBrackets {
   tpPx: number | null  // take-profit trigger price
 }
 
+// Cancel only the reduce-only TP/SL trigger orders for an asset. Leaves
+// regular limit orders alone — used by the UI "Cancel brackets" button so
+// a user can manage SL/TP without touching unrelated orders.
+export async function cancelPositionBrackets(
+  asset: string,
+  creds?: EnvConfig | null,
+): Promise<number> {
+  const { info, exchange, user } = getClients(creds)
+  const normalized = normalizeAssetName(asset)
+  const meta = await getAssetMeta(info, normalized)
+  // frontendOpenOrders exposes isTrigger / reduceOnly fields that the basic
+  // openOrders endpoint silently strips.
+  const open = await info.frontendOpenOrders(meta.dex ? { user, dex: meta.dex } : { user })
+  const mine = (open as Array<{
+    coin: string; oid: number
+    isTrigger?: boolean; reduceOnly?: boolean; isPositionTpsl?: boolean
+  }>).filter((o) => o.coin === normalized && (o.isTrigger || o.isPositionTpsl) && o.reduceOnly)
+  if (mine.length === 0) return 0
+  await exchange.cancel({ cancels: mine.map((o) => ({ a: meta.assetId, o: o.oid })) })
+  log.info(`Cancelled ${mine.length} bracket order(s) for ${normalized}`)
+  return mine.length
+}
+
+// Replace the live SL/TP brackets on an existing position with new trigger
+// prices. Cancels any existing brackets first, then places fresh ones sized
+// to the current position. Pass `null` to skip a leg (e.g. SL only).
+export async function replacePositionBrackets(
+  asset: string,
+  slPrice: number | null,
+  tpPrice: number | null,
+  creds?: EnvConfig | null,
+): Promise<{ slPlaced: boolean; tpPlaced: boolean; cancelled: number; positionSize: number }> {
+  const { info, exchange, user } = getClients(creds)
+  const normalized = normalizeAssetName(asset)
+  const meta = await getAssetMeta(info, normalized)
+
+  // Read the live position so we know side + size for the reduce-only legs.
+  const cs = meta.dex
+    ? await info.clearinghouseState({ user, dex: meta.dex })
+    : await info.clearinghouseState({ user })
+  type AssetPos = { position: { coin: string; szi: string } }
+  const positions = (cs.assetPositions ?? []) as AssetPos[]
+  const found = positions.find((p) => p.position.coin === normalized)
+  const szi = Number(found?.position.szi ?? 0)
+  if (!szi || !Number.isFinite(szi) || szi === 0) {
+    throw new Error(`No open ${normalized} position to attach brackets to`)
+  }
+  const side: 'buy' | 'sell' = szi > 0 ? 'buy' : 'sell'
+  const closeSide: 'buy' | 'sell' = side === 'buy' ? 'sell' : 'buy'
+  const closeQty = roundSize(Math.abs(szi), meta)
+  if (Number(closeQty) <= 0) throw new Error(`Position size ${szi} rounds to 0 for ${normalized}`)
+
+  // Drop the old brackets so we don't end up with overlapping triggers.
+  const cancelled = await cancelPositionBrackets(normalized, creds)
+
+  const limitMul = closeSide === 'sell' ? 0.95 : 1.05
+  let slPlaced = false
+  let tpPlaced = false
+
+  if (tpPrice && tpPrice > 0) {
+    try {
+      const triggerPx = roundPrice(tpPrice, meta)
+      const limitPx = roundPrice(tpPrice * limitMul, meta)
+      await exchange.order({
+        orders: [{ a: meta.assetId, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'tp' } } }],
+        grouping: 'positionTpsl',
+      })
+      tpPlaced = true
+      log.ok(`TP placed @ ${tpPrice.toFixed(4)} for ${normalized}`)
+    } catch (e) {
+      log.warn(`TP placement failed for ${normalized}: ${(e as Error).message}`)
+    }
+  }
+
+  if (slPrice && slPrice > 0) {
+    try {
+      const triggerPx = roundPrice(slPrice, meta)
+      const limitPx = roundPrice(slPrice * limitMul, meta)
+      await exchange.order({
+        orders: [{ a: meta.assetId, b: closeSide === 'buy', p: limitPx, s: closeQty, r: true, t: { trigger: { triggerPx, isMarket: true, tpsl: 'sl' } } }],
+        grouping: 'positionTpsl',
+      })
+      slPlaced = true
+      log.ok(`SL placed @ ${slPrice.toFixed(4)} for ${normalized}`)
+    } catch (e) {
+      log.warn(`SL placement failed for ${normalized}: ${(e as Error).message}`)
+    }
+  }
+
+  return { slPlaced, tpPlaced, cancelled, positionSize: Math.abs(szi) }
+}
+
 /**
  * Walks the user's open orders looking for reduce-only trigger orders
  * (TP / SL) for `asset` and returns their trigger prices.

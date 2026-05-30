@@ -19,6 +19,7 @@ import { createClients } from './hyperliquid.js'
 import { clearLogBuffer, createLogger, getLogBuffer, log, onLog } from './logger.js'
 import {
   cancelAssetOrders,
+  cancelPositionBrackets,
   closePosition,
   executeMarketTrade,
   evictClientCache,
@@ -28,6 +29,7 @@ import {
   listAssets,
   parseTradeRequest,
   placeOrder,
+  replacePositionBrackets,
   setAssetLeverage,
 } from './trade.js'
 import {
@@ -836,6 +838,43 @@ app.get('/api/positions/:asset/brackets', requireAuth, async (req: Request, res:
   if (!asset) { res.status(400).json({ error: 'asset is required' }); return }
   try {
     res.json(await getPositionBrackets(asset, side, userCreds(req)))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Cancel only the reduce-only TP/SL trigger orders for an asset. Used by
+// the signal-bot UI's "Cancel brackets" button.
+app.delete('/api/positions/:asset/brackets', requireAuth, async (req: Request, res: Response) => {
+  const asset = String(req.params.asset || '').trim().toUpperCase()
+  if (!asset) { res.status(400).json({ error: 'asset is required' }); return }
+  try {
+    const cancelled = await cancelPositionBrackets(asset, userCreds(req))
+    res.json({ cancelled })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Replace SL/TP on an open position. Body: { slPrice?, tpPrice? } — pass
+// null/omit a field to skip placing that leg. Cancels existing brackets
+// first so we never end up with overlapping triggers.
+app.put('/api/positions/:asset/brackets', requireAuth, async (req: Request, res: Response) => {
+  const asset = String(req.params.asset || '').trim().toUpperCase()
+  if (!asset) { res.status(400).json({ error: 'asset is required' }); return }
+  const b = (req.body ?? {}) as Record<string, unknown>
+  const num = (k: string): number | null => {
+    const v = b[k]; const n = typeof v === 'string' ? Number(v) : v
+    return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null
+  }
+  const slPrice = num('slPrice')
+  const tpPrice = num('tpPrice')
+  if (slPrice === null && tpPrice === null) {
+    res.status(400).json({ error: 'Provide at least one of slPrice or tpPrice (positive number)' }); return
+  }
+  try {
+    const result = await replacePositionBrackets(asset, slPrice, tpPrice, userCreds(req))
+    res.json(result)
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }
