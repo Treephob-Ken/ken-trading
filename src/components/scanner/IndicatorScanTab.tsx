@@ -16,6 +16,7 @@ import {
   realisticEstimatePct,
   timeAgo,
 } from '@/lib/scanner/verdict'
+import MarketPulse from '@/components/scanner/MarketPulse'
 
 interface Props {
   universe: SymbolInfo[]
@@ -404,6 +405,9 @@ export default function IndicatorScanTab({
           {error}
         </div>
       )}
+
+      {/* ── Market Pulse — current regime + recommended strategy type ───── */}
+      <MarketPulse rows={rows} onPick={goToBacktest} />
 
       {/* ── Best pick hero ──────────────────────────────────────────────── */}
       {bestPick && (
