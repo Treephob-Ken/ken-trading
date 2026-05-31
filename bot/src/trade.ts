@@ -325,19 +325,33 @@ export async function placeOrder(
     result = { ...base, ok: true, filled: false, resting: false, orderId: null, filledSize: 0, avgPx: null, tpPlaced: false, slPlaced: false, message: `Not filled: ${desc}` }
   }
 
-  if (result.filled && result.filledSize > 0) {
-    const avgPx = result.avgPx ?? meta.midPx
+  // Place brackets when EITHER:
+  //   - the entry filled (result.filled = true), OR
+  //   - the entry is resting as a limit (result.resting = true)
+  // For a resting limit we use the LIMIT PRICE as the basis for SL/TP, since
+  // we don't have a fill price yet. HL's grouping='positionTpsl' attaches the
+  // triggers to the position so they activate once the limit fills. Without
+  // this branch, a limit order silently opens with no protection — exactly
+  // the bug the user hit on xyz:CRCL.
+  const shouldPlaceBrackets = (result.filled && result.filledSize > 0) || result.resting
+  if (shouldPlaceBrackets) {
+    const referencePx = result.filled
+      ? (result.avgPx ?? meta.midPx)
+      : (orderType === 'limit' && limitPrice && limitPrice > 0 ? limitPrice : meta.midPx)
     const effectiveTp = tpPct
-      ? (side === 'buy' ? avgPx * (1 + tpPct / 100) : avgPx * (1 - tpPct / 100))
+      ? (side === 'buy' ? referencePx * (1 + tpPct / 100) : referencePx * (1 - tpPct / 100))
       : tpPrice
     const effectiveSl = slPct
-      ? (side === 'buy' ? avgPx * (1 - slPct / 100) : avgPx * (1 + slPct / 100))
+      ? (side === 'buy' ? referencePx * (1 - slPct / 100) : referencePx * (1 + slPct / 100))
       : slPrice
 
     if (effectiveTp || effectiveSl) {
       const closeSide: 'buy' | 'sell' = side === 'buy' ? 'sell' : 'buy'
-      const closeQty = roundSize(result.filledSize, meta)
+      // For a resting limit we don't know fill size yet — use the requested size.
+      const bracketSize = result.filledSize > 0 ? result.filledSize : size
+      const closeQty = roundSize(bracketSize, meta)
       const limitMul = closeSide === 'sell' ? 0.95 : 1.05
+      const refLabel = result.filled ? 'fill' : 'limit'
 
       // grouping='positionTpsl' tells Hyperliquid these are TP/SL brackets
       // attached to the position (rather than standalone trigger orders).
@@ -353,7 +367,7 @@ export async function placeOrder(
             grouping: 'positionTpsl',
           })
           result.tpPlaced = true
-          log.ok(`TP placed @ ${effectiveTp.toFixed(2)}${tpPct ? ` (+${tpPct}% from fill)` : ''}`)
+          log.ok(`TP placed @ ${effectiveTp.toFixed(2)}${tpPct ? ` (+${tpPct}% from ${refLabel})` : ''}`)
         } catch (e) {
           // Surface the full HL rejection — the catch silently hides errors
           // that look like "Order has invalid price" / "trigger condition met".
@@ -371,7 +385,7 @@ export async function placeOrder(
             grouping: 'positionTpsl',
           })
           result.slPlaced = true
-          log.ok(`SL placed @ ${effectiveSl.toFixed(2)}${slPct ? ` (-${slPct}% from fill)` : ''}`)
+          log.ok(`SL placed @ ${effectiveSl.toFixed(2)}${slPct ? ` (-${slPct}% from ${refLabel})` : ''}`)
         } catch (e) {
           const msg = (e as Error).message
           log.warn(`SL placement failed (asset=${asset}, side=${closeSide}, triggerPx=${roundPrice(effectiveSl, meta)}, qty=${closeQty}): ${msg}`)
