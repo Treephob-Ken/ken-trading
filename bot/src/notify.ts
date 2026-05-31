@@ -64,12 +64,29 @@ export async function notifyPositionClose(asset: string, pnlUsd: number): Promis
   await postToTelegram(msg)
 }
 
+// Public: send the "position opened" notification. Fires on an entry/add fill
+// (closedPnl === 0). `dir` is Hyperliquid's human label ("Open Long" / "Open
+// Short"); `sz`/`px` are the fill size and price as strings from the event.
+export async function notifyPositionOpen(asset: string, dir: string, sz: string, px: string): Promise<void> {
+  if (!ENABLED) return
+  const isLong = /long/i.test(dir) || /^B$/i.test(dir)
+  const emoji = isLong ? '🟢' : '🔴'
+  const dirText = dir || (isLong ? 'Long' : 'Short')
+  const msg = `${emoji} เปิดออเดอร์! ${dirText} · ${asset} · ${sz} @ ${px}`
+  await postToTelegram(msg)
+}
+
 // Hyperliquid `userFills` event shape we care about.
 interface UserFillLike {
   coin: string
   closedPnl: string
   px: string
   sz: string
+  // Human-readable direction, e.g. "Open Long" / "Close Short". Used to tell
+  // an opening fill from a closing one and to label the open notification.
+  dir?: string
+  // 'B' = buy/long side, 'A' = sell/short side. Fallback when `dir` is absent.
+  side?: string
 }
 
 // Track which user addresses already have a fills subscription so a second
@@ -91,10 +108,16 @@ export async function startFillNotifier(creds: EnvConfig | null): Promise<void> 
       if (event.isSnapshot) return
       for (const fill of event.fills as UserFillLike[]) {
         const pnl = Number(fill.closedPnl)
-        if (!Number.isFinite(pnl) || pnl === 0) continue
+        if (!Number.isFinite(pnl)) continue
         // Strip HIP-3 dex prefix if present ("xyz:GOLD" → "GOLD") for cleaner display.
         const asset = fill.coin.includes(':') ? fill.coin.split(':')[1] : fill.coin
-        void notifyPositionClose(asset, pnl)
+        // closedPnl === 0 → an opening/adding fill; non-zero → a close/reduce.
+        if (pnl === 0) {
+          const dir = fill.dir || (fill.side === 'B' ? 'Long' : fill.side === 'A' ? 'Short' : '')
+          void notifyPositionOpen(asset, dir, fill.sz, fill.px)
+        } else {
+          void notifyPositionClose(asset, pnl)
+        }
       }
     })
     subscribed.add(creds.user)
