@@ -134,6 +134,18 @@ export default function IndicatorScanTab({
       setError('Symbol universe is empty — refresh on the page header.')
       return
     }
+    // If the user picked a coin, scan only the symbols whose base matches.
+    // Empty search → scan the full universe as before. Matching is "contains"
+    // and case-insensitive so typing "BT" picks up BTC; an exact base also
+    // works of course.
+    const q = search.trim().toUpperCase()
+    const scanUniverse = q
+      ? universe.filter((s) => s.base.toUpperCase().includes(q) || s.symbol.toUpperCase().includes(q))
+      : universe
+    if (scanUniverse.length === 0) {
+      setError(`No coins in the universe match "${search}". Clear the coin filter or refresh the universe.`)
+      return
+    }
     setError(null)
     setRows([])
     setProgress({ done: 0, total: 0 })
@@ -143,7 +155,7 @@ export default function IndicatorScanTab({
     abortRef.current = ctrl
     try {
       const result = await runIndicatorScan(
-        universe,
+        scanUniverse,
         {
           timeframes: ALL_TFS.filter((tf) => tfFilter[tf]),
           lookbackDays: lookback,
@@ -357,9 +369,17 @@ export default function IndicatorScanTab({
             onClick={start}
             disabled={universe.length === 0}
             className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={search.trim() ? `Scan only coins matching "${search}"` : `Scan the full universe (${universe.length} coins)`}
           >
             <Play className="h-4 w-4" />
-            {rows.length > 0 ? 'Re-scan' : 'Scan'}
+            {(() => {
+              // Show target scope in the button so it's obvious whether the
+              // coin filter is restricting the scan or not.
+              const q = search.trim().toUpperCase()
+              const targets = q ? universe.filter((s) => s.base.toUpperCase().includes(q) || s.symbol.toUpperCase().includes(q)).length : universe.length
+              const label = rows.length > 0 ? 'Re-scan' : 'Scan'
+              return q ? `${label} ${targets} coin${targets === 1 ? '' : 's'}` : label
+            })()}
           </button>
         )}
       </div>
