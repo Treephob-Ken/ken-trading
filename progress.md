@@ -58,7 +58,7 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Network badge (testnet/mainnet) | ✅ in sidebar |
 | Strategy Backtester (Binance candles, MTF, regime, walk-forward) | ✅ |
 | Grid Optimizer (sweep + deploy-to-bot) | ✅ |
-| Currency Scanner (Indicator + Grid tabs, batch-rank top 30 HL coins, persisted results + colored verdicts) | ✅ |
+| Currency Scanner (Indicator + Grid + **SMC** tabs, batch-rank coins, colored verdicts) | ✅ SMC tab (`src/lib/scanner/smcScan.ts` + `SmcScanTab.tsx`) ranks coins by best SMC entry-rule expectancy; green = ≥+0.2R & ≥30 trades; row → Market Structure page |
 | Scanner — "Stocks & Commodities" universe toggle (HIP-3 ranked by HL open interest) | ✅ Phase A read-only |
 | HIP-3 markets (Gold, S&P 500, US stocks, forex, oil) in Backtester + Symbol picker | ✅ Phase A — backtest |
 | HIP-3 live trading via Trade page market + limit orders | ✅ Phase B + C.3 |
