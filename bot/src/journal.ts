@@ -500,6 +500,51 @@ export interface PortfolioSummary {
   byAsset: AssetRollup[]
 }
 
+export type EquityPeriod = 'day' | 'week' | 'month' | 'all'
+
+export interface EquitySeriesResponse {
+  period: EquityPeriod
+  points: { t: number; value: number }[]      // account value over time (ms, $)
+  pnlPoints: { t: number; value: number }[]    // pnl over time (ms, $)
+  startValue: number
+  currentValue: number
+  returnPct: number                            // (current - start) / start * 100
+  maxDrawdown: number                          // peak-to-trough on account value ($)
+  maxDrawdownPct: number                       // relative to the peak at the trough
+}
+
+// Map one Hyperliquid portfolio period's raw [ts, "value"] arrays into a chart-
+// ready series with return % and a true account-value max drawdown.
+export function mapEquitySeries(
+  period: EquityPeriod,
+  accountValueHistory: [number, string][],
+  pnlHistory: [number, string][],
+): EquitySeriesResponse {
+  const raw = accountValueHistory.map(([t, v]) => ({ t, value: Number(v) }))
+  // HL pads the start of month/allTime windows with $0 entries from before the
+  // account was first funded. Trim those leading zeros so the % return baseline
+  // and the chart start at the first funded value, not a misleading $0.
+  const firstFunded = raw.findIndex((p) => p.value > 0)
+  const points = firstFunded > 0 ? raw.slice(firstFunded) : raw
+  const pnlPoints = pnlHistory.map(([t, v]) => ({ t, value: Number(v) }))
+  const startValue = points.length ? points[0].value : 0
+  const currentValue = points.length ? points[points.length - 1].value : 0
+  const returnPct = startValue > 0 ? ((currentValue - startValue) / startValue) * 100 : 0
+
+  let peak = points.length ? points[0].value : 0
+  let maxDrawdown = 0
+  let maxDrawdownPct = 0
+  for (const p of points) {
+    if (p.value > peak) peak = p.value
+    const drop = peak - p.value
+    if (drop > maxDrawdown) {
+      maxDrawdown = drop
+      maxDrawdownPct = peak > 0 ? (drop / peak) * 100 : 0
+    }
+  }
+  return { period, points, pnlPoints, startValue, currentValue, returnPct, maxDrawdown, maxDrawdownPct }
+}
+
 function portfolioRangeBoundsMs(range: PortfolioRange): { from: number; to: number } {
   const to = Date.now()
   switch (range) {

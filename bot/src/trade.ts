@@ -51,6 +51,13 @@ export function evictClientCache(hlUser: string): void {
   userClientCache.delete(hlUser)
 }
 
+// Fetch the user's Hyperliquid portfolio (account-value + pnl history grouped
+// by day/week/month/allTime). Read-only; powers the Portfolio trend chart.
+export async function getPortfolio(creds?: EnvConfig | null) {
+  const { info, user } = getClients(creds)
+  return info.portfolio({ user })
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 const DEFAULT_SLIPPAGE_PCT = 2

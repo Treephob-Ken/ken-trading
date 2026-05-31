@@ -27,6 +27,7 @@ import {
   getAssetInfo,
   getPositionBrackets,
   listAssets,
+  getPortfolio,
   parseTradeRequest,
   placeOrder,
   replacePositionBrackets,
@@ -42,6 +43,8 @@ import {
   parseSignalConfig,
 } from './signal-bot.js'
 import { generateChartData, STRATEGIES } from './strategy/strategies.js'
+import { deleteSpec, listSpecs, loadSpec, saveSpec } from './strategy/builder-store.js'
+import type { CustomStrategySpec } from './strategy/builder-types.js'
 import { fetchKlines } from './strategy/market-data.js'
 import { MULTI_USER, requireAuth, requireAdmin, signToken, verifyToken } from './auth.js'
 import {
@@ -73,11 +76,13 @@ import {
   buildAssetSourceMap,
   fetchFillsFromHL,
   loadAuditLines,
+  mapEquitySeries,
   pairRoundTrips,
   portfolioRangeToBounds,
   rangeToBounds,
   summarize,
   summarizePortfolio,
+  type EquityPeriod,
 } from './journal.js'
 import { listPausedGridBotIds, listRunningGridBotIds, readGridRuntime, writeGridRuntime } from './grid-runtime.js'
 import { isNotifyEnabled, startFillNotifier } from './notify.js'
@@ -1079,6 +1084,46 @@ app.get('/api/strategies', (_req: Request, res: Response) => {
   res.json(STRATEGIES)
 })
 
+// ─── Strategy Builder presets ───────────────────────────────────────────────
+// CRUD for user-defined CustomStrategySpec objects. Stored as JSON files
+// under bot/data/<userId>/custom-strategies/ in multi-tenant mode, or
+// bot/data/custom-strategies/ in single-tenant mode. The bot's signal-bot
+// loader reads the same files when it sees strategyId === 'custom'.
+app.get('/api/builder/strategies', requireAuth, (req: Request, res: Response) => {
+  try {
+    res.json(listSpecs(userId(req)))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+app.get('/api/builder/strategies/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const spec = loadSpec(req.params.id, userId(req))
+    if (!spec) { res.status(404).json({ error: 'Not found' }); return }
+    res.json(spec)
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+app.post('/api/builder/strategies', requireAuth, (req: Request, res: Response) => {
+  try {
+    const spec = req.body as CustomStrategySpec
+    if (!spec || !spec.entryLong) { res.status(400).json({ error: 'spec.entryLong is required' }); return }
+    res.json(saveSpec(spec, userId(req)))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+app.delete('/api/builder/strategies/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const ok = deleteSpec(req.params.id, userId(req))
+    if (!ok) { res.status(404).json({ error: 'Not found' }); return }
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
 app.get('/api/assets', requireAuth, async (req: Request, res: Response) => {
   try {
     res.json(await listAssets(userCreds(req)))
@@ -1461,6 +1506,40 @@ app.get('/api/portfolio/trips', requireAuth, async (req: Request, res: Response)
     const fills = await fetchFillsFromHL(creds, from, to, srcMap)
     const trips = pairRoundTrips(fills)
     res.json(trips)
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Account-value trend for the Portfolio hero chart. Sources Hyperliquid's
+// portfolio endpoint (true account value incl. unrealized/funding/transfers),
+// which only offers day/week/month/allTime granularity — so this endpoint's
+// `period` is independent of the page's detail-range buttons.
+const EQUITY_PERIOD_MAP: Record<string, { hl: string; period: EquityPeriod }> = {
+  day:   { hl: 'day',     period: 'day' },
+  week:  { hl: 'week',    period: 'week' },
+  month: { hl: 'month',   period: 'month' },
+  all:   { hl: 'allTime', period: 'all' },
+}
+
+app.get('/api/portfolio/equity', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set. Add them in Settings.' }); return }
+    const key = typeof req.query.period === 'string' ? req.query.period : 'all'
+    const sel = EQUITY_PERIOD_MAP[key] ?? EQUITY_PERIOD_MAP.all
+    const uid = userId(req) ?? 'single'
+    const cacheKey = `equity|${uid}|${sel.period}`
+    const hit = portfolioCache.get(cacheKey)
+    if (hit && Date.now() - hit.at < PORTFOLIO_CACHE_MS) { res.json(hit.data); return }
+
+    const resp = await getPortfolio(creds)
+    const found = resp.find(([p]) => p === sel.hl)
+    const data = found
+      ? mapEquitySeries(sel.period, found[1].accountValueHistory, found[1].pnlHistory)
+      : mapEquitySeries(sel.period, [], [])
+    portfolioCache.set(cacheKey, { at: Date.now(), data })
+    res.json(data)
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }
