@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { Candle } from '@/types'
 import type { SMCResult, StructureBreak } from './types'
 import { compareSmcEntries, smcQuality } from './strategyTest'
+import { smcRetestSignals } from '@/lib/strategies'
 
 function resultWith(structures: StructureBreak[]): SMCResult {
   return {
@@ -48,5 +49,34 @@ describe('compareSmcEntries (entry × exit combos via runBacktest)', () => {
     expect(mirage).toBeLessThan(20)
     expect(solid).toBeGreaterThan(mirage)
     expect(solid).toBeGreaterThanOrEqual(50)
+  })
+})
+
+describe('smcRetestSignals', () => {
+  // Increasing-amplitude oscillation → breaks both ways → retests happen.
+  function triangle(): number[] {
+    const pts: number[] = []
+    const ramp = (from: number, to: number, step: number) => {
+      for (let v = from; step > 0 ? v <= to : v >= to; v += step) pts.push(v)
+    }
+    ramp(0, 20, 2); ramp(18, 0, -2); ramp(2, 26, 2); ramp(24, -6, -2); ramp(-4, 32, 2); ramp(30, -12, -2)
+    return pts
+  }
+
+  it('runs, returns length n, valid + deterministic signals', () => {
+    const closes = triangle()
+    const highs = closes.map(p => p + 0.2)
+    const lows = closes.map(p => p - 0.2)
+    const sig = smcRetestSignals(highs, lows, closes, 3, 'both', 'level')
+    expect(sig.length).toBe(closes.length)
+    for (const s of sig) expect([null, 'buy', 'sell']).toContain(s)
+    expect(sig.some(s => s !== null)).toBe(true)
+    // Deterministic — same input → identical output (the bot copy must match).
+    expect(smcRetestSignals(highs, lows, closes, 3, 'both', 'level')).toEqual(sig)
+  })
+
+  it('returns all-null when there is not enough data', () => {
+    const sig = smcRetestSignals([1, 2, 3], [1, 2, 3], [1, 2, 3], 50, 'both', 'level')
+    expect(sig).toEqual([null, null, null])
   })
 })

@@ -14,6 +14,7 @@
 import type { Candle, Signal } from '@/types'
 import type { SMCResult, StructureBreak } from './types'
 import { runBacktest } from '@/lib/backtest'
+import { smcRetestSignals } from '@/lib/strategies'
 
 export interface EntryResult {
   name: string         // "BOS + CHoCH · 2R"
@@ -57,10 +58,13 @@ const RR = 2
 
 interface Idx { index: number; dir: 'long' | 'short' }
 
-export function compareSmcEntries(candles: Candle[], result: SMCResult, slPct = 1.5): EntryResult[] {
+export function compareSmcEntries(candles: Candle[], result: SMCResult, slPct = 1.5, swingLength = 50): EntryResult[] {
   const n = candles.length
   const idxByTime = new Map<number, number>()
   for (let i = 0; i < n; i++) idxByTime.set(candles[i].time, i)
+  const highs = candles.map(c => c.high)
+  const lows = candles.map(c => c.low)
+  const closes = candles.map(c => c.close)
 
   const toIdx = (s: StructureBreak): Idx | null => {
     const i = idxByTime.get(s.atTime)
@@ -77,89 +81,31 @@ export function compareSmcEntries(candles: Candle[], result: SMCResult, slPct = 
       if (candles[k].low < lo) lo = candles[k].low
     }
     const mid = (hi + lo) / 2
-    const price = candles[sig.index].close
-    return sig.dir === 'long' ? price <= mid : price >= mid
+    return sig.dir === 'long' ? candles[sig.index].close <= mid : candles[sig.index].close >= mid
   }
 
-  const entries: { name: string; idxs: Idx[]; deployable: boolean }[] = [
-    { name: 'CHoCH', idxs: result.structures.filter(s => s.kind === 'CHoCH').map(toIdx).filter(ok), deployable: true },
-    { name: 'BOS + CHoCH', idxs: result.structures.map(toIdx).filter(ok), deployable: true },
+  const chochIdx = result.structures.filter(s => s.kind === 'CHoCH').map(toIdx).filter(ok)
+  const allIdx = result.structures.map(toIdx).filter(ok)
+
+  // Retrace rows call the SAME smcRetestSignals() the bot runs, so the test
+  // result and the live bot match by construction (not best-effort).
+  const entries: { name: string; signals: Signal[]; deployable: boolean }[] = [
+    { name: 'CHoCH', signals: buildSignals(n, chochIdx), deployable: true },
+    { name: 'BOS + CHoCH', signals: buildSignals(n, allIdx), deployable: true },
+    { name: 'CHoCH in zone', signals: buildSignals(n, chochIdx.filter(inFavorableZone)), deployable: true },
+    { name: 'Retest level', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'level'), deployable: false },
+    { name: 'Retest OB', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'ob'), deployable: false },
+    { name: 'Retest FVG', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'fvg'), deployable: false },
   ]
-  entries.push({ name: 'CHoCH in zone', idxs: entries[0].idxs.filter(inFavorableZone), deployable: true })
-  // Retrace/retest entries: after a break, wait for the pull-back into a target
-  // zone, then enter there (better price than chasing the break). Test-only for
-  // now — the bot still enters on the break itself.
-  entries.push({ name: 'Retest level', idxs: retraceEntries(candles, result.structures, idxByTime, 'level'), deployable: false })
-  entries.push({ name: 'Retest OB', idxs: retraceEntries(candles, result.structures, idxByTime, 'ob'), deployable: false })
-  entries.push({ name: 'Retest FVG', idxs: retraceEntries(candles, result.structures, idxByTime, 'fvg'), deployable: false })
 
   const out: EntryResult[] = []
   for (const e of entries) {
-    const signals = buildSignals(n, e.idxs)
-    const mfeTp = mfeTpPct(candles, signals)
-    out.push(simulate(e.name, 'Flip', e.deployable, signals, candles, slPct, 0))
-    out.push(simulate(e.name, '2R', e.deployable, signals, candles, slPct, RR * slPct))
-    out.push(simulate(e.name, 'MFE', e.deployable, signals, candles, slPct, mfeTp))
+    const mfeTp = mfeTpPct(candles, e.signals)
+    out.push(simulate(e.name, 'Flip', e.deployable, e.signals, candles, slPct, 0))
+    out.push(simulate(e.name, '2R', e.deployable, e.signals, candles, slPct, RR * slPct))
+    out.push(simulate(e.name, 'MFE', e.deployable, e.signals, candles, slPct, mfeTp))
   }
   return out
-}
-
-const RETEST_WINDOW = 40 // bars to wait for the pull-back after a break
-
-// For each structure break, find the first bar (within RETEST_WINDOW) where
-// price pulls back into the chosen target zone — that's the retrace entry.
-// Causal: the zone is derived only from bars up to the break; the entry is a
-// later bar. No survivorship bias (zones come from the break's own range).
-function retraceEntries(
-  candles: Candle[],
-  breaks: StructureBreak[],
-  idxByTime: Map<number, number>,
-  kind: 'level' | 'ob' | 'fvg',
-): Idx[] {
-  const out: Idx[] = []
-  for (const b of breaks) {
-    const breakIdx = idxByTime.get(b.atTime)
-    const pivotIdx = idxByTime.get(b.fromTime)
-    if (breakIdx === undefined || pivotIdx === undefined || pivotIdx > breakIdx) continue
-    const long = b.bias === 'bullish'
-
-    let zoneTop: number
-    let zoneBottom: number
-    if (kind === 'level') {
-      zoneTop = b.level
-      zoneBottom = b.level
-    } else if (kind === 'ob') {
-      // Order block = the extreme candle in the pivot→break range.
-      let ix = pivotIdx
-      for (let k = pivotIdx; k <= breakIdx; k++) {
-        if (long ? candles[k].low < candles[ix].low : candles[k].high > candles[ix].high) ix = k
-      }
-      zoneTop = candles[ix].high
-      zoneBottom = candles[ix].low
-    } else {
-      const fvg = findFvgInRange(candles, pivotIdx, breakIdx, long)
-      if (!fvg) continue
-      zoneTop = fvg.top
-      zoneBottom = fvg.bottom
-    }
-
-    const end = Math.min(breakIdx + RETEST_WINDOW, candles.length - 1)
-    for (let k = breakIdx + 1; k <= end; k++) {
-      const touched = long ? candles[k].low <= zoneTop : candles[k].high >= zoneBottom
-      if (touched) { out.push({ index: k, dir: long ? 'long' : 'short' }); break }
-    }
-  }
-  return out
-}
-
-// Last fair-value gap in [a, b] matching the direction (3-candle imbalance).
-function findFvgInRange(candles: Candle[], a: number, b: number, long: boolean): { top: number; bottom: number } | null {
-  let found: { top: number; bottom: number } | null = null
-  for (let i = Math.max(a + 2, 2); i <= b; i++) {
-    if (long && candles[i].low > candles[i - 2].high) found = { top: candles[i].low, bottom: candles[i - 2].high }
-    else if (!long && candles[i].high < candles[i - 2].low) found = { top: candles[i - 2].low, bottom: candles[i].high }
-  }
-  return found
 }
 
 function buildSignals(n: number, idxs: Idx[]): Signal[] {

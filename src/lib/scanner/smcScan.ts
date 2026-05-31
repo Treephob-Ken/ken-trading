@@ -76,7 +76,7 @@ export async function runSmcScan(
       const candles: Candle[] = await fetchKlines({ symbol: job.sym.symbol, interval: job.tf, startTime })
       if (candles.length >= swingLength + 5) {
         const result = computeSMC(candles, { swingLength })
-        const rules = compareSmcEntries(candles, result, slPct)
+        const rules = compareSmcEntries(candles, result, slPct, swingLength)
         rows.push({ symbol: job.sym.symbol, base: job.sym.base, timeframe: job.tf, best: bestRule(rules), rules })
       }
     } catch {

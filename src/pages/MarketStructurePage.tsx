@@ -65,8 +65,8 @@ export default function MarketStructurePage() {
   const lastPrice = candles.length ? candles[candles.length - 1].close : 0
   const summary = useMemo(() => summarizeSMC(result, lastPrice), [result, lastPrice])
   const strategyResults = useMemo(
-    () => compareSmcEntries(candles, result, slPct).sort((a, b) => b.quality - a.quality),
-    [candles, result, slPct],
+    () => compareSmcEntries(candles, result, slPct, swingLength).sort((a, b) => b.quality - a.quality),
+    [candles, result, slPct, swingLength],
   )
   const pairLabel = symbol.includes(':') ? symbol.split(':')[1] + '/USDC' : symbol.replace(/USDT$/, '/USDC')
 
