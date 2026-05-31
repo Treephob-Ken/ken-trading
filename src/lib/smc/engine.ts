@@ -9,7 +9,7 @@
 
 import type { Candle } from '@/types'
 import { atr } from '../indicators'
-import type { EqualLevel, OrderBlock, SMCResult, SMCSettings, StructureBreak, TrailingExtremes } from './types'
+import type { EqualLevel, FairValueGap, OrderBlock, SMCResult, SMCSettings, StructureBreak, TrailingExtremes } from './types'
 
 const DEFAULTS: SMCSettings = { swingLength: 50, orderBlockCount: 5, equalLength: 3, equalThreshold: 0.1 }
 
@@ -19,7 +19,7 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   const n = candles.length
   const structures: StructureBreak[] = []
 
-  if (n === 0) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [] }
+  if (n === 0) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [], fairValueGaps: [] }
   // Swing structure needs enough bars for the pivot window; EQH/EQL (shorter
   // length) runs independently below even when this is false.
   const hasSwing = n >= size + 2
@@ -27,6 +27,7 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   const high = candles.map(c => c.high)
   const low = candles.map(c => c.low)
   const close = candles.map(c => c.close)
+  const open = candles.map(c => c.open)
   const time = candles.map(c => c.time)
 
   // Volatility-parsed extremes for order blocks (LuxAlgo): on high-volatility
@@ -182,5 +183,36 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
     }
   }
 
-  return { structures, trailing, orderBlocks, equalLevels }
+  // Fair Value Gaps: a 3-candle imbalance where bar i's range doesn't overlap
+  // bar i-2's range, with a strong middle bar (i-1). Auto threshold = 2× the
+  // running mean of |body %| so only significant gaps count. Mitigated (dropped)
+  // once price trades back through the gap.
+  const fvgs: FairValueGap[] = []
+  let absDeltaSum = 0
+  for (let i = 0; i < n; i++) {
+    const delta = open[i] !== 0 ? (close[i] - open[i]) / open[i] : 0
+    absDeltaSum += Math.abs(delta)
+    if (i < 2) continue
+    const threshold = (absDeltaSum / (i + 1)) * 2
+    const midDelta = open[i - 1] !== 0 ? (close[i - 1] - open[i - 1]) / open[i - 1] : 0
+    if (low[i] > high[i - 2] && close[i - 1] > high[i - 2] && midDelta > threshold) {
+      fvgs.push({ bias: 'bullish', top: low[i], bottom: high[i - 2], fromTime: time[i - 1] })
+    } else if (high[i] < low[i - 2] && close[i - 1] < low[i - 2] && -midDelta > threshold) {
+      fvgs.push({ bias: 'bearish', top: low[i - 2], bottom: high[i], fromTime: time[i - 1] })
+    }
+  }
+  // Keep only gaps not yet filled by later price, newest first, capped.
+  const fairValueGaps: FairValueGap[] = []
+  for (const g of fvgs) {
+    const startIdx = time.indexOf(g.fromTime)
+    let filled = false
+    for (let k = startIdx + 2; k < n; k++) {
+      if (g.bias === 'bullish' ? low[k] < g.bottom : high[k] > g.top) { filled = true; break }
+    }
+    if (!filled) fairValueGaps.push(g)
+  }
+  fairValueGaps.reverse()
+  fairValueGaps.length = Math.min(fairValueGaps.length, 30)
+
+  return { structures, trailing, orderBlocks, equalLevels, fairValueGaps }
 }

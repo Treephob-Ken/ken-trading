@@ -53,6 +53,14 @@ export interface EqualLevel {
   toTime: number   // confirming equal pivot time
 }
 
+// A fair value gap (imbalance) — a 3-candle price gap that often gets refilled.
+export interface FairValueGap {
+  bias: 'bullish' | 'bearish'
+  top: number
+  bottom: number
+  fromTime: number // unix seconds of the gap (middle) candle
+}
+
 export interface SMCResult {
   structures: StructureBreak[]
   // null when there isn't enough data to establish extremes.
@@ -60,4 +68,6 @@ export interface SMCResult {
   // Most-recent un-mitigated order blocks (newest first), capped to orderBlockCount.
   orderBlocks: OrderBlock[]
   equalLevels: EqualLevel[]
+  // Active (un-filled) fair value gaps, newest first.
+  fairValueGaps: FairValueGap[]
 }

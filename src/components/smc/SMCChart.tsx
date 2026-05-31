@@ -14,16 +14,16 @@ import {
 } from 'lightweight-charts'
 import type { Candle } from '@/types'
 import type { SMCResult } from '@/lib/smc/types'
-import { OrderBlockPrimitive } from './primitives/orderBlockPrimitive'
+import { BoxPrimitive, type SMCBox } from './primitives/boxPrimitive'
 
 const GREEN = '#089981'
 const RED = '#f23645'
 
-export default function SMCChart({ candles, result, showStructure = true, showStrongWeak = true, showEqual = true, showOrderBlocks = true }: { candles: Candle[]; result: SMCResult; showStructure?: boolean; showStrongWeak?: boolean; showEqual?: boolean; showOrderBlocks?: boolean }) {
+export default function SMCChart({ candles, result, showStructure = true, showStrongWeak = true, showEqual = true, showOrderBlocks = true, showFVG = false }: { candles: Candle[]; result: SMCResult; showStructure?: boolean; showStrongWeak?: boolean; showEqual?: boolean; showOrderBlocks?: boolean; showFVG?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const obPrimitiveRef = useRef<OrderBlockPrimitive | null>(null)
+  const boxPrimitiveRef = useRef<BoxPrimitive | null>(null)
   const priceLinesRef = useRef<IPriceLine[]>([])
   // One thin line series per structure break (pivot → break, drawn at the
   // pivot level). Kept in a ref so we can remove them when data changes.
@@ -47,12 +47,12 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
       upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
       wickUpColor: '#26a69a', wickDownColor: '#ef5350',
     })
-    const obPrimitive = new OrderBlockPrimitive()
-    series.attachPrimitive(obPrimitive)
+    const boxPrimitive = new BoxPrimitive()
+    series.attachPrimitive(boxPrimitive)
     chartRef.current = chart
     seriesRef.current = series
-    obPrimitiveRef.current = obPrimitive
-    return () => { chart.remove(); chartRef.current = null; seriesRef.current = null; obPrimitiveRef.current = null }
+    boxPrimitiveRef.current = boxPrimitive
+    return () => { chart.remove(); chartRef.current = null; seriesRef.current = null; boxPrimitiveRef.current = null }
   }, [])
 
   // Push candles + SMC overlays whenever data changes.
@@ -142,11 +142,22 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
       }))
     }
 
-    // Order-block boxes (custom primitive drawn behind the candles).
-    obPrimitiveRef.current?.setBlocks(showOrderBlocks ? result.orderBlocks : [])
+    // Boxes (order blocks + fair value gaps) drawn behind the candles. FVGs
+    // pushed first so order blocks sit on top where they overlap.
+    const boxes: SMCBox[] = [
+      ...(showFVG ? result.fairValueGaps.map(g => ({
+        top: g.top, bottom: g.bottom, fromTime: g.fromTime,
+        fill: g.bias === 'bullish' ? 'rgba(0,255,104,0.12)' : 'rgba(255,0,8,0.12)',
+      })) : []),
+      ...(showOrderBlocks ? result.orderBlocks.map(ob => ({
+        top: ob.top, bottom: ob.bottom, fromTime: ob.fromTime,
+        fill: ob.bias === 'bullish' ? 'rgba(49,121,245,0.18)' : 'rgba(247,124,128,0.20)',
+      })) : []),
+    ]
+    boxPrimitiveRef.current?.setBoxes(boxes)
 
     chart.timeScale().fitContent()
-  }, [candles, result, showStructure, showStrongWeak, showEqual, showOrderBlocks])
+  }, [candles, result, showStructure, showStrongWeak, showEqual, showOrderBlocks, showFVG])
 
   return (
     <div className="relative">

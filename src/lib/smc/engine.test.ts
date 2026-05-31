@@ -128,3 +128,53 @@ describe('computeSMC — equal highs/lows', () => {
     expect(r.equalLevels.filter(e => e.kind === 'EQH').length).toBe(0)
   })
 })
+
+describe('computeSMC — fair value gaps', () => {
+  // Build candles from [open, high, low, close] rows.
+  function ohlc(rows: number[][]): Candle[] {
+    return rows.map((r, i) => ({
+      time: 1_700_000_000 + i * 60, open: r[0], high: r[1], low: r[2], close: r[3], volume: 1,
+    }))
+  }
+
+  it('detects a bullish fair value gap (i low above i-2 high, strong middle)', () => {
+    const c = ohlc([
+      [100, 100, 100, 100],
+      [100, 101, 99, 100],
+      [100, 100, 100, 100], // i-2 of the gap → high 100
+      [100, 120, 100, 120], // strong bullish middle
+      [121, 125, 121, 124], // gap: low 121 > 100
+      [124, 126, 123, 125], // later bars stay above → gap not filled
+    ])
+    const r = computeSMC(c)
+    const bull = r.fairValueGaps.find(g => g.bias === 'bullish')
+    expect(bull).toBeDefined()
+    expect(bull!.bottom).toBe(100)
+    expect(bull!.top).toBe(121)
+  })
+
+  it('drops a gap that later price fills', () => {
+    const c = ohlc([
+      [100, 100, 100, 100],
+      [100, 101, 99, 100],
+      [100, 100, 100, 100],
+      [100, 120, 100, 120],
+      [121, 125, 121, 124],
+      [121, 122, 95, 98],   // dips to 95 < 100 → fills the gap
+    ])
+    const r = computeSMC(c)
+    expect(r.fairValueGaps.length).toBe(0)
+  })
+
+  it('finds no gaps in a smooth overlapping series', () => {
+    const c = ohlc([
+      [100, 102, 99, 101],
+      [101, 103, 100, 102],
+      [102, 104, 101, 103],
+      [103, 105, 102, 104],
+      [104, 106, 103, 105],
+    ])
+    const r = computeSMC(c)
+    expect(r.fairValueGaps.length).toBe(0)
+  })
+})

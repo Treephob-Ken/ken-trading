@@ -9,12 +9,13 @@ import type { Candle } from '@/types'
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
 
-type LayerKey = 'structure' | 'strongWeak' | 'orderBlocks' | 'equal'
+type LayerKey = 'structure' | 'strongWeak' | 'orderBlocks' | 'equal' | 'fvg'
 const LAYERS: { key: LayerKey; label: string }[] = [
   { key: 'structure', label: 'BOS/CHoCH' },
   { key: 'strongWeak', label: 'Strong/Weak' },
   { key: 'orderBlocks', label: 'Order blocks' },
   { key: 'equal', label: 'EQH/EQL' },
+  { key: 'fvg', label: 'Fair Value Gap' },
 ]
 
 export default function MarketStructurePage() {
@@ -23,7 +24,7 @@ export default function MarketStructurePage() {
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('lab_timeframe') || '1h')
   const [swingLength, setSwingLength] = useState(50)
   const [visible, setVisible] = useState<Record<LayerKey, boolean>>({
-    structure: true, strongWeak: true, orderBlocks: true, equal: true,
+    structure: true, strongWeak: true, orderBlocks: true, equal: true, fvg: false,
   })
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(false)
@@ -106,6 +107,7 @@ export default function MarketStructurePage() {
             showStrongWeak={visible.strongWeak}
             showEqual={visible.equal}
             showOrderBlocks={visible.orderBlocks}
+            showFVG={visible.fvg}
           />
         )}
       </section>
