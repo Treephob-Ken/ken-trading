@@ -65,7 +65,7 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | HIP-3 positions visible + closeable in Trade page Open Positions (cross-dex) | ✅ Phase C.1 |
 | Signal bots can target HIP-3 symbols (xyz:GOLD etc.) end-to-end | ✅ Phase C.2 |
 | Live SSE log tail across all bots | ✅ Logs page |
-| Market Structure page (LuxAlgo SMC port) | ✅ `/structure`: BOS/CHoCH + structure lines, Strong/Weak, Order Blocks (boxes), EQH/EQL, Fair Value Gaps, Premium/Discount zones, MTF prev D/W/M levels. Internal structure (dashed, length 5), trend-colored candles. Per-layer show/hide toggles, SymbolSearch dropdown, **Setup Summary** panel (bias/zone/nearest OB-FVG-liquidity + plain-language note via `src/lib/smc/summary.ts`), **Strategy Test** panel (`src/lib/smc/strategyTest.ts` — compares CHoCH / BOS+CHoCH / CHoCH-in-zone entries by win-rate + expectancy + profit factor, causal 2R sim), and **Deploy to Signal Bot** (strategy=smc, risk-based sizing). Engine `src/lib/smc/` is pure + unit-tested (Vitest, 20 tests) |
+| Market Structure page (LuxAlgo SMC port) | ✅ `/structure`: BOS/CHoCH + structure lines, Strong/Weak, Order Blocks (boxes), EQH/EQL, Fair Value Gaps, Premium/Discount zones, MTF prev D/W/M levels. Internal structure (dashed, length 5), trend-colored candles. Per-layer show/hide toggles, SymbolSearch dropdown, **Setup Summary** panel (bias/zone/nearest OB-FVG-liquidity + plain-language note via `src/lib/smc/summary.ts`), **Strategy Test** panel (`src/lib/smc/strategyTest.ts` — compares CHoCH / BOS+CHoCH / CHoCH-in-zone entries by return% / win-rate / profit factor; runs the **same `runBacktest` engine as the Backtester** with SL% + exit-on-opposite-signal + fees, so its numbers match the Backtester AND the deployed bot), and **Deploy to Signal Bot** (strategy=smc, CHoCH=mode1 / BOS+CHoCH=mode2, risk-based sizing). Engine `src/lib/smc/` is pure + unit-tested (Vitest). Also: SMC tab in Scanner ranks coins by best-rule return%. |
 | Unit tests (Vitest) | ✅ `npm test` — SMC engine covered; first test suite in the repo |
 | Login page redesign (dot-grid, framer-motion) | ✅ |
 | Portfolio page — account-value trend (HL portfolio), max drawdown, bot leaderboard, Power BI cross-filter | ✅ two-layer model (see gotcha) |
@@ -161,6 +161,12 @@ pm2 restart cloudflare-tunnel    # if tunnel drops
 - **Two strategy code trees stay in sync.** `src/lib/strategies.ts` (web)
   and `bot/src/strategy/strategies.ts` (bot) — the bot must trade what the
   backtester shows.
+- **TP/SL convention (whole app).** Exit model = **SL% bracket + close/flip on the
+  opposite signal** (no fixed R:R TP by default). TP is either off or the
+  **MFE P75 suggestion** (`bot/src/strategy/mfe.ts`, shown in `RiskControlsCard`).
+  Sizing = risk-based ($risk ÷ SL%). The SMC Strategy Test reuses `runBacktest`
+  with this exact model so test = Backtester = bot. Do NOT reintroduce a separate
+  fixed-2R TP for one strategy — keep it consistent.
 - **Two entry points in `bot/`.** Use `npm run serve` (→ `server.ts`, the
   Express server + dashboard). `npm start` (→ `index.ts`) is the legacy
   standalone single-bot runner — no API, no dashboard.
