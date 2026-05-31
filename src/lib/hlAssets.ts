@@ -36,6 +36,34 @@ export async function fetchHLAssets(): Promise<SymbolInfo[]> {
   return _cache
 }
 
+// Coin → exchange max leverage (e.g. { BTC: 40, ETH: 25 }). One cached fetch
+// shared by every Scanner tab. Failure resolves to an empty map (column shows
+// "—") rather than throwing — leverage info is non-critical.
+let _levCache: Record<string, number> | null = null
+
+export async function fetchMaxLeverage(): Promise<Record<string, number>> {
+  if (_levCache) return _levCache
+  const jwt = localStorage.getItem('auth_jwt') ?? ''
+  const res = await fetch('/api/assets/leverage', {
+    headers: jwt ? { Authorization: `Bearer ${jwt}` } : {},
+  })
+  if (!res.ok) throw new Error(`/api/assets/leverage returned ${res.status}`)
+  _levCache = (await res.json()) as Record<string, number>
+  return _levCache
+}
+
+export function useMaxLeverage(): Record<string, number> {
+  const [lev, setLev] = useState<Record<string, number>>({})
+  useEffect(() => {
+    let cancelled = false
+    fetchMaxLeverage()
+      .then((m) => { if (!cancelled) setLev(m) })
+      .catch(() => { if (!cancelled) setLev({}) })
+    return () => { cancelled = true }
+  }, [])
+  return lev
+}
+
 export function useHLAssets(): { symbols: SymbolInfo[]; loading: boolean } {
   const [symbols, setSymbols] = useState<SymbolInfo[]>(FALLBACK)
   const [loading, setLoading] = useState(true)

@@ -5,6 +5,7 @@ import type { SymbolInfo } from '@/lib/binance'
 import { runGridScan, type GridScanRow } from '@/lib/scanner/gridScan'
 import type { ScanProgress } from '@/lib/scanner/indicatorScan'
 import { gradeBg, gradeGridRow, timeAgo } from '@/lib/scanner/verdict'
+import { useMaxLeverage } from '@/lib/hlAssets'
 
 interface Props {
   universe: SymbolInfo[]
@@ -54,6 +55,7 @@ export default function GridScanTab({
   onPickTimeframe,
 }: Props) {
   const navigate = useNavigate()
+  const maxLev = useMaxLeverage()
   const persisted = loadPersisted()
   const [rows, setRows] = useState<GridScanRow[]>(persisted?.rows ?? [])
   const [scanning, setScanning] = useState(false)
@@ -421,6 +423,12 @@ export default function GridScanTab({
                   <th className="px-3 py-2 text-left">Pick</th>
                   <th className="px-3 py-2 text-left">Symbol</th>
                   <th
+                    className="px-3 py-2 text-right"
+                    title="Exchange maximum leverage for this coin. This is the cap, NOT a recommendation — high leverage liquidates fast on a small account. Your bot still sets its own leverage."
+                  >
+                    Max Lev
+                  </th>
+                  <th
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
                     onClick={() => headerClick('score')}
                   >
@@ -475,6 +483,9 @@ export default function GridScanTab({
                       </span>
                     </td>
                     <td className="px-3 py-2 font-mono text-text">{r.base}</td>
+                    <td className="px-3 py-2 text-right font-mono text-dim tabular-nums">
+                      {maxLev[r.base] ? `${maxLev[r.base]}x` : '—'}
+                    </td>
                     <td className="px-3 py-2 text-right font-mono text-text tabular-nums">
                       {r.score}
                     </td>

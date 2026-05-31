@@ -459,6 +459,16 @@ export async function listAssetsTagged(creds?: EnvConfig | null): Promise<Listed
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// Map of asset name → exchange max leverage (e.g. { BTC: 40, ETH: 25 }).
+// The Scanner shows this as an info-only column. Network-aware via creds.
+export async function listAssetLeverage(creds?: EnvConfig | null): Promise<Record<string, number>> {
+  const { info } = getClients(creds)
+  const all = await listAllAssets(info)
+  const out: Record<string, number> = {}
+  for (const u of all) if (u.maxLeverage > 0) out[u.name] = u.maxLeverage
+  return out
+}
+
 export interface PositionInfo {
   asset: string
   // null for main perp dex, dex name (e.g. "xyz") for HIP-3 positions.

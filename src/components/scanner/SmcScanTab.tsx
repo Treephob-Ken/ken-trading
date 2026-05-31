@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Play, Loader2 } from 'lucide-react'
 import type { SymbolInfo } from '@/lib/binance'
 import { runSmcScan, type SmcScanRow, type ScanProgress } from '@/lib/scanner/smcScan'
+import { useMaxLeverage } from '@/lib/hlAssets'
 
 interface Props {
   universe: SymbolInfo[]
@@ -16,6 +17,7 @@ const PASS_QUALITY = 50
 
 export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: Props) {
   const navigate = useNavigate()
+  const maxLev = useMaxLeverage()
   const [timeframes, setTimeframes] = useState<string[]>(['1h', '4h'])
   // SL% and lookback are shared with the Market Structure page (localStorage)
   // so a coin's scan numbers match its Strategy test there.
@@ -110,6 +112,12 @@ export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: 
             <thead>
               <tr className="border-b border-border text-left text-dim">
                 <th className="px-3 py-2">Coin</th>
+                <th
+                  className="px-3 py-2 text-right"
+                  title="Exchange maximum leverage for this coin. This is the cap, NOT a recommendation — high leverage liquidates fast on a small account. Your bot still sets its own leverage."
+                >
+                  Max Lev
+                </th>
                 <th className="px-3 py-2">TF</th>
                 <th className="px-3 py-2">Best rule</th>
                 <th className="px-3 py-2 text-right">Quality</th>
@@ -131,6 +139,9 @@ export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: 
                     <td className="px-3 py-1.5 font-medium text-text">
                       {pass && <span className="mr-1 text-gain">●</span>}
                       {r.base}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-dim tabular-nums">
+                      {maxLev[r.base] ? `${maxLev[r.base]}x` : '—'}
                     </td>
                     <td className="px-3 py-1.5 font-mono text-dim">{r.timeframe}</td>
                     <td className="px-3 py-1.5">{r.best.name}</td>

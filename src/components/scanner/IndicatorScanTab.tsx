@@ -17,6 +17,7 @@ import {
   timeAgo,
 } from '@/lib/scanner/verdict'
 import MarketPulse from '@/components/scanner/MarketPulse'
+import { useMaxLeverage } from '@/lib/hlAssets'
 
 interface Props {
   universe: SymbolInfo[]
@@ -70,6 +71,7 @@ export default function IndicatorScanTab({
   onPickTimeframe,
 }: Props) {
   const navigate = useNavigate()
+  const maxLev = useMaxLeverage()
   const persisted = loadPersisted()
   const [rows, setRows] = useState<IndicatorScanRow[]>(persisted?.rows ?? [])
   const [scanning, setScanning] = useState(false)
@@ -587,6 +589,12 @@ export default function IndicatorScanTab({
                     Quality{sortArrow('qualityScore')}
                   </th>
                   <th className="px-3 py-2 text-left">Symbol</th>
+                  <th
+                    className="px-3 py-2 text-right"
+                    title="Exchange maximum leverage for this coin. This is the cap, NOT a recommendation — high leverage liquidates fast on a small account. Your bot still sets its own leverage."
+                  >
+                    Max Lev
+                  </th>
                   <th className="px-3 py-2 text-left">TF</th>
                   <th
                     className="px-3 py-2 text-left"
@@ -672,6 +680,9 @@ export default function IndicatorScanTab({
                       {typeof r.qualityScore === 'number' ? Math.round(r.qualityScore) : '—'}
                     </td>
                     <td className="px-3 py-2 font-mono text-text">{r.base}</td>
+                    <td className="px-3 py-2 text-right font-mono text-dim tabular-nums">
+                      {maxLev[r.base] ? `${maxLev[r.base]}x` : '—'}
+                    </td>
                     <td className="px-3 py-2 font-mono text-text">{r.timeframe}</td>
                     <td className="px-3 py-2">
                       {r.regimeLabel ? (

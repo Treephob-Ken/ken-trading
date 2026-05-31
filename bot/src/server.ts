@@ -27,6 +27,7 @@ import {
   getAssetInfo,
   getPositionBrackets,
   listAssets,
+  listAssetLeverage,
   getPortfolio,
   parseTradeRequest,
   placeOrder,
@@ -1127,6 +1128,15 @@ app.delete('/api/builder/strategies/:id', requireAuth, (req: Request, res: Respo
 app.get('/api/assets', requireAuth, async (req: Request, res: Response) => {
   try {
     res.json(await listAssets(userCreds(req)))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Map of coin → exchange max leverage. Info-only; the Scanner displays it.
+app.get('/api/assets/leverage', requireAuth, async (req: Request, res: Response) => {
+  try {
+    res.json(await listAssetLeverage(userCreds(req)))
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }
