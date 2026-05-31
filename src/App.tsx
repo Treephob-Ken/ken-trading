@@ -10,6 +10,7 @@ import GridBotsPage from '@/pages/GridBotsPage'
 import TradePage from '@/pages/TradePage'
 import LogsPage from '@/pages/LogsPage'
 import PortfolioPage from '@/pages/PortfolioPage'
+import BuilderPage from '@/pages/BuilderPage'
 import SettingsPage from '@/pages/SettingsPage'
 import FundamentalsPage from '@/pages/FundamentalsPage'
 import ScannerPage from '@/pages/ScannerPage'
@@ -90,6 +91,9 @@ export default function App() {
 
           {/* Portfolio — multi-range PnL dashboard, equity curve, by-asset/bot rollups */}
           <Route path="portfolio" element={<PortfolioPage />} />
+
+          {/* Strategy Builder — combine indicator conditions with AND/OR */}
+          <Route path="builder" element={<BuilderPage />} />
 
           {/* Scanner — batch-rank symbols × strategies, feeds Backtester + Grid pages */}
           <Route path="scanner" element={

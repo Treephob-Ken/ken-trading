@@ -32,6 +32,8 @@ import {
 } from './strategy/strategies.js'
 import { cancelOrdersByOid, getAccountState, getAssetInfo, placeOrder, snapshotAssetOrderOids } from './trade.js'
 import { computeMfeStats, type MfeResult } from './strategy/mfe.js'
+import { evaluateCustomStrategy } from './strategy/builder-evaluate.js'
+import { loadSpec } from './strategy/builder-store.js'
 import { MULTI_USER } from './auth.js'
 import type { EnvConfig } from './config.js'
 
@@ -66,7 +68,9 @@ function signalDirForUser(userId?: string): string {
 export interface SignalBotConfig {
   symbol: string // Binance symbol, e.g. ETHUSDT
   timeframe: string
-  strategyId: StrategyId
+  // 'custom' is a sentinel that means "look up `customStrategyId` and run
+  // evaluateCustomStrategy" — everything else is a built-in StrategyId.
+  strategyId: StrategyId | 'custom'
   params: Record<string, number>
   asset: string // Hyperliquid asset, e.g. ETH
   // Risk mode: positionUsd = riskUsd / (slPct/100); size = positionUsd / currentPrice.
@@ -110,6 +114,11 @@ export interface SignalBotConfig {
   // Toggleable live via API. Falls back to manual `tpPct` if there aren't
   // enough historical signals (< 10) to suggest reliably.
   useSuggestedTp?: boolean
+  // When strategyId === 'custom', the bot loads this saved CustomStrategySpec
+  // and runs `evaluateCustomStrategy` instead of the built-in dispatcher.
+  // Stored as the id so a user can edit the spec in the Builder and have all
+  // bots that reference it pick up the new logic on next signal poll.
+  customStrategyId?: string
 }
 
 export interface SignalBotStatus {
@@ -153,7 +162,7 @@ export interface SignalBotSummary {
   id: string
   name: string
   running: boolean
-  strategyId: StrategyId
+  strategyId: StrategyId | 'custom'
   symbol: string
   timeframe: string
   ensembleMode?: boolean
@@ -182,13 +191,19 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     throw new Error(`timeframe must be one of: ${VALID_TIMEFRAMES.join(', ')}`)
   }
 
-  const strategyId = b.strategyId as StrategyId
-  const meta = STRATEGIES.find((s) => s.id === strategyId)
-  if (!meta) throw new Error(`Unknown strategyId: ${String(b.strategyId)}`)
+  const strategyId = b.strategyId as StrategyId | 'custom'
+  // 'custom' bypasses the built-in catalogue lookup; signal generation goes
+  // through evaluateCustomStrategy with a stored CustomStrategySpec instead.
+  const isCustom = (strategyId as string) === 'custom'
+  const meta = isCustom ? null : STRATEGIES.find((s) => s.id === strategyId)
+  if (!isCustom && !meta) throw new Error(`Unknown strategyId: ${String(b.strategyId)}`)
+  if (isCustom && (typeof b.customStrategyId !== 'string' || !b.customStrategyId)) {
+    throw new Error('customStrategyId is required when strategyId="custom"')
+  }
 
   const rawParams = (typeof b.params === 'object' && b.params) || {}
   const params: Record<string, number> = {}
-  for (const def of meta.params) {
+  for (const def of meta?.params ?? []) {
     const v = (rawParams as Record<string, unknown>)[def.key]
     const num = typeof v === 'string' ? Number(v) : v
     params[def.key] = typeof num === 'number' && Number.isFinite(num) ? num : def.default
@@ -289,6 +304,9 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ...(maxDivergencePct !== undefined ? { maxDivergencePct } : {}),
     ...(catchUpOnStart ? { catchUpOnStart } : {}),
     ...(useSuggestedTp ? { useSuggestedTp } : {}),
+    ...(isCustom && typeof b.customStrategyId === 'string'
+      ? { customStrategyId: b.customStrategyId }
+      : {}),
   }
 }
 
@@ -435,7 +453,15 @@ class SignalBot {
     this.tpSuggestionInFlight = true
     try {
       const cfg = this.config
-      const result = await computeMfeStats(cfg.symbol, cfg.timeframe, cfg.strategyId, cfg.params)
+      // MFE suggestion is built around the catalogue of built-in strategies;
+      // custom builder specs don't have a stable strategy id the analyzer can
+      // walk historical bars with. Skip for now — manual `tpPct` still works.
+      if ((cfg.strategyId as string) === 'custom') {
+        this.tpSuggestion = null
+        this.log.info('TP suggestion skipped — not supported for custom strategies yet')
+        return null
+      }
+      const result = await computeMfeStats(cfg.symbol, cfg.timeframe, cfg.strategyId as StrategyId, cfg.params)
       this.tpSuggestion = result
       const buyN = result.buy?.count ?? 0
       const sellN = result.sell?.count ?? 0
@@ -589,6 +615,30 @@ class SignalBot {
     this.persist()
   }
 
+  // Dispatch helper — returns per-bar signals using either the built-in
+  // strategy dispatcher OR the custom-spec evaluator. Keeps the three poll
+  // call-sites (catch-up, main loop, MTF filter) in lock-step. Loading the
+  // saved spec on every poll is intentional: if the user edits the spec in
+  // the Builder while a bot is running, the bot picks up the change on the
+  // next 30-second tick without needing a restart.
+  private signalsFor(candles: Parameters<typeof generateSignals>[1]): Signal[] {
+    const cfg = this.config
+    if ((cfg.strategyId as string) === 'custom') {
+      const sid = cfg.customStrategyId
+      if (!sid) {
+        this.log.warn('strategyId=custom but customStrategyId is unset; no signals will fire')
+        return new Array(candles.length).fill(null) as Signal[]
+      }
+      const spec = loadSpec(sid, this.userId)
+      if (!spec) {
+        this.log.warn(`Custom strategy "${sid}" not found on disk; no signals will fire`)
+        return new Array(candles.length).fill(null) as Signal[]
+      }
+      return evaluateCustomStrategy(spec, candles)
+    }
+    return generateSignals(cfg.strategyId as StrategyId, candles, cfg.params)
+  }
+
   private async tick(): Promise<void> {
     if (this.evaluating) return
     this.evaluating = true
@@ -655,7 +705,7 @@ class SignalBot {
               const threshold = cfg.ensembleThreshold ?? Math.ceil(cfg.ensembleStrategyIds.length / 2)
               s = buy >= threshold ? 'buy' : sell >= threshold ? 'sell' : null
             } else {
-              const signals = generateSignals(cfg.strategyId, candles, cfg.params)
+              const signals = this.signalsFor(candles)
               s = signals[closedIdx]
             }
             const sigPx = closedBar.close
@@ -719,7 +769,7 @@ class SignalBot {
         )
       } else {
         this.lastVotes = null
-        const signals = generateSignals(cfg.strategyId, candles, cfg.params)
+        const signals = this.signalsFor(candles)
         sig = signals[closedIdx]
       }
 
@@ -738,7 +788,7 @@ class SignalBot {
         try {
           const htfCandles = await fetchKlines(cfg.symbol, cfg.mtfTimeframe, CANDLE_LIMIT)
           if (htfCandles.length >= 30) {
-            const htfSigs = generateSignals(cfg.strategyId, htfCandles, cfg.params)
+            const htfSigs = this.signalsFor(htfCandles)
             let htfLast: Signal = null
             for (let i = htfSigs.length - 2; i >= 0; i--) {
               if (htfSigs[i] !== null) { htfLast = htfSigs[i]; break }
