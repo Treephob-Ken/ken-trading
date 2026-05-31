@@ -178,10 +178,10 @@ export default function MarketStructurePage() {
       {/* ── Strategy test: which entry rule would have had an edge here ── */}
       <section className="card p-4">
         <div className="mb-1 text-xs font-semibold text-text">
-          Strategy test <span className="font-normal text-dim">· {pairLabel} {timeframe} · target 2R, SL {slPct}%</span>
+          Strategy test <span className="font-normal text-dim">· {pairLabel} {timeframe} · SL {slPct}%, exit on opposite signal, fees on</span>
         </div>
         <p className="mb-3 text-[11px] text-dim">
-          Which entry rule would have made money in this window (causal, no look-ahead). <span className="text-gain">Positive expectancy</span> = an edge. This window only — not a guarantee of future results.
+          Which entry rule would have made money here — same engine + fees as the Backtester, same exit the bot uses. <span className="text-gain">Profit factor &gt; 1</span> = edge. This window only — not a guarantee of future results.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
@@ -190,7 +190,7 @@ export default function MarketStructurePage() {
                 <th className="py-1 pr-3">Entry rule</th>
                 <th className="py-1 pr-3 text-right">Trades</th>
                 <th className="py-1 pr-3 text-right">Win %</th>
-                <th className="py-1 pr-3 text-right">Expectancy</th>
+                <th className="py-1 pr-3 text-right">Return %</th>
                 <th className="py-1 pr-3 text-right">Profit factor</th>
               </tr>
             </thead>
@@ -199,9 +199,9 @@ export default function MarketStructurePage() {
                 <tr key={r.name} className="border-t border-border">
                   <td className="py-1 pr-3 font-medium text-text">{r.name}</td>
                   <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades}</td>
-                  <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades ? `${(r.winRate * 100).toFixed(0)}%` : '—'}</td>
-                  <td className={`py-1 pr-3 text-right font-mono tabular-nums ${r.expectancyR > 0 ? 'text-gain' : r.expectancyR < 0 ? 'text-loss' : 'text-dim'}`}>
-                    {r.trades ? `${r.expectancyR > 0 ? '+' : ''}${r.expectancyR.toFixed(2)}R` : '—'}
+                  <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades ? `${r.winRate.toFixed(0)}%` : '—'}</td>
+                  <td className={`py-1 pr-3 text-right font-mono tabular-nums ${r.returnPct > 0 ? 'text-gain' : r.returnPct < 0 ? 'text-loss' : 'text-dim'}`}>
+                    {r.trades ? `${r.returnPct > 0 ? '+' : ''}${r.returnPct.toFixed(1)}%` : '—'}
                   </td>
                   <td className="py-1 pr-3 text-right font-mono tabular-nums">
                     {r.trades === 0 ? '—' : r.profitFactor === Infinity ? '∞' : r.profitFactor.toFixed(2)}

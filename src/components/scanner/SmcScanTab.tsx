@@ -12,8 +12,8 @@ interface Props {
 
 const TF_OPTIONS = ['15m', '1h', '4h', '1d']
 // A row "passes" (green) when its best rule has a real edge on a usable sample.
-const PASS_EXPECTANCY = 0.2
-const PASS_TRADES = 30
+const PASS_PF = 1.3
+const PASS_TRADES = 20
 
 export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: Props) {
   const navigate = useNavigate()
@@ -89,8 +89,8 @@ export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: 
       </div>
 
       <p className="text-[11px] text-dim">
-        Ranks coins by their best SMC entry rule (CHoCH / BOS+CHoCH / CHoCH-in-zone), causal 2R sim.
-        <span className="text-gain"> Green</span> = edge worth a look (expectancy ≥ +{PASS_EXPECTANCY}R and ≥ {PASS_TRADES} trades). This is a backtest, not a guarantee.
+        Ranks coins by their best SMC entry rule (CHoCH / BOS+CHoCH / CHoCH-in-zone), same engine + fees as the Backtester (SL% + exit on opposite signal).
+        <span className="text-gain"> Green</span> = edge worth a look (profit factor ≥ {PASS_PF}, ≥ {PASS_TRADES} trades, positive return). This is a backtest, not a guarantee.
       </p>
 
       {progress && running && (
@@ -108,7 +108,7 @@ export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: 
                 <th className="px-3 py-2">Coin</th>
                 <th className="px-3 py-2">TF</th>
                 <th className="px-3 py-2">Best rule</th>
-                <th className="px-3 py-2 text-right">Expectancy</th>
+                <th className="px-3 py-2 text-right">Return %</th>
                 <th className="px-3 py-2 text-right">Trades</th>
                 <th className="px-3 py-2 text-right">Win %</th>
                 <th className="px-3 py-2 text-right">PF</th>
@@ -116,7 +116,7 @@ export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: 
             </thead>
             <tbody>
               {rows.map((r, i) => {
-                const pass = r.best.expectancyR >= PASS_EXPECTANCY && r.best.trades >= PASS_TRADES
+                const pass = r.best.profitFactor >= PASS_PF && r.best.trades >= PASS_TRADES && r.best.returnPct > 0
                 return (
                   <tr
                     key={`${r.symbol}-${r.timeframe}-${i}`}
@@ -129,11 +129,11 @@ export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: 
                     </td>
                     <td className="px-3 py-1.5 font-mono text-dim">{r.timeframe}</td>
                     <td className="px-3 py-1.5">{r.best.name}</td>
-                    <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${r.best.expectancyR > 0 ? 'text-gain' : r.best.expectancyR < 0 ? 'text-loss' : 'text-dim'}`}>
-                      {r.best.trades ? `${r.best.expectancyR > 0 ? '+' : ''}${r.best.expectancyR.toFixed(2)}R` : '—'}
+                    <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${r.best.returnPct > 0 ? 'text-gain' : r.best.returnPct < 0 ? 'text-loss' : 'text-dim'}`}>
+                      {r.best.trades ? `${r.best.returnPct > 0 ? '+' : ''}${r.best.returnPct.toFixed(1)}%` : '—'}
                     </td>
                     <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.best.trades}</td>
-                    <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.best.trades ? `${(r.best.winRate * 100).toFixed(0)}%` : '—'}</td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.best.trades ? `${r.best.winRate.toFixed(0)}%` : '—'}</td>
                     <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.best.trades === 0 ? '—' : r.best.profitFactor === Infinity ? '∞' : r.best.profitFactor.toFixed(2)}</td>
                   </tr>
                 )
