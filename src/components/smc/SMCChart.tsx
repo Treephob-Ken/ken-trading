@@ -11,6 +11,7 @@ import {
   type SeriesMarker,
   type Time,
   type IPriceLine,
+  type ISeriesMarkersPluginApi,
 } from 'lightweight-charts'
 import type { Candle } from '@/types'
 import type { SMCResult } from '@/lib/smc/types'
@@ -24,6 +25,9 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const boxPrimitiveRef = useRef<BoxPrimitive | null>(null)
+  // Single markers plugin, created once and updated via setMarkers — calling
+  // createSeriesMarkers repeatedly would stack duplicate marker layers.
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const priceLinesRef = useRef<IPriceLine[]>([])
   // One thin line series per structure break (pivot → break, drawn at the
   // pivot level). Kept in a ref so we can remove them when data changes.
@@ -52,7 +56,8 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
     chartRef.current = chart
     seriesRef.current = series
     boxPrimitiveRef.current = boxPrimitive
-    return () => { chart.remove(); chartRef.current = null; seriesRef.current = null; boxPrimitiveRef.current = null }
+    markersRef.current = createSeriesMarkers(series, [])
+    return () => { chart.remove(); chartRef.current = null; seriesRef.current = null; boxPrimitiveRef.current = null; markersRef.current = null }
   }, [])
 
   // Push candles + SMC overlays whenever data changes.
@@ -126,7 +131,7 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
         text: e.kind,
       })) : []),
     ].sort((a, b) => (a.time as number) - (b.time as number))
-    createSeriesMarkers(series, markers)
+    markersRef.current?.setMarkers(markers)
 
     // Clear previous Strong/Weak price lines, then redraw.
     for (const pl of priceLinesRef.current) series.removePriceLine(pl)
@@ -144,11 +149,17 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
 
     // Boxes (order blocks + fair value gaps) drawn behind the candles. FVGs
     // pushed first so order blocks sit on top where they overlap.
+    const FVG_EXTEND = 10 // bars a fair value gap box stretches to the right
     const boxes: SMCBox[] = [
-      ...(showFVG ? result.fairValueGaps.map(g => ({
-        top: g.top, bottom: g.bottom, fromTime: g.fromTime,
-        fill: g.bias === 'bullish' ? 'rgba(0,255,104,0.12)' : 'rgba(255,0,8,0.12)',
-      })) : []),
+      ...(showFVG ? result.fairValueGaps.map(g => {
+        const idx = candles.findIndex(c => c.time === g.fromTime)
+        const toIdx = idx >= 0 ? Math.min(idx + FVG_EXTEND, candles.length - 1) : candles.length - 1
+        return {
+          top: g.top, bottom: g.bottom, fromTime: g.fromTime,
+          toTime: candles[toIdx]?.time,
+          fill: g.bias === 'bullish' ? 'rgba(0,255,104,0.12)' : 'rgba(255,0,8,0.12)',
+        }
+      }) : []),
       ...(showOrderBlocks ? result.orderBlocks.map(ob => ({
         top: ob.top, bottom: ob.bottom, fromTime: ob.fromTime,
         fill: ob.bias === 'bullish' ? 'rgba(49,121,245,0.18)' : 'rgba(247,124,128,0.20)',
