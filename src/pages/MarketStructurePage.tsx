@@ -5,6 +5,7 @@ import { fetchKlines } from '@/lib/binance'
 import { useHLAssets } from '@/lib/hlAssets'
 import { computeSMC } from '@/lib/smc/engine'
 import { summarizeSMC } from '@/lib/smc/summary'
+import { compareSmcEntries } from '@/lib/smc/strategyTest'
 import SMCChart from '@/components/smc/SMCChart'
 import SymbolSearch from '@/components/SymbolSearch'
 import type { Candle } from '@/types'
@@ -52,6 +53,7 @@ export default function MarketStructurePage() {
   const result = useMemo(() => computeSMC(candles, { swingLength }), [candles, swingLength])
   const lastPrice = candles.length ? candles[candles.length - 1].close : 0
   const summary = useMemo(() => summarizeSMC(result, lastPrice), [result, lastPrice])
+  const strategyResults = useMemo(() => compareSmcEntries(candles, result, slPct), [candles, result, slPct])
   const pairLabel = symbol.includes(':') ? symbol.split(':')[1] + '/USDC' : symbol.replace(/USDT$/, '/USDC')
 
   const pickSymbol = (s: string) => { setSymbol(s); localStorage.setItem('lab_symbol', s) }
@@ -168,6 +170,47 @@ export default function MarketStructurePage() {
         </p>
         <p className="mt-2 text-[10px] text-dim italic">
           Guide only — confirm with your own analysis and size by risk. Not financial advice.
+        </p>
+      </section>
+
+      {/* ── Strategy test: which entry rule would have had an edge here ── */}
+      <section className="card p-4">
+        <div className="mb-1 text-xs font-semibold text-text">
+          Strategy test <span className="font-normal text-dim">· {pairLabel} {timeframe} · target 2R, SL {slPct}%</span>
+        </div>
+        <p className="mb-3 text-[11px] text-dim">
+          Which entry rule would have made money in this window (causal, no look-ahead). <span className="text-gain">Positive expectancy</span> = an edge. This window only — not a guarantee of future results.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-left text-dim">
+                <th className="py-1 pr-3">Entry rule</th>
+                <th className="py-1 pr-3 text-right">Trades</th>
+                <th className="py-1 pr-3 text-right">Win %</th>
+                <th className="py-1 pr-3 text-right">Expectancy</th>
+                <th className="py-1 pr-3 text-right">Profit factor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategyResults.map(r => (
+                <tr key={r.name} className="border-t border-border">
+                  <td className="py-1 pr-3 font-medium text-text">{r.name}</td>
+                  <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades}</td>
+                  <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades ? `${(r.winRate * 100).toFixed(0)}%` : '—'}</td>
+                  <td className={`py-1 pr-3 text-right font-mono tabular-nums ${r.expectancyR > 0 ? 'text-gain' : r.expectancyR < 0 ? 'text-loss' : 'text-dim'}`}>
+                    {r.trades ? `${r.expectancyR > 0 ? '+' : ''}${r.expectancyR.toFixed(2)}R` : '—'}
+                  </td>
+                  <td className="py-1 pr-3 text-right font-mono tabular-nums">
+                    {r.trades === 0 ? '—' : r.profitFactor === Infinity ? '∞' : r.profitFactor.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[10px] text-dim italic">
+          Tests only structure entries (causal). Order-block / FVG tap entries come later — they need careful look-ahead-free handling.
         </p>
       </section>
 
