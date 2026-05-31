@@ -20,11 +20,13 @@ import { BoxPrimitive, type SMCBox } from './primitives/boxPrimitive'
 const GREEN = '#089981'
 const RED = '#f23645'
 
-export default function SMCChart({ candles, result, showStructure = true, showStrongWeak = true, showEqual = true, showOrderBlocks = true, showFVG = false, showZones = false, showMTF = false }: { candles: Candle[]; result: SMCResult; showStructure?: boolean; showStrongWeak?: boolean; showEqual?: boolean; showOrderBlocks?: boolean; showFVG?: boolean; showZones?: boolean; showMTF?: boolean }) {
+export default function SMCChart({ candles, result, showStructure = true, showStrongWeak = true, showEqual = true, showOrderBlocks = true, showFVG = false, showZones = false, showMTF = false, showInternal = false, showTrend = false }: { candles: Candle[]; result: SMCResult; showStructure?: boolean; showStrongWeak?: boolean; showEqual?: boolean; showOrderBlocks?: boolean; showFVG?: boolean; showZones?: boolean; showMTF?: boolean; showInternal?: boolean; showTrend?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const boxPrimitiveRef = useRef<BoxPrimitive | null>(null)
+  // Dashed line series for internal-structure breaks.
+  const internalLinesRef = useRef<ISeriesApi<'Line'>[]>([])
   // Single markers plugin, created once and updated via setMarkers — calling
   // createSeriesMarkers repeatedly would stack duplicate marker layers.
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
@@ -67,7 +69,14 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
     if (!series || !chart) return
 
     series.setData(
-      candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close })),
+      candles.map((c, i) => {
+        const base = { time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close }
+        if (!showTrend) return base
+        // Trend candles: color the whole candle by the swing trend bias.
+        const b = result.trendBias[i] ?? 0
+        const col = b === 1 ? GREEN : b === -1 ? RED : '#5d606b'
+        return { ...base, color: col, wickColor: col, borderColor: col }
+      }),
     )
 
     // Structure lines: a horizontal segment from the broken pivot to the bar
@@ -89,6 +98,27 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
           { time: s.atTime as Time, value: s.level },
         ])
         structureLinesRef.current.push(ls)
+      }
+    }
+
+    // Internal structure: dashed lines for the shorter-length breaks.
+    for (const ls of internalLinesRef.current) chart.removeSeries(ls)
+    internalLinesRef.current = []
+    if (showInternal) {
+      for (const s of result.internalStructures) {
+        const ls = chart.addSeries(LineSeries, {
+          color: s.bias === 'bullish' ? GREEN : RED,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        })
+        ls.setData([
+          { time: s.fromTime as Time, value: s.level },
+          { time: s.atTime as Time, value: s.level },
+        ])
+        internalLinesRef.current.push(ls)
       }
     }
 
@@ -194,7 +224,7 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
     boxPrimitiveRef.current?.setBoxes(boxes)
 
     chart.timeScale().fitContent()
-  }, [candles, result, showStructure, showStrongWeak, showEqual, showOrderBlocks, showFVG, showZones, showMTF])
+  }, [candles, result, showStructure, showStrongWeak, showEqual, showOrderBlocks, showFVG, showZones, showMTF, showInternal, showTrend])
 
   return (
     <div className="relative">

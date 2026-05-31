@@ -11,15 +11,17 @@ import type { Candle } from '@/types'
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
 
-type LayerKey = 'structure' | 'strongWeak' | 'orderBlocks' | 'equal' | 'fvg' | 'zones' | 'mtf'
+type LayerKey = 'structure' | 'internal' | 'strongWeak' | 'orderBlocks' | 'equal' | 'fvg' | 'zones' | 'mtf' | 'trend'
 const LAYERS: { key: LayerKey; label: string }[] = [
   { key: 'structure', label: 'BOS/CHoCH' },
+  { key: 'internal', label: 'Internal' },
   { key: 'strongWeak', label: 'Strong/Weak' },
   { key: 'orderBlocks', label: 'Order blocks' },
   { key: 'equal', label: 'EQH/EQL' },
   { key: 'fvg', label: 'Fair Value Gap' },
   { key: 'zones', label: 'Premium/Discount' },
   { key: 'mtf', label: 'MTF levels' },
+  { key: 'trend', label: 'Trend candles' },
 ]
 
 export default function MarketStructurePage() {
@@ -31,7 +33,7 @@ export default function MarketStructurePage() {
   const [riskUsd, setRiskUsd] = useState(3)
   const [slPct, setSlPct] = useState(1.5)
   const [visible, setVisible] = useState<Record<LayerKey, boolean>>({
-    structure: true, strongWeak: true, orderBlocks: true, equal: true, fvg: false, zones: false, mtf: false,
+    structure: true, internal: false, strongWeak: true, orderBlocks: true, equal: true, fvg: false, zones: false, mtf: false, trend: false,
   })
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(false)
@@ -139,6 +141,8 @@ export default function MarketStructurePage() {
             showFVG={visible.fvg}
             showZones={visible.zones}
             showMTF={visible.mtf}
+            showInternal={visible.internal}
+            showTrend={visible.trend}
           />
         )}
       </section>
