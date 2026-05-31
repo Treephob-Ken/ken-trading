@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Candle } from '@/types'
 import { computeSMC } from './engine'
+import { summarizeSMC } from './summary'
 
 // Helper: build flat OHLC candles from a list of prices (high=low=close=open).
 function series(prices: number[]): Candle[] {
@@ -176,5 +177,34 @@ describe('computeSMC — fair value gaps', () => {
     ])
     const r = computeSMC(c)
     expect(r.fairValueGaps.length).toBe(0)
+  })
+})
+
+describe('computeSMC — zones', () => {
+  it('splits the swing range into premium/equilibrium/discount', () => {
+    const r = computeSMC(series(PATH), { swingLength: 3 })
+    expect(r.zones).not.toBeNull()
+    expect(r.zones!.bottom).toBeLessThan(r.zones!.equilibrium)
+    expect(r.zones!.equilibrium).toBeLessThan(r.zones!.top)
+    expect(r.zones!.equilibrium).toBeCloseTo((r.zones!.top + r.zones!.bottom) / 2, 6)
+  })
+})
+
+describe('summarizeSMC', () => {
+  it('flags a bullish-in-discount setup as favorable for longs', () => {
+    const bullishEnding = [0, 2, 4, 6, 8, 10, 8, 6, 4, 2, 4, 6, 8, 10, 12, 14]
+    const r = computeSMC(series(bullishEnding), { swingLength: 3 })
+    const eq = r.zones!.equilibrium
+    const s = summarizeSMC(r, eq - (r.zones!.top - r.zones!.bottom) * 0.3) // price below mid
+    expect(s.bias).toBe('bullish')
+    expect(s.zone).toBe('discount')
+    expect(s.note.toLowerCase()).toContain('bullish')
+  })
+
+  it('returns neutral with no structure', () => {
+    const r = computeSMC(series([1, 2, 3]), { swingLength: 50 })
+    const s = summarizeSMC(r, 2)
+    expect(s.bias).toBe('neutral')
+    expect(s.note.toLowerCase()).toContain('no confirmed structure')
   })
 })

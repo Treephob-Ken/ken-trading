@@ -61,6 +61,21 @@ export interface FairValueGap {
   fromTime: number // unix seconds of the gap (middle) candle
 }
 
+// Premium / equilibrium / discount split of the current swing range.
+// Above equilibrium = premium (expensive, prefer selling); below = discount.
+export interface Zones {
+  top: number
+  equilibrium: number
+  bottom: number
+}
+
+// Previous-period high/low from a higher timeframe (PDH/PDL, PWH/PWL, PMH/PML).
+export interface MTFLevel {
+  tf: 'D' | 'W' | 'M'
+  high: number
+  low: number
+}
+
 export interface SMCResult {
   structures: StructureBreak[]
   // null when there isn't enough data to establish extremes.
@@ -70,4 +85,8 @@ export interface SMCResult {
   equalLevels: EqualLevel[]
   // Active (un-filled) fair value gaps, newest first.
   fairValueGaps: FairValueGap[]
+  // Premium/discount split of the current swing range (null if no swing yet).
+  zones: Zones | null
+  // Previous-period high/low levels available from the loaded candles.
+  mtfLevels: MTFLevel[]
 }

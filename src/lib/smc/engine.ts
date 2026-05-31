@@ -9,7 +9,7 @@
 
 import type { Candle } from '@/types'
 import { atr } from '../indicators'
-import type { EqualLevel, FairValueGap, OrderBlock, SMCResult, SMCSettings, StructureBreak, TrailingExtremes } from './types'
+import type { EqualLevel, FairValueGap, MTFLevel, OrderBlock, SMCResult, SMCSettings, StructureBreak, TrailingExtremes, Zones } from './types'
 
 const DEFAULTS: SMCSettings = { swingLength: 50, orderBlockCount: 5, equalLength: 3, equalThreshold: 0.1 }
 
@@ -19,7 +19,7 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   const n = candles.length
   const structures: StructureBreak[] = []
 
-  if (n === 0) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [], fairValueGaps: [] }
+  if (n === 0) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [], fairValueGaps: [], zones: null, mtfLevels: [] }
   // Swing structure needs enough bars for the pivot window; EQH/EQL (shorter
   // length) runs independently below even when this is false.
   const hasSwing = n >= size + 2
@@ -214,5 +214,43 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   fairValueGaps.reverse()
   fairValueGaps.length = Math.min(fairValueGaps.length, 30)
 
-  return { structures, trailing, orderBlocks, equalLevels, fairValueGaps }
+  // Premium/discount split of the current swing range.
+  const zones: Zones | null = trailing
+    ? { top: trailing.top, equilibrium: (trailing.top + trailing.bottom) / 2, bottom: trailing.bottom }
+    : null
+
+  // Previous-period high/low from the loaded candles (PDH/PDL, PWH/PWL, PMH/PML).
+  const mtfLevels = computeMtfLevels(high, low, time)
+
+  return { structures, trailing, orderBlocks, equalLevels, fairValueGaps, zones, mtfLevels }
+}
+
+// Bucket bars by UTC day/week/month and return the most-recent COMPLETED
+// period's high/low for each timeframe present in the data.
+function computeMtfLevels(high: number[], low: number[], time: number[]): MTFLevel[] {
+  const out: MTFLevel[] = []
+  const dayKey = (t: number) => Math.floor(t / 86400)
+  const weekKey = (t: number) => Math.floor(t / (7 * 86400))
+  const monthKey = (t: number) => {
+    const d = new Date(t * 1000)
+    return d.getUTCFullYear() * 12 + d.getUTCMonth()
+  }
+  const priorPeriod = (tf: 'D' | 'W' | 'M', key: (t: number) => number) => {
+    const current = key(time[time.length - 1])
+    let hi = -Infinity
+    let lo = Infinity
+    let found = false
+    for (let i = 0; i < time.length; i++) {
+      if (key(time[i]) === current - 1) {
+        found = true
+        if (high[i] > hi) hi = high[i]
+        if (low[i] < lo) lo = low[i]
+      }
+    }
+    if (found) out.push({ tf, high: hi, low: lo })
+  }
+  priorPeriod('D', dayKey)
+  priorPeriod('W', weekKey)
+  priorPeriod('M', monthKey)
+  return out
 }
