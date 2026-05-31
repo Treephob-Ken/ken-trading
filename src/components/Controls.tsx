@@ -250,6 +250,24 @@ export default function Controls(props: Props) {
               />
             </div>
           ))}
+          {/* SMC has an extra entry knob not in strategyMeta: enter on the break
+              (0) or wait for the pull-back and enter on the retest of the broken
+              level / order-block / FVG (1/2/3). */}
+          {props.strategyId === 'smc' && (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted">Entry rule</span>
+              <select
+                className="field w-40 text-right"
+                value={props.params.entryMode ?? 0}
+                onChange={(e) => props.onParam('entryMode', Number(e.target.value))}
+              >
+                <option value={0}>Break</option>
+                <option value={1}>Retest level</option>
+                <option value={2}>Retest OB</option>
+                <option value={3}>Retest FVG</option>
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
