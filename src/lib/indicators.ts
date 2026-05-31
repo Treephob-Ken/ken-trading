@@ -552,8 +552,9 @@ export interface SMCResult {
   swingHighs: { time: number; level: number; bar: number }[]
   swingLows:  { time: number; level: number; bar: number }[]
   // Every structure break (both BOS and CHoCH, regardless of signalMode) so the
-  // chart can label them. Display-only — does not affect signals.
-  breaks: { time: number; kind: 'BOS' | 'CHoCH'; bias: 'bullish' | 'bearish' }[]
+  // chart can draw the pivot→break line + label. Display-only — no signal effect.
+  // time = break bar, fromTime = the broken pivot's bar, level = pivot price.
+  breaks: { time: number; fromTime: number; level: number; kind: 'BOS' | 'CHoCH'; bias: 'bullish' | 'bearish' }[]
 }
 
 export type SMCSignalMode = 'choch' | 'both'
@@ -617,14 +618,14 @@ export function smcStructure(
       const isChoch = bias === -1
       pendingHigh.crossed = true
       bias = 1
-      breaks.push({ time: times[i], kind: isChoch ? 'CHoCH' : 'BOS', bias: 'bullish' })
+      breaks.push({ time: times[i], fromTime: times[pendingHigh.bar], level: pendingHigh.level, kind: isChoch ? 'CHoCH' : 'BOS', bias: 'bullish' })
       if (signalMode === 'both' || isChoch) signals[i] = 'buy'
     }
     if (pendingLow && !pendingLow.crossed && closes[i] < pendingLow.level) {
       const isChoch = bias === 1
       pendingLow.crossed = true
       bias = -1
-      breaks.push({ time: times[i], kind: isChoch ? 'CHoCH' : 'BOS', bias: 'bearish' })
+      breaks.push({ time: times[i], fromTime: times[pendingLow.bar], level: pendingLow.level, kind: isChoch ? 'CHoCH' : 'BOS', bias: 'bearish' })
       if (signalMode === 'both' || isChoch) signals[i] = 'sell'
     }
   }

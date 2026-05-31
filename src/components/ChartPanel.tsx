@@ -117,6 +117,24 @@ export default function ChartPanel({ candles, output, trades, liveCandle, select
       indicatorLinesRef.current.push(s)
     }
 
+    // SMC structure lines: one short horizontal segment per BOS/CHoCH (pivot →
+    // break). Kept in indicatorLinesRef so the Hide-Indicator toggle hides them.
+    for (const sl of output?.structureLines ?? []) {
+      const s = chart.addSeries(LineSeries, {
+        color: sl.color,
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        visible: showIndicator,
+      })
+      s.setData([
+        { time: t(sl.fromTime), value: sl.level },
+        { time: t(sl.toTime), value: sl.level },
+      ])
+      indicatorLinesRef.current.push(s)
+    }
+
     waveMarkersRef.current = (output?.waveMarkers ?? []).map((wm) => ({
       time: t(wm.time),
       position: wm.position,

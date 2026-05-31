@@ -276,6 +276,15 @@ export interface PriceLine {
   label: string
 }
 
+// A short horizontal line from a pivot to where price broke it (BOS/CHoCH),
+// drawn at the pivot's price level. Not shown in the indicator legend.
+export interface StructureLine {
+  fromTime: number
+  toTime: number
+  level: number
+  color: string
+}
+
 export interface StrategyOutput {
   signals: Signal[]
   mainLines: SeriesLine[]
@@ -287,6 +296,7 @@ export interface StrategyOutput {
   }
   waveMarkers?: WaveMarker[]
   priceLines?: PriceLine[]
+  structureLines?: StructureLine[]
 }
 
 function toLine(times: number[], values: number[]): LinePoint[] {
@@ -775,21 +785,27 @@ export function generateSignals(
       const r = smcStructure(highs, lows, closes, times, swingSize, mode)
       // Pivot dots overlay on the main chart so the user can see where the
       // structure breaks happened. Lows below the candle, highs above.
-      const swingHighLine: LinePoint[] = r.swingHighs.map((p) => ({ time: p.time, value: p.level }))
-      const swingLowLine:  LinePoint[] = r.swingLows.map((p)  => ({ time: p.time, value: p.level }))
-      // Label every structure break so the chart shows BOS / CHoCH, not just lines.
+      const GREEN = '#089981'
+      const RED = '#f23645'
+      // Label every structure break (BOS / CHoCH) ...
       const waveMarkers: WaveMarker[] = r.breaks.map((b) => ({
         time: b.time,
         label: b.kind,
         position: b.bias === 'bullish' ? 'belowBar' : 'aboveBar',
       }))
+      // ... and draw the pivot→break line at the broken level (like Market
+      // Structure), instead of the long zig-zag swing lines.
+      const structureLines = r.breaks.map((b) => ({
+        fromTime: b.fromTime,
+        toTime: b.time,
+        level: b.level,
+        color: b.bias === 'bullish' ? GREEN : RED,
+      }))
       return {
         signals: r.signals as Signal[],
-        mainLines: [
-          { id: 'smc-swing-high', color: 'rgba(239,68,68,0.6)', data: swingHighLine },
-          { id: 'smc-swing-low',  color: 'rgba(34,197,94,0.6)', data: swingLowLine },
-        ],
+        mainLines: [],
         waveMarkers,
+        structureLines,
       }
     }
 

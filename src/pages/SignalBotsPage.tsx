@@ -261,6 +261,21 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
       indicatorLinesRef.current.push(s)
     }
 
+    // SMC structure lines: one short horizontal segment per BOS/CHoCH (pivot →
+    // break). Kept in indicatorLinesRef so the Hide-Indicator toggle hides them.
+    for (const sl of strategyOutput.structureLines ?? []) {
+      const s = chart.addSeries(LineSeries, {
+        color: sl.color, lineWidth: 2,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        visible: showIndicator,
+      })
+      s.setData([
+        { time: t(sl.fromTime), value: sl.level },
+        { time: t(sl.toTime), value: sl.level },
+      ])
+      indicatorLinesRef.current.push(s)
+    }
+
     // Horizontal price lines (Elliott Fibonacci retracements, etc.) — same
     // rendering as the Backtester's ChartPanel so live charts match what the
     // backtest shows. Captured so the Hide Indicator toggle can hide them too.
