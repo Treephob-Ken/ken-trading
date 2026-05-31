@@ -134,14 +134,17 @@ export default function IndicatorScanTab({
       setError('Symbol universe is empty — refresh on the page header.')
       return
     }
-    // If the user picked a coin, scan only the symbols whose base matches.
-    // Empty search → scan the full universe as before. Matching is "contains"
-    // and case-insensitive so typing "BT" picks up BTC; an exact base also
-    // works of course.
+    // Coin filter controls the scan scope:
+    //   - User picked a coin     → scan only the matching coin(s)
+    //   - No filter (full sweep) → scan the top DEFAULT_SCAN_LIMIT by volume,
+    //     not the entire universe. The universe holds every HL-tradeable coin
+    //     so the picker can offer them all, but a default sweep across 150+
+    //     coins is way too slow for "show me where the edge is right now".
     const q = search.trim().toUpperCase()
+    const DEFAULT_SCAN_LIMIT = 30
     const scanUniverse = q
       ? universe.filter((s) => s.base.toUpperCase().includes(q) || s.symbol.toUpperCase().includes(q))
-      : universe
+      : universe.slice(0, DEFAULT_SCAN_LIMIT)
     if (scanUniverse.length === 0) {
       setError(`No coins in the universe match "${search}". Clear the coin filter or refresh the universe.`)
       return
@@ -369,16 +372,18 @@ export default function IndicatorScanTab({
             onClick={start}
             disabled={universe.length === 0}
             className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-            title={search.trim() ? `Scan only coins matching "${search}"` : `Scan the full universe (${universe.length} coins)`}
+            title={search.trim() ? `Scan only coins matching "${search}"` : `Scan top 30 by volume (universe has ${universe.length} total)`}
           >
             <Play className="h-4 w-4" />
             {(() => {
               // Show target scope in the button so it's obvious whether the
-              // coin filter is restricting the scan or not.
+              // coin filter is restricting the scan to one coin or running
+              // the default top-30 sweep.
               const q = search.trim().toUpperCase()
-              const targets = q ? universe.filter((s) => s.base.toUpperCase().includes(q) || s.symbol.toUpperCase().includes(q)).length : universe.length
               const label = rows.length > 0 ? 'Re-scan' : 'Scan'
-              return q ? `${label} ${targets} coin${targets === 1 ? '' : 's'}` : label
+              if (!q) return `${label} top 30`
+              const targets = universe.filter((s) => s.base.toUpperCase().includes(q) || s.symbol.toUpperCase().includes(q)).length
+              return `${label} ${targets} coin${targets === 1 ? '' : 's'}`
             })()}
           </button>
         )}

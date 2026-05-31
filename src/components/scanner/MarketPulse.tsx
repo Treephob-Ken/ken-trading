@@ -103,7 +103,18 @@ export default function MarketPulse({ rows, onPick }: Props) {
       {rec.topPicks.length > 0 && (
         <div>
           <div className="text-[10px] uppercase tracking-wider text-dim mb-2">
-            Top picks for now (filtered to fit regime)
+            {(() => {
+              // Detect single-coin scan from the picks themselves: if all 3
+              // picks share the same base, surface that in the heading so the
+              // user immediately sees these are strategies for ONE coin, not
+              // picks across many coins.
+              const bases = new Set(rec.topPicks.map((p) => p.base))
+              if (bases.size === 1) {
+                const coin = rec.topPicks[0].base
+                return `Best strategies for ${coin}`
+              }
+              return 'Top picks for now (filtered to fit regime)'
+            })()}
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
             {rec.topPicks.map((r, i) => {

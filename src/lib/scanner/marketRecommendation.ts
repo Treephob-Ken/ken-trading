@@ -154,13 +154,20 @@ export function recommendForMarket(rows: IndicatorScanRow[]): MarketRecommendati
     const bv = (b.qualityScore ?? b.totalReturnPct ?? 0) as number
     return bv - av
   })
-  // De-duplicate by base so the top 3 spans different coins (avoids three
-  // rows of "BTC · 1h · X / BTC · 4h · X / BTC · 1d · X").
-  const seenBases = new Set<string>()
+  // Pick top 3. For a multi-coin scan we de-duplicate by base so the trio
+  // spans different coins (avoids "BTC · 1h · X / BTC · 4h · X / BTC · 1d
+  // · X"). But for a single-coin scan that dedupe collapses everything to
+  // one row — exactly the opposite of what's useful. In that case we
+  // de-duplicate by strategy instead, so the picks become "best strategy /
+  // 2nd-best strategy / 3rd-best strategy for the chosen coin".
+  const uniqueBasesInCandidates = new Set(candidates.map((r) => r.base))
+  const singleCoinScan = uniqueBasesInCandidates.size === 1
+  const seenKeys = new Set<string>()
   const topPicks: IndicatorScanRow[] = []
   for (const r of candidates) {
-    if (seenBases.has(r.base)) continue
-    seenBases.add(r.base)
+    const key = singleCoinScan ? String(r.strategyId) : r.base
+    if (seenKeys.has(key)) continue
+    seenKeys.add(key)
     topPicks.push(r)
     if (topPicks.length >= 3) break
   }
