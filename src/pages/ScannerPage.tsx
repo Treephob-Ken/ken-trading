@@ -8,13 +8,14 @@ import {
 } from '@/lib/scanner/universe'
 import IndicatorScanTab from '@/components/scanner/IndicatorScanTab'
 import GridScanTab from '@/components/scanner/GridScanTab'
+import SmcScanTab from '@/components/scanner/SmcScanTab'
 
 interface Props {
   onSymbol: (v: string) => void
   onTimeframe: (v: string) => void
 }
 
-type TabId = 'indicator' | 'grid'
+type TabId = 'indicator' | 'grid' | 'smc'
 
 export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
   const [tab, setTab] = useState<TabId>(
@@ -143,6 +144,17 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
         >
           Grid
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('smc')}
+          className={`px-4 py-2 text-sm font-semibold transition-colors -mb-px border-b-2 ${
+            tab === 'smc'
+              ? 'border-brand text-text'
+              : 'border-transparent text-dim hover:text-text'
+          }`}
+        >
+          SMC
+        </button>
       </div>
 
       {tab === 'indicator' ? (
@@ -151,8 +163,14 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
           onPickSymbol={onSymbol}
           onPickTimeframe={onTimeframe}
         />
-      ) : (
+      ) : tab === 'grid' ? (
         <GridScanTab
+          universe={universe}
+          onPickSymbol={onSymbol}
+          onPickTimeframe={onTimeframe}
+        />
+      ) : (
+        <SmcScanTab
           universe={universe}
           onPickSymbol={onSymbol}
           onPickTimeframe={onTimeframe}
