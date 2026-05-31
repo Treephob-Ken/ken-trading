@@ -1324,6 +1324,22 @@ export default function SignalBotsPage() {
                 </div>
               )}
 
+              {/* SMC has an extra entry knob not in strategyMeta: enter on the
+                  break (0) or wait for the pull-back and enter on the retest of
+                  the broken level / order-block / FVG (1/2/3). */}
+              {cfg.strategyId === 'smc' && (
+                <Field label="Entry rule">
+                  <select disabled={running} value={cfg.params.entryMode ?? 0}
+                    onChange={(e) => patch({ params: { ...cfg.params, entryMode: Number(e.target.value) } })}
+                    className={inputCls}>
+                    <option value={0}>Break — enter on the break</option>
+                    <option value={1}>Retest level — wait for pull-back to broken level</option>
+                    <option value={2}>Retest OB — wait for pull-back to order block</option>
+                    <option value={3}>Retest FVG — wait for pull-back to fair-value gap</option>
+                  </select>
+                </Field>
+              )}
+
               <div className="my-1 h-px bg-border" />
 
               {/* ── Sizing Mode — mirrors the Backtester's Fixed | Risk-based toggle ── */}
