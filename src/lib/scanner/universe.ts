@@ -20,7 +20,10 @@ let _cryptoCache: SymbolInfo[] | null = null
 let _hip3Cache: SymbolInfo[] | null = null
 
 async function getCryptoUniverse(limit: number): Promise<SymbolInfo[]> {
-  if (_cryptoCache && _cryptoCache.length >= limit) return _cryptoCache.slice(0, limit)
+  // The cache always holds the full ranked list, so any cache hit covers any
+  // requested limit (including Infinity). Comparing length >= limit would
+  // miss Infinity and force a wasteful refetch.
+  if (_cryptoCache) return _cryptoCache.slice(0, limit)
 
   const [hlAssets, tickers] = await Promise.all([
     fetchHLAssets(),
@@ -59,9 +62,12 @@ interface Hip3UniverseRow {
 }
 
 async function getHip3Universe(limit: number): Promise<SymbolInfo[]> {
-  if (_hip3Cache && _hip3Cache.length >= limit) return _hip3Cache.slice(0, limit)
+  if (_hip3Cache) return _hip3Cache.slice(0, limit)
   const jwt = localStorage.getItem('auth_jwt') ?? ''
-  const res = await fetch(`/api/scanner-universe?limit=${limit}`, {
+  // Infinity wouldn't serialize meaningfully in the query string; use a large
+  // finite value so the server returns "essentially everything".
+  const serverLimit = Number.isFinite(limit) ? limit : 1000
+  const res = await fetch(`/api/scanner-universe?limit=${serverLimit}`, {
     headers: jwt ? { Authorization: `Bearer ${jwt}` } : {},
   })
   if (!res.ok) throw new Error(`/api/scanner-universe returned ${res.status}`)

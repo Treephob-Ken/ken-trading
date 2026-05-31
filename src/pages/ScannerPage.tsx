@@ -38,7 +38,11 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
   const loadUniverse = () => {
     setLoading(true)
     setError(null)
-    getScannerUniverse(30, kind)
+    // Load every HL-tradeable coin that also has a Binance pair (so the coin
+    // picker covers everything the user can trade), not just the top 30.
+    // The scan respects whatever the coin filter is set to, so a full
+    // universe doesn't force scanning every coin — only what the user picks.
+    getScannerUniverse(Number.POSITIVE_INFINITY, kind)
       .then((u) => {
         setUniverse(u)
         setLoading(false)
