@@ -677,6 +677,13 @@ export default function SignalBotsPage() {
   // Live SL/TP for the bot's asset (when a position is open on HL).
   // Polled together with status. null = not yet fetched; { slPx: null, tpPx: null } = no brackets.
   const [brackets, setBrackets] = useState<{ slPx: number | null; tpPx: number | null } | null>(null)
+  // Count of consecutive empty bracket polls — HL's frontendOpenOrders is
+  // flaky and intermittently returns no triggers even while they're alive.
+  // We require 2 empty polls in a row before clearing the panel, so the UI
+  // doesn't flicker "No active SL/TP" every 5s.
+  const emptyBracketCountRef = useRef(0)
+  const bracketsRef = useRef<{ slPx: number | null; tpPx: number | null } | null>(null)
+  useEffect(() => { bracketsRef.current = brackets }, [brackets])
   // Bracket edit form state — `null` = view mode, object = editing
   const [bracketEdit, setBracketEdit] = useState<{ slPrice: string; tpPrice: string } | null>(null)
 
@@ -925,13 +932,29 @@ export default function SignalBotsPage() {
         if ((!dirtyRef.current && !staleByRace) || st.running) setCfg(st.config)
         // Fetch live brackets for this bot's asset — fire-and-forget so a
         // slow HL response doesn't block the status update.
+        //
+        // Stickiness: HL's frontendOpenOrders intermittently returns no
+        // triggers for ~1 poll even while brackets are alive. To stop the
+        // panel from flickering "No active SL/TP" every 5s, we only clear
+        // brackets after 2 consecutive empty polls. Errors keep stale data.
         const asset = (st.config?.asset || '').trim().toUpperCase()
         if (asset) {
           apiFetch(`/api/positions/${encodeURIComponent(asset)}/brackets`)
-            .then((r) => r.ok ? r.json() : { slPx: null, tpPx: null })
-            .then((d: { slPx: number | null; tpPx: number | null }) => setBrackets(d))
-            .catch(() => setBrackets({ slPx: null, tpPx: null }))
+            .then(async (r) => ({ ok: r.ok, data: r.ok ? await r.json() as { slPx: number | null; tpPx: number | null } : null }))
+            .then(({ ok, data }) => {
+              if (!ok || !data) return // keep stale brackets on HTTP error
+              const empty = data.slPx === null && data.tpPx === null
+              const hadBefore = bracketsRef.current && (bracketsRef.current.slPx !== null || bracketsRef.current.tpPx !== null)
+              if (empty && hadBefore && emptyBracketCountRef.current < 1) {
+                emptyBracketCountRef.current += 1
+                return // 1st empty after good data — likely transient, keep stale
+              }
+              emptyBracketCountRef.current = 0
+              setBrackets(data)
+            })
+            .catch(() => { /* keep stale brackets on network error */ })
         } else {
+          emptyBracketCountRef.current = 0
           setBrackets(null)
         }
       }
@@ -1510,10 +1533,11 @@ export default function SignalBotsPage() {
                   </button>
                 </div>
                 <p className="mb-2 text-[10px] text-dim leading-snug">
-                  Looks back 500 bars, finds every past signal, and measures how far price ran
+                  Looks back 1500 bars, finds every past signal, and measures how far price ran
                   before reversal. Sets TP at the <strong>P75</strong> of that distribution — far
                   enough from fill to avoid HL "trigger condition met" rejections, but still
-                  within the strategy's typical reach. Good for sideways; turn OFF in trends.
+                  within the strategy's typical reach. Needs ≥5 signals per side.
+                  Good for sideways; turn OFF in trends.
                 </p>
 
                 {status?.tpSuggestion ? (
@@ -1537,7 +1561,7 @@ export default function SignalBotsPage() {
                           <div className="mt-1 flex items-center justify-between">
                             <span className="text-dim">Suggested TP</span>
                             <span className={`font-mono font-semibold ${using ? 'text-brand' : 'text-text'}`}>
-                              {s.suggestion ? `${s.suggestion}%` : `— (need ≥10 signals)`}
+                              {s.suggestion ? `${s.suggestion}%` : `— (need ≥5 signals)`}
                               {using ? ' ← active' : ''}
                             </span>
                           </div>
