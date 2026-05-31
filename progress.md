@@ -65,7 +65,7 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | HIP-3 positions visible + closeable in Trade page Open Positions (cross-dex) | ✅ Phase C.1 |
 | Signal bots can target HIP-3 symbols (xyz:GOLD etc.) end-to-end | ✅ Phase C.2 |
 | Live SSE log tail across all bots | ✅ Logs page |
-| Market Structure page (LuxAlgo SMC port) | ✅ Phase 1 — `/structure`: swing BOS/CHoCH labels + Strong/Weak high-low. Phases 2-4 (order blocks, EQH/EQL, FVG, zones, deploy-to-bot) pending |
+| Market Structure page (LuxAlgo SMC port) | ✅ `/structure`: BOS/CHoCH + structure lines, Strong/Weak, Order Blocks (boxes), EQH/EQL, Fair Value Gaps, Premium/Discount zones, MTF prev D/W/M levels. Per-layer show/hide toggles, SymbolSearch dropdown, **Setup Summary** panel (bias/zone/nearest OB-FVG-liquidity + plain-language note via `src/lib/smc/summary.ts`), and **Deploy to Signal Bot** (strategy=smc, risk-based sizing). Engine `src/lib/smc/` is pure + unit-tested (Vitest, 17 tests) |
 | Unit tests (Vitest) | ✅ `npm test` — SMC engine covered; first test suite in the repo |
 | Login page redesign (dot-grid, framer-motion) | ✅ |
 | Portfolio page — account-value trend (HL portfolio), max drawdown, bot leaderboard, Power BI cross-filter | ✅ two-layer model (see gotcha) |
@@ -74,13 +74,12 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 
 ## What's still pending
 
-- [ ] **SMC Market Structure — Phases 2-4** (spec: `docs/superpowers/specs/2026-05-31-smc-market-structure-design.md`,
-      plan: `docs/superpowers/plans/2026-05-31-smc-market-structure-phase1.md`):
-      Phase 2 = order blocks + EQH/EQL (needs custom Lightweight Charts box/label primitives);
-      Phase 3 = fair value gaps + premium/discount zones + MTF levels + trend candles;
-      Phase 4 = SMC events → alerts + deploy-to-bot (port engine into `bot/src/strategy/`).
-      ⚠️ LuxAlgo SMC is CC BY-NC-SA (non-commercial only).
-      Phase 1 chart rendering is **not yet visually verified in a browser** — confirm before relying on it.
+- [ ] **SMC Market Structure — follow-ups** (spec: `docs/superpowers/specs/2026-05-31-smc-market-structure-design.md`).
+      Phases 1-3 shipped. Remaining nice-to-haves: trend-colored candles; internal-structure (length-5)
+      BOS/CHoCH + internal order blocks; richer deploy-to-bot triggers (order-block tap / FVG entry, not just
+      swing CHoCH — would need the SMC engine ported into `bot/src/strategy/` to keep web↔bot in sync);
+      volume-profile-weighted order blocks (JacobMagleby idea — needs lower-TF volume). ⚠️ LuxAlgo SMC is
+      CC BY-NC-SA (non-commercial only). Chart visuals are verified by the user on deploy, not by automated test.
 - [ ] HIP-3 follow-ups (none blocking; nice-to-haves):
       - Resting limit orders aren't shown anywhere in the dashboard; you only
         know a limit didn't fill by checking the HL UI directly.
