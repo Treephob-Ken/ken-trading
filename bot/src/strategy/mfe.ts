@@ -19,14 +19,12 @@ export interface MfeStats {
   median: number    // P50 MFE %
   p25: number       // P25 MFE %
   p75: number       // P75 MFE %
-  suggestion: number | null  // suggested TP % (= median) or null if too few signals
+  suggestion: number | null  // suggested TP % (= P75) or null if too few signals
 }
 
 export interface MfeResult {
   buy: MfeStats | null
   sell: MfeStats | null
-  // Combined suggestion: max of buy/sell (so we never under-shoot either
-  // direction). When tradeSide is restricted, the bot picks the right one.
   symbol: string
   timeframe: string
   strategyId: StrategyId
@@ -34,8 +32,14 @@ export interface MfeResult {
   computedAt: number
 }
 
-const LOOKBACK_BARS = 500
-const MIN_SIGNALS = 10
+// 1000 is Binance's max bars per REST call (fetchKlines caps at 1000 and does
+// not paginate), so requesting more is silently truncated. 1000 bars ≈ 21 days
+// at 30m, ~3.5 days at 5m — wide enough to catch enough signals on slow
+// strategies (RSI Reversal etc.) without overweighting old regimes. Combined
+// with MIN_SIGNALS=5, most bots get a suggestion within a day of running
+// instead of needing 30+ historical signals.
+const LOOKBACK_BARS = 1000
+const MIN_SIGNALS = 5
 
 // Public: compute MFE stats for a bot's exact strategy/symbol/timeframe.
 export async function computeMfeStats(
