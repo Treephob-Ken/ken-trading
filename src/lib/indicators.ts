@@ -551,6 +551,9 @@ export interface SMCResult {
   // Side history of the most-recent swing pivots — useful for charting later.
   swingHighs: { time: number; level: number; bar: number }[]
   swingLows:  { time: number; level: number; bar: number }[]
+  // Every structure break (both BOS and CHoCH, regardless of signalMode) so the
+  // chart can label them. Display-only — does not affect signals.
+  breaks: { time: number; kind: 'BOS' | 'CHoCH'; bias: 'bullish' | 'bearish' }[]
 }
 
 export type SMCSignalMode = 'choch' | 'both'
@@ -567,7 +570,8 @@ export function smcStructure(
   const signals: ('buy' | 'sell' | null)[] = new Array(n).fill(null)
   const swingHighs: SMCResult['swingHighs'] = []
   const swingLows:  SMCResult['swingLows']  = []
-  if (n < swingSize + 2 || swingSize < 2) return { signals, swingHighs, swingLows }
+  const breaks: SMCResult['breaks'] = []
+  if (n < swingSize + 2 || swingSize < 2) return { signals, swingHighs, swingLows, breaks }
 
   // Pine `var leg = 0` → start bearish; flips when newLegHigh / newLegLow fires.
   let leg = 0       // 0 = bearish leg, 1 = bullish leg
@@ -613,15 +617,17 @@ export function smcStructure(
       const isChoch = bias === -1
       pendingHigh.crossed = true
       bias = 1
+      breaks.push({ time: times[i], kind: isChoch ? 'CHoCH' : 'BOS', bias: 'bullish' })
       if (signalMode === 'both' || isChoch) signals[i] = 'buy'
     }
     if (pendingLow && !pendingLow.crossed && closes[i] < pendingLow.level) {
       const isChoch = bias === 1
       pendingLow.crossed = true
       bias = -1
+      breaks.push({ time: times[i], kind: isChoch ? 'CHoCH' : 'BOS', bias: 'bearish' })
       if (signalMode === 'both' || isChoch) signals[i] = 'sell'
     }
   }
 
-  return { signals, swingHighs, swingLows }
+  return { signals, swingHighs, swingLows, breaks }
 }

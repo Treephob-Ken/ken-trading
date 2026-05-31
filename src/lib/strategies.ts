@@ -777,12 +777,19 @@ export function generateSignals(
       // structure breaks happened. Lows below the candle, highs above.
       const swingHighLine: LinePoint[] = r.swingHighs.map((p) => ({ time: p.time, value: p.level }))
       const swingLowLine:  LinePoint[] = r.swingLows.map((p)  => ({ time: p.time, value: p.level }))
+      // Label every structure break so the chart shows BOS / CHoCH, not just lines.
+      const waveMarkers: WaveMarker[] = r.breaks.map((b) => ({
+        time: b.time,
+        label: b.kind,
+        position: b.bias === 'bullish' ? 'belowBar' : 'aboveBar',
+      }))
       return {
         signals: r.signals as Signal[],
         mainLines: [
           { id: 'smc-swing-high', color: 'rgba(239,68,68,0.6)', data: swingHighLine },
           { id: 'smc-swing-low',  color: 'rgba(34,197,94,0.6)', data: swingLowLine },
         ],
+        waveMarkers,
       }
     }
 
