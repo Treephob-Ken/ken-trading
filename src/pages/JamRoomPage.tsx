@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Pause, Volume2, Music4 } from 'lucide-react'
 import { apiFetch } from '@/contexts/AuthContext'
 import PixelCat, { type CatMood, type Instrument } from '@/components/jam/PixelCat'
+import IsoRoom from '@/components/jam/IsoRoom'
+import { iso, CAT_SLOTS, VIEW_W, VIEW_H } from '@/lib/jam/iso'
 import { MetalJam } from '@/lib/jam/metalRiff'
 
 interface SignalSummary {
@@ -179,19 +181,18 @@ export default function JamRoomPage() {
         </div>
       )}
 
-      {/* ── The stage ───────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl border border-border"
-           style={{ background: 'linear-gradient(180deg,#15101c 0%,#1c1426 55%,#241a30 100%)' }}>
-        {/* Spotlights */}
-        <div className="stage-light pointer-events-none absolute -top-10 left-10 h-40 w-40 rounded-full"
-             style={{ background: 'radial-gradient(circle,rgba(155,120,255,0.35),transparent 70%)' }} />
-        <div className="stage-light pointer-events-none absolute -top-10 right-10 h-40 w-40 rounded-full"
-             style={{ background: 'radial-gradient(circle,rgba(255,90,120,0.32),transparent 70%)', animationDelay: '1s' }} />
+      {/* ── The isometric room ──────────────────────────────────────────── */}
+      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-[#0e0a16]"
+           style={{ aspectRatio: `${VIEW_W} / ${VIEW_H}` }}>
+        {/* Room scene */}
+        <div className="absolute inset-0">
+          <IsoRoom lit={anyRocking} />
+        </div>
 
-        {/* Neon sign */}
-        <div className="relative z-10 flex justify-center pt-5">
+        {/* Neon sign overlay */}
+        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
           <span
-            className={`rounded-md border px-3 py-1 font-mono text-xs font-bold tracking-widest ${
+            className={`rounded-md border px-3 py-1 font-mono text-[11px] font-bold tracking-widest ${
               anyRocking ? 'border-brand/60 text-brand' : 'border-border text-dim'
             }`}
             style={anyRocking ? { textShadow: '0 0 8px rgba(120,220,160,0.8)', boxShadow: '0 0 12px rgba(120,220,160,0.3)' } : undefined}
@@ -200,30 +201,38 @@ export default function JamRoomPage() {
           </span>
         </div>
 
-        {/* Band */}
-        <div className="relative z-10 flex min-h-[220px] flex-wrap items-end justify-center gap-x-2 gap-y-6 px-4 pt-6 pb-2">
-          {cats.length === 0 ? (
-            <div className="self-center py-12 text-center text-sm text-dim">
-              No bots yet — create a Signal or Grid bot and the band shows up here. 😼
-            </div>
-          ) : (
-            cats.map((c) => (
-              <PixelCat
+        {/* Band — each cat placed on a floor slot via the same iso projection */}
+        {cats.length === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-dim">
+            No bots yet — create a Signal or Grid bot and the band shows up here. 😼
+          </div>
+        ) : (
+          cats.slice(0, CAT_SLOTS.length).map((c, i) => {
+            const slot = CAT_SLOTS[i]
+            const p = iso(slot.x, slot.y, 0)
+            return (
+              <div
                 key={c.id}
-                mood={c.mood}
-                instrument={c.instrument}
-                color={c.color}
-                beatMs={beatMs}
-                label={c.label}
-                sub={c.sub}
-              />
-            ))
-          )}
-        </div>
-
-        {/* Stage floor */}
-        <div className="relative z-0 h-6 w-full"
-             style={{ background: 'repeating-linear-gradient(90deg,#0d0a12 0 18px,#120d18 18px 36px)' }} />
+                className="absolute"
+                style={{
+                  left: `${(p.x / VIEW_W) * 100}%`,
+                  top: `${(p.y / VIEW_H) * 100}%`,
+                  transform: 'translate(-50%, -86%) scale(0.82)',
+                  zIndex: 10 + Math.round((slot.x + slot.y) * 10),
+                }}
+              >
+                <PixelCat
+                  mood={c.mood}
+                  instrument={c.instrument}
+                  color={c.color}
+                  beatMs={beatMs}
+                  label={c.label}
+                  sub={c.sub}
+                />
+              </div>
+            )
+          })
+        )}
       </div>
 
       {/* Legend */}
