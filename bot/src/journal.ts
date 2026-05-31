@@ -504,17 +504,25 @@ export type EquityPeriod = 'day' | 'week' | 'month' | 'all'
 
 export interface EquitySeriesResponse {
   period: EquityPeriod
-  points: { t: number; value: number }[]      // account value over time (ms, $)
-  pnlPoints: { t: number; value: number }[]    // pnl over time (ms, $)
-  startValue: number
-  currentValue: number
-  returnPct: number                            // (current - start) / start * 100
-  maxDrawdown: number                          // peak-to-trough on account value ($)
-  maxDrawdownPct: number                       // relative to the peak at the trough
+  points: { t: number; value: number }[]      // account value over time (ms, $) — for the chart
+  pnlPoints: { t: number; value: number }[]    // cumulative trading pnl over time (ms, $)
+  startValue: number                           // first funded account value
+  currentValue: number                         // latest account value (headline)
+  periodPnl: number                            // trading PnL over the period ($), deposit-adjusted
+  avgCapital: number                           // mean funded account value (return denominator)
+  returnPct: number                            // periodPnl / avgCapital * 100 (deposit-proof)
+  maxDrawdown: number                          // peak-to-trough on cumulative trading pnl ($)
+  maxDrawdownPct: number                       // maxDrawdown / avgCapital * 100
 }
 
 // Map one Hyperliquid portfolio period's raw [ts, "value"] arrays into a chart-
-// ready series with return % and a true account-value max drawdown.
+// ready series.
+//
+// Return % and drawdown are based on `pnlHistory` (real trading PnL, which
+// EXCLUDES deposits/withdrawals) — NOT on start→end account value. Account
+// value includes deposits, so a tiny first balance funded up by transfers would
+// otherwise report an absurd return (e.g. $5 → $157 = "+3047%"). We divide by
+// average funded capital so the denominator is never a near-zero baseline.
 export function mapEquitySeries(
   period: EquityPeriod,
   accountValueHistory: [number, string][],
@@ -522,27 +530,37 @@ export function mapEquitySeries(
 ): EquitySeriesResponse {
   const raw = accountValueHistory.map(([t, v]) => ({ t, value: Number(v) }))
   // HL pads the start of month/allTime windows with $0 entries from before the
-  // account was first funded. Trim those leading zeros so the % return baseline
-  // and the chart start at the first funded value, not a misleading $0.
+  // account was first funded. Trim those leading zeros so the chart starts at
+  // the first funded value, not a misleading $0.
   const firstFunded = raw.findIndex((p) => p.value > 0)
   const points = firstFunded > 0 ? raw.slice(firstFunded) : raw
   const pnlPoints = pnlHistory.map(([t, v]) => ({ t, value: Number(v) }))
   const startValue = points.length ? points[0].value : 0
   const currentValue = points.length ? points[points.length - 1].value : 0
-  const returnPct = startValue > 0 ? ((currentValue - startValue) / startValue) * 100 : 0
 
-  let peak = points.length ? points[0].value : 0
+  // Average funded capital — robust denominator for a percentage that isn't
+  // wrecked by a tiny starting balance or distorted hard by a single deposit.
+  const avgCapital = points.length
+    ? points.reduce((s, p) => s + p.value, 0) / points.length
+    : 0
+
+  // Trading PnL over the period: last cumulative pnl minus the first (≈0).
+  const periodPnl = pnlPoints.length
+    ? pnlPoints[pnlPoints.length - 1].value - pnlPoints[0].value
+    : 0
+  const returnPct = avgCapital > 0 ? (periodPnl / avgCapital) * 100 : 0
+
+  // Max drawdown on the cumulative trading-pnl curve (deposit-proof).
+  let peak = -Infinity
   let maxDrawdown = 0
-  let maxDrawdownPct = 0
-  for (const p of points) {
+  for (const p of pnlPoints) {
     if (p.value > peak) peak = p.value
     const drop = peak - p.value
-    if (drop > maxDrawdown) {
-      maxDrawdown = drop
-      maxDrawdownPct = peak > 0 ? (drop / peak) * 100 : 0
-    }
+    if (drop > maxDrawdown) maxDrawdown = drop
   }
-  return { period, points, pnlPoints, startValue, currentValue, returnPct, maxDrawdown, maxDrawdownPct }
+  const maxDrawdownPct = avgCapital > 0 ? (maxDrawdown / avgCapital) * 100 : 0
+
+  return { period, points, pnlPoints, startValue, currentValue, periodPnl, avgCapital, returnPct, maxDrawdown, maxDrawdownPct }
 }
 
 function portfolioRangeBoundsMs(range: PortfolioRange): { from: number; to: number } {

@@ -16,7 +16,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AreaSeries,
   ColorType,
-  HistogramSeries,
   createChart,
   type IChartApi,
   type UTCTimestamp,
@@ -48,10 +47,6 @@ const EQUITY_PERIODS: { id: EquityPeriod; label: string }[] = [
   { id: 'month', label: 'Month' },
   { id: 'all', label: 'All' },
 ]
-
-function dateToTs(d: string): UTCTimestamp {
-  return Math.floor(new Date(d + 'T00:00:00Z').getTime() / 1000) as UTCTimestamp
-}
 
 function toneForPnl(v: number): 'gain' | 'loss' | 'neutral' {
   if (v > 0) return 'gain'
@@ -221,34 +216,6 @@ export default function PortfolioPage() {
     return () => { window.removeEventListener('resize', onResize); chart.remove(); eqChartRef.current = null }
   }, [eqData, hasEqData])
 
-  // ── Daily PnL bars (realized, cross-filtered) ─────────────────────────────
-  const barContainerRef = useRef<HTMLDivElement>(null)
-  const barChartRef = useRef<IChartApi | null>(null)
-  useEffect(() => {
-    const el = barContainerRef.current
-    if (barChartRef.current) { barChartRef.current.remove(); barChartRef.current = null }
-    if (!el || view.daily.length === 0) return
-    const chart = createChart(el, {
-      width: el.clientWidth,
-      height: 140,
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#94a3b8', fontSize: 11 },
-      grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
-      rightPriceScale: { borderColor: '#334155' },
-      timeScale: { borderColor: '#334155', timeVisible: false, secondsVisible: false },
-    })
-    const series = chart.addSeries(HistogramSeries, { priceFormat: { type: 'price', precision: 2, minMove: 0.01 } })
-    series.setData(view.daily.map((d) => ({
-      time: dateToTs(d.date),
-      value: d.pnl,
-      color: d.pnl >= 0 ? '#22c55e' : '#ef4444',
-    })))
-    chart.timeScale().fitContent()
-    barChartRef.current = chart
-    const onResize = () => chart.applyOptions({ width: el.clientWidth })
-    window.addEventListener('resize', onResize)
-    return () => { window.removeEventListener('resize', onResize); chart.remove(); barChartRef.current = null }
-  }, [view])
-
   return (
     <main className="flex w-full flex-1 flex-col gap-5 px-6 py-5">
       {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -333,10 +300,11 @@ export default function PortfolioPage() {
             <>
               <StatCard big title="Account value" value={equity ? money(equity.currentValue) : '—'}
                 sub={equity ? `${equity.period} window` : ' '} tone="neutral" />
-              <StatCard big title="Return" value={equity ? pct(equity.returnPct, true) : '—'}
-                sub="account value" tone={equity ? toneForPnl(equity.returnPct) : 'neutral'} />
+              <StatCard big title="Net PnL" value={equity ? money(equity.periodPnl, true) : '—'}
+                sub={equity ? `${pct(equity.returnPct, true)} on avg capital` : ' '}
+                tone={equity ? toneForPnl(equity.periodPnl) : 'neutral'} />
               <StatCard title="Max drawdown" value={equity ? `−${money(equity.maxDrawdown)}` : '—'}
-                sub={equity && equity.maxDrawdownPct > 0 ? `−${equity.maxDrawdownPct.toFixed(1)}%` : ' '} tone="loss" />
+                sub={equity && equity.maxDrawdownPct > 0 ? `−${equity.maxDrawdownPct.toFixed(1)}% of capital` : ' '} tone="loss" />
               <StatCard title="Realized win rate" value={pct(view.winRate)}
                 sub={`${view.trades} closed trades`} tone="neutral" />
             </>
@@ -384,20 +352,11 @@ export default function PortfolioPage() {
         )}
       </section>
 
-      {/* ── Daily PnL bars (realized) ────────────────────────────────────── */}
-      <div className="card p-3">
-        <div className="mb-2 text-xs font-semibold text-text">
-          Daily realized PnL{selectedBot ? ` · ${sourceLabel(selectedPerf!.source)}` : ''}
-        </div>
-        {view.daily.length === 0 ? (
-          <div className="text-[11px] text-dim italic">No closed trades in this selection.</div>
-        ) : (
-          <div ref={barContainerRef} className="w-full" style={{ height: 140 }} />
-        )}
-      </div>
-
-      {/* ── PnL Calendar (realized) ──────────────────────────────────────── */}
-      {view.daily.length > 0 && <PnlCalendar series={view.daily} />}
+      {/* ── Monthly PnL calendar + insights (realized, cross-filtered) ───── */}
+      <MonthlyPnlCalendar
+        daily={view.daily}
+        label={selectedBot ? sourceLabel(selectedPerf!.source) : 'All bots'}
+      />
 
       {/* ── By Asset (realized) ──────────────────────────────────────────── */}
       <RollupTable
@@ -523,124 +482,201 @@ function RollupTable<T extends AssetRollupRow>({
   )
 }
 
-// PnL Calendar — github-contributions-style grid where columns are weeks and
-// rows are weekdays (Mon..Sun). Cell brightness scales with the magnitude of
-// PnL relative to the largest abs PnL in the window. Hover shows the exact
-// figure; click does nothing (per-trade drill-down lives on the Logs page).
-function PnlCalendar({ series }: { series: DailyBucket[] }) {
-  if (series.length === 0) return null
+// Compact money for tight calendar cells: "$1.2k" / "-$340" / "$0".
+function fmtCellMoney(v: number): string {
+  const sign = v > 0 ? '+' : v < 0 ? '−' : ''
+  const a = Math.abs(v)
+  const body = a >= 1000 ? `$${(a / 1000).toFixed(a >= 10000 ? 0 : 1)}k` : `$${a.toFixed(a < 100 ? 1 : 0)}`
+  return `${sign}${body}`
+}
 
-  const byDate = new Map<string, DailyBucket>()
-  for (const d of series) byDate.set(d.date, d)
-  const dates = [...byDate.keys()].sort()
-  const first = new Date(dates[0] + 'T00:00:00Z')
-  const last = new Date(dates[dates.length - 1] + 'T00:00:00Z')
+// One insight chip in the summary strip.
+function Insight({ label, value, tone }: { label: string; value: string; tone?: 'gain' | 'loss' }) {
+  const c = tone === 'gain' ? 'text-gain' : tone === 'loss' ? 'text-loss' : 'text-text'
+  return (
+    <div className="rounded-md border border-border bg-panel-2/40 px-2.5 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-dim">{label}</div>
+      <div className={`mt-0.5 font-mono text-xs font-bold tabular-nums ${c}`}>{value}</div>
+    </div>
+  )
+}
 
-  const startOfWeek = new Date(first)
-  const dow = startOfWeek.getUTCDay() === 0 ? 6 : startOfWeek.getUTCDay() - 1
-  startOfWeek.setUTCDate(startOfWeek.getUTCDate() - dow)
+// Monthly trading-journal calendar: a real month grid (Sun–Sat) where each day
+// shows its realized $ PnL + trade count, color-coded, with a weekly-total
+// column and a month total. Below it, a PnL insights strip. Navigates between
+// the months present in `daily`. Cross-filtered upstream via `view.daily`.
+function MonthlyPnlCalendar({ daily, label }: { daily: DailyBucket[]; label: string }) {
+  const byDate = useMemo(() => {
+    const m = new Map<string, DailyBucket>()
+    for (const d of daily) m.set(d.date, d)
+    return m
+  }, [daily])
 
-  const cells: { date: string; pnl: number; trades: number; inRange: boolean }[] = []
-  const cur = new Date(startOfWeek)
-  while (cur <= last) {
-    const key = cur.toISOString().slice(0, 10)
-    const bucket = byDate.get(key)
-    const inRange = cur >= first
-    cells.push({ date: key, pnl: bucket?.pnl ?? 0, trades: bucket?.trades ?? 0, inRange })
-    cur.setUTCDate(cur.getUTCDate() + 1)
+  // Distinct YYYY-MM present in the data, ascending.
+  const months = useMemo(() => {
+    const s = new Set<string>()
+    for (const d of daily) s.add(d.date.slice(0, 7))
+    return [...s].sort()
+  }, [daily])
+
+  const [monthIdx, setMonthIdx] = useState(0)
+  // Jump to the latest month whenever the available months change (e.g. the
+  // user switches bot filter or range).
+  useEffect(() => { setMonthIdx(Math.max(0, months.length - 1)) }, [months.length])
+
+  if (daily.length === 0 || months.length === 0) {
+    return (
+      <div className="card p-3">
+        <div className="mb-2 text-xs font-semibold text-text">PnL calendar · {label}</div>
+        <div className="text-[11px] text-dim italic">No closed trades in this selection.</div>
+      </div>
+    )
   }
 
-  const columns: typeof cells[] = []
-  for (let i = 0; i < cells.length; i += 7) columns.push(cells.slice(i, i + 7))
+  const idx = Math.min(monthIdx, months.length - 1)
+  const ym = months[idx]
+  const [year, month] = ym.split('-').map(Number) // month is 1-based here
+  const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 
-  const maxAbs = Math.max(1, ...series.map((d) => Math.abs(d.pnl)))
+  // Build the day cells for this month, padded to whole Sun–Sat weeks.
+  const firstDow = new Date(Date.UTC(year, month - 1, 1)).getUTCDay() // 0=Sun
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  type Cell = { day: number; date: string; pnl: number; trades: number; has: boolean } | null
+  const cells: Cell[] = []
+  for (let i = 0; i < firstDow; i++) cells.push(null)
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${ym}-${String(day).padStart(2, '0')}`
+    const b = byDate.get(date)
+    cells.push({ day, date, pnl: b?.pnl ?? 0, trades: b?.trades ?? 0, has: !!b })
+  }
+  while (cells.length % 7 !== 0) cells.push(null)
+  const weeks: Cell[][] = []
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
 
-  const cellTone = (pnl: number) => {
-    if (pnl === 0) return 'bg-panel-2 border-border/30'
-    const intensity = Math.min(1, Math.abs(pnl) / maxAbs)
-    if (pnl > 0) {
-      if (intensity > 0.75) return 'bg-gain/70 border-gain/60'
-      if (intensity > 0.4)  return 'bg-gain/45 border-gain/40'
-      return 'bg-gain/25 border-gain/30'
-    }
-    if (intensity > 0.75) return 'bg-loss/70 border-loss/60'
-    if (intensity > 0.4)  return 'bg-loss/45 border-loss/40'
-    return 'bg-loss/25 border-loss/30'
+  // This month's trading days (days that actually had trades).
+  const monthDays = cells.filter((c): c is NonNullable<Cell> => !!c && c.has)
+  const monthNet = monthDays.reduce((s, c) => s + c.pnl, 0)
+  const greenDays = monthDays.filter((c) => c.pnl > 0).length
+  const redDays = monthDays.filter((c) => c.pnl < 0).length
+  const best = monthDays.reduce((b, c) => (c.pnl > (b?.pnl ?? -Infinity) ? c : b), null as NonNullable<Cell> | null)
+  const worst = monthDays.reduce((w, c) => (c.pnl < (w?.pnl ?? Infinity) ? c : w), null as NonNullable<Cell> | null)
+  const avgPerDay = monthDays.length ? monthNet / monthDays.length : 0
+  const dayWinRate = greenDays + redDays > 0 ? (greenDays / (greenDays + redDays)) * 100 : 0
+
+  // Longest green / red streaks across trading days (in date order).
+  let bestGreen = 0, bestRed = 0, runG = 0, runR = 0
+  for (const c of monthDays) {
+    if (c.pnl > 0) { runG++; runR = 0 } else if (c.pnl < 0) { runR++; runG = 0 } else { runG = 0; runR = 0 }
+    bestGreen = Math.max(bestGreen, runG)
+    bestRed = Math.max(bestRed, runR)
   }
 
-  const monthLabels: { col: number; label: string }[] = []
-  let lastMonth = -1
-  columns.forEach((col, idx) => {
-    const firstInCol = col.find((c) => c.inRange)
-    if (!firstInCol) return
-    const m = new Date(firstInCol.date + 'T00:00:00Z').getUTCMonth()
-    if (m !== lastMonth) {
-      monthLabels.push({ col: idx, label: new Date(firstInCol.date).toLocaleString('en-US', { month: 'short' }) })
-      lastMonth = m
-    }
-  })
-
-  const winDays = series.filter((d) => d.pnl > 0).length
-  const lossDays = series.filter((d) => d.pnl < 0).length
-  const bestDay = series.reduce((b, d) => (d.pnl > (b?.pnl ?? -Infinity) ? d : b), null as DailyBucket | null)
-  const worstDay = series.reduce((w, d) => (d.pnl < (w?.pnl ?? Infinity) ? d : w), null as DailyBucket | null)
+  const maxAbs = Math.max(1, ...monthDays.map((c) => Math.abs(c.pnl)))
+  const cellTone = (c: NonNullable<Cell>) => {
+    if (!c.has || c.pnl === 0) return 'border-border/40 bg-panel-2/30 text-dim'
+    const strong = Math.abs(c.pnl) / maxAbs > 0.5
+    if (c.pnl > 0) return strong ? 'border-gain/60 bg-gain/25 text-gain' : 'border-gain/40 bg-gain/10 text-gain'
+    return strong ? 'border-loss/60 bg-loss/25 text-loss' : 'border-loss/40 bg-loss/10 text-loss'
+  }
 
   return (
     <div className="card p-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-text">PnL calendar</span>
-        <div className="flex items-center gap-3 text-[10px] text-dim font-mono tabular-nums">
-          <span><span className="text-gain">{winDays}</span> green</span>
-          <span><span className="text-loss">{lossDays}</span> red</span>
-          {bestDay && bestDay.pnl > 0 && (
-            <span>best <span className="text-gain">{money(bestDay.pnl, true)}</span></span>
-          )}
-          {worstDay && worstDay.pnl < 0 && (
-            <span>worst <span className="text-loss">{money(worstDay.pnl, true)}</span></span>
-          )}
+      {/* Header: month nav + month total */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-text">PnL calendar · {label}</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setMonthIdx((i) => Math.max(0, Math.min(i, months.length - 1) - 1))}
+              disabled={idx === 0}
+              className="rounded border border-border bg-panel-2 px-1.5 py-0.5 text-[11px] text-dim hover:text-text disabled:opacity-30 cursor-pointer"
+              aria-label="Previous month"
+            >‹</button>
+            <span className="min-w-[120px] text-center font-mono text-[11px] text-text">{monthName}</span>
+            <button
+              type="button"
+              onClick={() => setMonthIdx((i) => Math.min(months.length - 1, Math.min(i, months.length - 1) + 1))}
+              disabled={idx === months.length - 1}
+              className="rounded border border-border bg-panel-2 px-1.5 py-0.5 text-[11px] text-dim hover:text-text disabled:opacity-30 cursor-pointer"
+              aria-label="Next month"
+            >›</button>
+          </div>
+        </div>
+        <span className={`font-mono text-sm font-bold tabular-nums ${monthNet >= 0 ? 'text-gain' : 'text-loss'}`}>
+          {money(monthNet, true)} <span className="text-[10px] font-normal text-dim">month</span>
+        </span>
+      </div>
+
+      {/* Calendar grid: 7 weekday columns + a weekly-total column */}
+      <div className="overflow-x-auto">
+        <div className="min-w-[560px]">
+          <div className="grid grid-cols-8 gap-1 text-[9px] text-dim font-mono">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+              <div key={d} className="px-1 py-0.5 text-center">{d}</div>
+            ))}
+            <div className="px-1 py-0.5 text-center text-brand">Week</div>
+          </div>
+          <div className="mt-1 flex flex-col gap-1">
+            {weeks.map((week, wi) => {
+              const weekTotal = week.reduce((s, c) => s + (c?.pnl ?? 0), 0)
+              const weekHasTrades = week.some((c) => c?.has)
+              return (
+                <div key={wi} className="grid grid-cols-8 gap-1">
+                  {week.map((c, di) => {
+                    if (!c) return <div key={di} className="h-14 rounded-md border border-transparent" />
+                    return (
+                      <div
+                        key={c.date}
+                        title={`${c.date} · ${c.trades} ${c.trades === 1 ? 'trade' : 'trades'} · ${money(c.pnl, true)}`}
+                        className={`flex h-14 flex-col justify-between rounded-md border p-1 ${cellTone(c)}`}
+                      >
+                        <div className="text-[9px] leading-none text-dim">{c.day}</div>
+                        {c.has ? (
+                          <>
+                            <div className="text-center font-mono text-[11px] font-bold leading-none tabular-nums">
+                              {fmtCellMoney(c.pnl)}
+                            </div>
+                            <div className="text-right text-[8px] leading-none text-dim">{c.trades}t</div>
+                          </>
+                        ) : (
+                          <div className="text-center text-[9px] leading-none text-dim/40">·</div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {/* Weekly total */}
+                  <div className={`flex h-14 flex-col items-center justify-center rounded-md border border-border bg-panel-2/40 ${
+                    !weekHasTrades ? 'opacity-40' : ''
+                  }`}>
+                    <div className="text-[8px] uppercase text-dim">wk{wi + 1}</div>
+                    <div className={`font-mono text-[11px] font-bold tabular-nums ${weekTotal > 0 ? 'text-gain' : weekTotal < 0 ? 'text-loss' : 'text-dim'}`}>
+                      {weekHasTrades ? fmtCellMoney(weekTotal) : '—'}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto pb-1">
-        <div className="flex flex-col gap-1 pt-4 text-[9px] text-dim font-mono">
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-            <div key={d} className="h-4 leading-4">{d}</div>
-          ))}
+      {/* PnL insights for the visible month */}
+      <div className="mt-3 border-t border-border pt-3">
+        <div className="mb-2 text-[10px] uppercase tracking-wider text-dim">PnL insights · {monthName}</div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <Insight label="Month net" value={money(monthNet, true)} tone={monthNet >= 0 ? 'gain' : 'loss'} />
+          <Insight label="Best day" value={best ? money(best.pnl, true) : '—'} tone="gain" />
+          <Insight label="Worst day" value={worst && worst.pnl < 0 ? money(worst.pnl, true) : '—'} tone="loss" />
+          <Insight label="Green / Red days" value={`${greenDays} / ${redDays}`} />
+          <Insight label="Day win rate" value={pct(dayWinRate)} />
+          <Insight label="Avg / trading day" value={money(avgPerDay, true)} tone={avgPerDay >= 0 ? 'gain' : 'loss'} />
         </div>
-        <div className="flex gap-1">
-          {columns.map((col, ci) => {
-            const monthLabel = monthLabels.find((m) => m.col === ci)
-            return (
-              <div key={ci} className="flex flex-col gap-1">
-                <div className="h-3 text-[9px] text-dim font-mono leading-3">{monthLabel?.label ?? ''}</div>
-                {col.map((cell) => {
-                  if (!cell.inRange) return <div key={cell.date} className="h-4 w-4" />
-                  const tone = cellTone(cell.pnl)
-                  const tradesTxt = cell.trades === 0 ? 'no trades' : `${cell.trades} ${cell.trades === 1 ? 'trade' : 'trades'}`
-                  return (
-                    <div
-                      key={cell.date}
-                      title={`${cell.date} · ${tradesTxt} · ${money(cell.pnl, true)}`}
-                      className={`h-4 w-4 rounded-sm border ${tone}`}
-                    />
-                  )
-                })}
-              </div>
-            )
-          })}
+        <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-dim font-mono">
+          <span>longest green streak <span className="text-gain">{bestGreen}d</span></span>
+          <span>longest red streak <span className="text-loss">{bestRed}d</span></span>
+          <span>trading days <span className="text-text">{monthDays.length}</span></span>
         </div>
-      </div>
-
-      <div className="mt-2 flex items-center gap-1.5 text-[9px] text-dim">
-        <span>Less</span>
-        <div className="h-2.5 w-2.5 rounded-sm border border-loss/60 bg-loss/70" />
-        <div className="h-2.5 w-2.5 rounded-sm border border-loss/40 bg-loss/45" />
-        <div className="h-2.5 w-2.5 rounded-sm border border-loss/30 bg-loss/25" />
-        <div className="h-2.5 w-2.5 rounded-sm border border-border/30 bg-panel-2" />
-        <div className="h-2.5 w-2.5 rounded-sm border border-gain/30 bg-gain/25" />
-        <div className="h-2.5 w-2.5 rounded-sm border border-gain/40 bg-gain/45" />
-        <div className="h-2.5 w-2.5 rounded-sm border border-gain/60 bg-gain/70" />
-        <span>More</span>
       </div>
     </div>
   )

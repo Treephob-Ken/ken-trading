@@ -129,6 +129,8 @@ export interface EquitySeriesResponse {
   pnlPoints: { t: number; value: number }[]
   startValue: number
   currentValue: number
+  periodPnl: number
+  avgCapital: number
   returnPct: number
   maxDrawdown: number
   maxDrawdownPct: number
