@@ -81,3 +81,30 @@ describe('computeSMC — trailing extremes', () => {
     expect(['Strong Low', 'Weak Low']).toContain(r.trailing!.bottomLabel)
   })
 })
+
+describe('computeSMC — order blocks', () => {
+  it('creates a bullish order block on a dip-then-rally that is not retraced', () => {
+    // Rise, dip to a swing low, rally above the swing high. Price never returns
+    // below the dip, so the bullish OB survives (is not mitigated).
+    const bullishEnding = [0, 2, 4, 6, 8, 10, 8, 6, 4, 2, 4, 6, 8, 10, 12, 14]
+    const r = computeSMC(series(bullishEnding), { swingLength: 3 })
+    expect(r.orderBlocks.length).toBeGreaterThan(0)
+    const ob = r.orderBlocks.find(o => o.bias === 'bullish')
+    expect(ob).toBeDefined()
+    expect(ob!.bottom).toBeLessThanOrEqual(ob!.top)
+  })
+
+  it('mitigates (removes) a bullish order block once price trades back below it', () => {
+    // Same rally, then a deep sell-off below the original dip → OB mitigated.
+    const retraced = [0, 2, 4, 6, 8, 10, 8, 6, 4, 2, 4, 6, 8, 10, 12, 14, 6, 0, -4, -8]
+    const r = computeSMC(series(retraced), { swingLength: 3 })
+    // No surviving bullish OB whose bottom is the original ~2 dip.
+    const survivingLowBullish = r.orderBlocks.filter(o => o.bias === 'bullish' && o.bottom <= 2)
+    expect(survivingLowBullish.length).toBe(0)
+  })
+
+  it('caps the number of returned order blocks to orderBlockCount', () => {
+    const r = computeSMC(series(PATH), { swingLength: 3, orderBlockCount: 2 })
+    expect(r.orderBlocks.length).toBeLessThanOrEqual(2)
+  })
+})
