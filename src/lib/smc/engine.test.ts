@@ -60,3 +60,24 @@ describe('computeSMC — swing structure', () => {
     expect(r.structures.some(s => s.kind === 'CHoCH')).toBe(true)
   })
 })
+
+describe('computeSMC — trailing extremes', () => {
+  it('labels the low "Strong Low" when the final bias is bullish', () => {
+    // Rise → dip → rally above the prior swing high. The only break is bullish,
+    // so the final swing bias is bullish → the low is the "Strong Low".
+    const bullishEnding = [0, 2, 4, 6, 8, 10, 8, 6, 4, 2, 4, 6, 8, 10, 12, 14]
+    const r = computeSMC(series(bullishEnding), { swingLength: 3 })
+    expect(r.trailing).not.toBeNull()
+    expect(r.trailing!.bottomLabel).toBe('Strong Low')
+    expect(Number.isFinite(r.trailing!.top)).toBe(true)
+    expect(Number.isFinite(r.trailing!.bottom)).toBe(true)
+  })
+
+  it('exposes a top/bottom with their times and valid labels', () => {
+    const r = computeSMC(series(PATH), { swingLength: 3 })
+    expect(r.trailing!.topTime).toBeGreaterThan(0)
+    expect(r.trailing!.bottomTime).toBeGreaterThan(0)
+    expect(['Strong High', 'Weak High']).toContain(r.trailing!.topLabel)
+    expect(['Strong Low', 'Weak Low']).toContain(r.trailing!.bottomLabel)
+  })
+})
