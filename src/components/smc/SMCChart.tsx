@@ -19,7 +19,7 @@ import { OrderBlockPrimitive } from './primitives/orderBlockPrimitive'
 const GREEN = '#089981'
 const RED = '#f23645'
 
-export default function SMCChart({ candles, result, showEqual = true, showOrderBlocks = true }: { candles: Candle[]; result: SMCResult; showEqual?: boolean; showOrderBlocks?: boolean }) {
+export default function SMCChart({ candles, result, showStructure = true, showStrongWeak = true, showEqual = true, showOrderBlocks = true }: { candles: Candle[]; result: SMCResult; showStructure?: boolean; showStrongWeak?: boolean; showEqual?: boolean; showOrderBlocks?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -69,20 +69,22 @@ export default function SMCChart({ candles, result, showEqual = true, showOrderB
     // that broke it, at the pivot level. One 2-point line series per break.
     for (const ls of structureLinesRef.current) chart.removeSeries(ls)
     structureLinesRef.current = []
-    for (const s of result.structures) {
-      const ls = chart.addSeries(LineSeries, {
-        color: s.bias === 'bullish' ? GREEN : RED,
-        lineWidth: 2,
-        lineStyle: LineStyle.Solid,
-        lastValueVisible: false,
-        priceLineVisible: false,
-        crosshairMarkerVisible: false,
-      })
-      ls.setData([
-        { time: s.fromTime as Time, value: s.level },
-        { time: s.atTime as Time, value: s.level },
-      ])
-      structureLinesRef.current.push(ls)
+    if (showStructure) {
+      for (const s of result.structures) {
+        const ls = chart.addSeries(LineSeries, {
+          color: s.bias === 'bullish' ? GREEN : RED,
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        })
+        ls.setData([
+          { time: s.fromTime as Time, value: s.level },
+          { time: s.atTime as Time, value: s.level },
+        ])
+        structureLinesRef.current.push(ls)
+      }
     }
 
     // EQH/EQL: dotted line connecting the two equal pivots.
@@ -109,13 +111,13 @@ export default function SMCChart({ candles, result, showEqual = true, showOrderB
     // Markers: BOS/CHoCH at the break bar + EQH/EQL at the confirming pivot.
     // Combined into one sorted array (Lightweight Charts needs ascending time).
     const markers: SeriesMarker<Time>[] = [
-      ...result.structures.map(s => ({
+      ...(showStructure ? result.structures.map(s => ({
         time: s.atTime as Time,
         position: (s.bias === 'bullish' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
         color: s.bias === 'bullish' ? GREEN : RED,
         shape: (s.bias === 'bullish' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
         text: s.kind,
-      })),
+      })) : []),
       ...(showEqual ? result.equalLevels.map(e => ({
         time: e.toTime as Time,
         position: (e.kind === 'EQH' ? 'aboveBar' : 'belowBar') as 'aboveBar' | 'belowBar',
@@ -129,7 +131,7 @@ export default function SMCChart({ candles, result, showEqual = true, showOrderB
     // Clear previous Strong/Weak price lines, then redraw.
     for (const pl of priceLinesRef.current) series.removePriceLine(pl)
     priceLinesRef.current = []
-    if (result.trailing) {
+    if (showStrongWeak && result.trailing) {
       priceLinesRef.current.push(series.createPriceLine({
         price: result.trailing.top, color: RED, lineWidth: 1, lineStyle: LineStyle.Dashed,
         axisLabelVisible: true, title: result.trailing.topLabel,
@@ -144,7 +146,7 @@ export default function SMCChart({ candles, result, showEqual = true, showOrderB
     obPrimitiveRef.current?.setBlocks(showOrderBlocks ? result.orderBlocks : [])
 
     chart.timeScale().fitContent()
-  }, [candles, result, showEqual, showOrderBlocks])
+  }, [candles, result, showStructure, showStrongWeak, showEqual, showOrderBlocks])
 
   return (
     <div className="relative">

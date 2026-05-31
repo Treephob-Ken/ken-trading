@@ -1,18 +1,30 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Network } from 'lucide-react'
 import { fetchKlines } from '@/lib/binance'
+import { useHLAssets } from '@/lib/hlAssets'
 import { computeSMC } from '@/lib/smc/engine'
 import SMCChart from '@/components/smc/SMCChart'
+import SymbolSearch from '@/components/SymbolSearch'
 import type { Candle } from '@/types'
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
 
+type LayerKey = 'structure' | 'strongWeak' | 'orderBlocks' | 'equal'
+const LAYERS: { key: LayerKey; label: string }[] = [
+  { key: 'structure', label: 'BOS/CHoCH' },
+  { key: 'strongWeak', label: 'Strong/Weak' },
+  { key: 'orderBlocks', label: 'Order blocks' },
+  { key: 'equal', label: 'EQH/EQL' },
+]
+
 export default function MarketStructurePage() {
+  const { symbols } = useHLAssets()
   const [symbol, setSymbol] = useState(() => localStorage.getItem('lab_symbol') || 'ETHUSDT')
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('lab_timeframe') || '1h')
   const [swingLength, setSwingLength] = useState(50)
-  const [showEqual, setShowEqual] = useState(true)
-  const [showOrderBlocks, setShowOrderBlocks] = useState(true)
+  const [visible, setVisible] = useState<Record<LayerKey, boolean>>({
+    structure: true, strongWeak: true, orderBlocks: true, equal: true,
+  })
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +41,8 @@ export default function MarketStructurePage() {
 
   const result = useMemo(() => computeSMC(candles, { swingLength }), [candles, swingLength])
 
-  const pairLabel = symbol.includes(':') ? symbol.split(':')[1] + '/USDC' : symbol.replace(/USDT$/, '/USDC')
+  const pickSymbol = (s: string) => { setSymbol(s); localStorage.setItem('lab_symbol', s) }
+  const toggle = (k: LayerKey) => setVisible(v => ({ ...v, [k]: !v[k] }))
 
   return (
     <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5">
@@ -37,15 +50,11 @@ export default function MarketStructurePage() {
         <div className="flex items-center gap-2">
           <Network className="h-5 w-5 text-brand" />
           <h1 className="text-lg font-semibold text-text font-display">Market Structure</h1>
-          <p className="hidden sm:block text-xs text-dim">Swing structure (BOS/CHoCH) + Strong/Weak levels — {pairLabel} · {timeframe}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            value={symbol}
-            onChange={e => { setSymbol(e.target.value.toUpperCase()); localStorage.setItem('lab_symbol', e.target.value.toUpperCase()) }}
-            className="field w-[140px]"
-            aria-label="Symbol"
-          />
+          <div className="w-[210px]">
+            <SymbolSearch value={symbol} symbols={symbols} onChange={pickSymbol} />
+          </div>
           <div className="flex items-center gap-1">
             {TIMEFRAMES.map(tf => (
               <button
@@ -64,17 +73,20 @@ export default function MarketStructurePage() {
               className="field w-[64px]"
             />
           </label>
-          <button
-            type="button"
-            onClick={() => setShowOrderBlocks(v => !v)}
-            className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${showOrderBlocks ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
-          >Order blocks</button>
-          <button
-            type="button"
-            onClick={() => setShowEqual(v => !v)}
-            className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${showEqual ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
-          >EQH/EQL</button>
         </div>
+      </div>
+
+      {/* Layer show/hide toggles */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[10px] uppercase tracking-wider text-dim mr-1">Show</span>
+        {LAYERS.map(l => (
+          <button
+            key={l.key}
+            type="button"
+            onClick={() => toggle(l.key)}
+            className={`rounded-md border px-2.5 py-1 text-[11px] cursor-pointer ${visible[l.key] ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
+          >{l.label}</button>
+        ))}
       </div>
 
       {error && <div className="card border border-loss/30 bg-loss/5 p-3 text-xs text-loss">{error}</div>}
@@ -87,11 +99,18 @@ export default function MarketStructurePage() {
         {candles.length === 0 && !loading ? (
           <div className="flex h-[460px] min-h-[460px] items-center justify-center text-sm text-dim">No data.</div>
         ) : (
-          <SMCChart candles={candles} result={result} showEqual={showEqual} showOrderBlocks={showOrderBlocks} />
+          <SMCChart
+            candles={candles}
+            result={result}
+            showStructure={visible.structure}
+            showStrongWeak={visible.strongWeak}
+            showEqual={visible.equal}
+            showOrderBlocks={visible.orderBlocks}
+          />
         )}
       </section>
 
-      {showOrderBlocks && (
+      {visible.orderBlocks && (
         <section className="card p-3">
           <div className="mb-2 text-xs font-semibold text-text">
             Order blocks <span className="text-dim font-normal">({result.orderBlocks.length} active)</span>
@@ -115,25 +134,27 @@ export default function MarketStructurePage() {
         </section>
       )}
 
-      <section className="card p-3">
-        <div className="mb-2 text-xs font-semibold text-text">Recent structure events</div>
-        {result.structures.length === 0 ? (
-          <div className="text-[11px] text-dim italic">No structure breaks detected in this window.</div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {result.structures.slice(-12).reverse().map((s, i) => (
-              <div key={i} className="flex items-center justify-between text-[11px]">
-                <span className={s.bias === 'bullish' ? 'text-gain' : 'text-loss'}>
-                  {s.bias === 'bullish' ? 'Bullish' : 'Bearish'} {s.kind}
-                </span>
-                <span className="font-mono tabular-nums text-dim">
-                  @ {s.level} · {new Date(s.atTime * 1000).toLocaleString()}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      {visible.structure && (
+        <section className="card p-3">
+          <div className="mb-2 text-xs font-semibold text-text">Recent structure events</div>
+          {result.structures.length === 0 ? (
+            <div className="text-[11px] text-dim italic">No structure breaks detected in this window.</div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {result.structures.slice(-12).reverse().map((s, i) => (
+                <div key={i} className="flex items-center justify-between text-[11px]">
+                  <span className={s.bias === 'bullish' ? 'text-gain' : 'text-loss'}>
+                    {s.bias === 'bullish' ? 'Bullish' : 'Bearish'} {s.kind}
+                  </span>
+                  <span className="font-mono tabular-nums text-dim">
+                    @ {s.level} · {new Date(s.atTime * 1000).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </main>
   )
 }
