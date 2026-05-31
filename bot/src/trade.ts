@@ -813,17 +813,21 @@ export async function getPositionBrackets(
       o.reduceOnly === true &&
       o.triggerPx,
   )
-  if (triggers.length === 0 || !side) return { slPx: null, tpPx: null }
+  if (triggers.length === 0) return { slPx: null, tpPx: null }
 
   // Reference price for fallback classification. Prefer the position's entry
   // price (stable across the trade), then mark price, then mid. If all fail,
   // we still try to classify via triggerCondition text.
+  // If side wasn't supplied, also auto-detect from the live position so the
+  // fallback classifier still works (signal-bot UI calls without ?side=).
   let refPx: number | null = null
+  let effectiveSide: 'long' | 'short' | null = side
   try {
     const state = await getAccountState(want, creds)
     if (state.position?.entryPx) refPx = state.position.entryPx
     else if (state.position?.markPx) refPx = state.position.markPx
     else if (state.currentPrice) refPx = state.currentPrice
+    if (effectiveSide === null && state.position?.side) effectiveSide = state.position.side
   } catch { /* fall through to meta */ }
   if (refPx === null) {
     try {
@@ -843,18 +847,18 @@ export async function getPositionBrackets(
     if (cond.includes('stop')) kind = 'sl'
     else if (cond.includes('take profit') || cond.includes('takeprofit')) kind = 'tp'
     // Fallback: classify by price direction relative to the reference.
-    if (kind === null && refPx !== null) {
-      if (side === 'long')  kind = px < refPx ? 'sl' : 'tp'
-      else                  kind = px > refPx ? 'sl' : 'tp'
+    if (kind === null && refPx !== null && effectiveSide !== null) {
+      if (effectiveSide === 'long')  kind = px < refPx ? 'sl' : 'tp'
+      else                           kind = px > refPx ? 'sl' : 'tp'
     }
     if (kind === 'sl') {
       // Pick the closest SL to entry (largest below for long, smallest above for short)
       if (sl === null) sl = px
-      else sl = side === 'long' ? Math.max(sl, px) : Math.min(sl, px)
+      else sl = effectiveSide === 'long' ? Math.max(sl, px) : Math.min(sl, px)
     } else if (kind === 'tp') {
       // Pick the closest TP to entry
       if (tp === null) tp = px
-      else tp = side === 'long' ? Math.min(tp, px) : Math.max(tp, px)
+      else tp = effectiveSide === 'long' ? Math.min(tp, px) : Math.max(tp, px)
     }
   }
   return { slPx: sl, tpPx: tp }
