@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, Square, ArrowRight, Medal, Search, Trophy, X } from 'lucide-react'
+import { ChevronDown, Play, Square, ArrowRight, Medal, Search, Trophy, X } from 'lucide-react'
 import type { Direction, StrategyId } from '@/types'
 import type { SymbolInfo } from '@/lib/binance'
 import { defaultParams, STRATEGIES } from '@/lib/strategies'
@@ -206,6 +206,14 @@ export default function IndicatorScanTab({
   const top3 = visible.slice(0, 3)
   const bestPick = visible[0]
 
+  // Unique base coins present in the current scan results. Powers the coin
+  // dropdown so the user only sees options that will actually match a row.
+  const uniqueBases = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of rows) set.add(r.base.toUpperCase())
+    return [...set].sort()
+  }, [rows])
+
   const goToBacktest = (r: IndicatorScanRow) => {
     onPickSymbol(r.symbol)
     onPickTimeframe(r.timeframe)
@@ -234,29 +242,14 @@ export default function IndicatorScanTab({
     <div className="flex flex-col gap-4">
       {/* ── Filter / action bar ─────────────────────────────────────────── */}
       <div className="card p-4 flex flex-wrap items-end gap-4">
-        {/* Search — filters the results table by base coin or ticker. */}
-        <div className="flex flex-col gap-1 min-w-[180px]">
-          <span className="text-[10px] text-dim uppercase tracking-wider">Search coin</span>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-dim" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="e.g. BTC, ETH, FET"
-              className="w-full rounded-md border border-border bg-panel-2 pl-7 pr-7 py-1 text-xs font-mono text-text outline-none focus:border-brand/60 placeholder:text-dim/60"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-dim hover:bg-panel hover:text-text"
-                aria-label="Clear search"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
+        {/* Coin picker — combobox of bases in the current scan results. */}
+        <div className="flex flex-col gap-1 min-w-[200px]">
+          <span className="text-[10px] text-dim uppercase tracking-wider">Coin</span>
+          <CoinPicker
+            value={search}
+            onChange={setSearch}
+            options={uniqueBases}
+          />
         </div>
 
         <div className="flex flex-col gap-1">
@@ -792,6 +785,107 @@ export default function IndicatorScanTab({
       {!scanning && rows.length > 0 && visible.length === 0 && (
         <div className="card p-6 text-center text-xs text-dim">
           No combos match the current filters.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// CoinPicker — searchable dropdown for filtering rows by base coin. Mirrors
+// the SymbolSearch combobox pattern from other pages (input + popover list)
+// but is scoped to the bases that exist in the current scan results, so the
+// user never sees a coin that wouldn't match any row.
+function CoinPicker({
+  value,
+  onChange,
+  options,
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: string[]
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false)
+        setQuery('')
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [])
+
+  const q = query.trim().toUpperCase()
+  const filtered = q ? options.filter((o) => o.includes(q)) : options
+
+  const select = (v: string) => {
+    onChange(v)
+    setOpen(false)
+    setQuery('')
+  }
+
+  // Show the selected value when closed; while open, show typed query.
+  const displayValue = open ? query : (value || '')
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-dim" />
+        <input
+          type="text"
+          value={displayValue}
+          placeholder={options.length ? 'All coins · type or pick…' : 'Run a scan first'}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+          className="w-full rounded-md border border-border bg-panel-2 pl-7 pr-8 py-1 text-xs font-mono text-text outline-none focus:border-brand/60 placeholder:text-dim/60"
+        />
+        {value ? (
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); select('') }}
+            className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-dim hover:bg-panel hover:text-text"
+            aria-label="Clear coin filter"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        ) : (
+          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-dim" />
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-40 mt-1 w-full overflow-hidden rounded-md border border-border bg-panel-2 shadow-2xl">
+          <div className="max-h-72 overflow-auto py-1">
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); select('') }}
+              className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs hover:bg-bg ${
+                value === '' ? 'text-brand' : 'text-text'
+              }`}
+            >
+              <span className="font-medium">All coins</span>
+              <span className="text-[10px] text-dim">{options.length} available</span>
+            </button>
+            {filtered.length === 0 ? (
+              <p className="px-3 py-2 text-[11px] text-dim italic">No coins match</p>
+            ) : (
+              filtered.map((base) => (
+                <button
+                  key={base}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); select(base) }}
+                  className={`flex w-full items-center px-3 py-1.5 text-left text-xs font-mono hover:bg-bg ${
+                    base.toUpperCase() === value.toUpperCase() ? 'text-brand' : 'text-text'
+                  }`}
+                >
+                  {base}
+                </button>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>
