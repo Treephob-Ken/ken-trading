@@ -206,13 +206,18 @@ export default function IndicatorScanTab({
   const top3 = visible.slice(0, 3)
   const bestPick = visible[0]
 
-  // Unique base coins present in the current scan results. Powers the coin
-  // dropdown so the user only sees options that will actually match a row.
+  // Coin choices for the picker. Prefer the bases that already showed up in
+  // the scan results (so the filter only offers things that actually match),
+  // but fall back to the full scan universe when no scan has run yet — so the
+  // dropdown is never empty on first visit.
   const uniqueBases = useMemo(() => {
     const set = new Set<string>()
     for (const r of rows) set.add(r.base.toUpperCase())
+    if (set.size > 0) return [...set].sort()
+    // Fallback: every base in the universe (pre-scan state).
+    for (const sym of universe) set.add(sym.base.toUpperCase())
     return [...set].sort()
-  }, [rows])
+  }, [rows, universe])
 
   const goToBacktest = (r: IndicatorScanRow) => {
     onPickSymbol(r.symbol)
