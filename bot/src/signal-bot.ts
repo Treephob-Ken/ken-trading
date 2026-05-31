@@ -841,12 +841,17 @@ class SignalBot {
       let openSide: 'buy' | 'sell' = sig
 
       if (cfg.tradeSide === 'both') {
-        // Long & Short: always enter in signal direction; close the opposite first.
-        willOpen = true
+        // Long & Short: flip on opposite signal; skip if a same-direction
+        // signal arrives while we already hold that side (no averaging into
+        // the position — keeps SL coverage aligned with what the UI shows).
         if (sig === 'buy') {
+          if (pos && pos.side === 'long') { this.log.info(`Already LONG ${cfg.asset} — BUY skipped (no averaging)`); return }
+          willOpen = true
           openSide = 'buy'
           if (pos && pos.side === 'short') { willClose = true; closeSide = 'buy'; closeSize = pos.size }
         } else {
+          if (pos && pos.side === 'short') { this.log.info(`Already SHORT ${cfg.asset} — SELL skipped (no averaging)`); return }
+          willOpen = true
           openSide = 'sell'
           if (pos && pos.side === 'long') { willClose = true; closeSide = 'sell'; closeSize = pos.size }
         }
