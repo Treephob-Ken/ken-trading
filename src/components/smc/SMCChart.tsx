@@ -18,7 +18,7 @@ import type { SMCResult } from '@/lib/smc/types'
 const GREEN = '#089981'
 const RED = '#f23645'
 
-export default function SMCChart({ candles, result }: { candles: Candle[]; result: SMCResult }) {
+export default function SMCChart({ candles, result, showEqual = true }: { candles: Candle[]; result: SMCResult; showEqual?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -26,6 +26,8 @@ export default function SMCChart({ candles, result }: { candles: Candle[]; resul
   // One thin line series per structure break (pivot → break, drawn at the
   // pivot level). Kept in a ref so we can remove them when data changes.
   const structureLinesRef = useRef<ISeriesApi<'Line'>[]>([])
+  // One dotted line series per EQH/EQL (connecting the two equal pivots).
+  const equalLinesRef = useRef<ISeriesApi<'Line'>[]>([])
 
   // Create the chart once.
   useEffect(() => {
@@ -78,14 +80,45 @@ export default function SMCChart({ candles, result }: { candles: Candle[]; resul
       structureLinesRef.current.push(ls)
     }
 
-    // BOS/CHoCH labels as series markers at the breaking bar.
-    const markers: SeriesMarker<Time>[] = result.structures.map(s => ({
-      time: s.atTime as Time,
-      position: s.bias === 'bullish' ? 'belowBar' : 'aboveBar',
-      color: s.bias === 'bullish' ? GREEN : RED,
-      shape: s.bias === 'bullish' ? 'arrowUp' : 'arrowDown',
-      text: s.kind,
-    }))
+    // EQH/EQL: dotted line connecting the two equal pivots.
+    for (const ls of equalLinesRef.current) chart.removeSeries(ls)
+    equalLinesRef.current = []
+    if (showEqual) {
+      for (const e of result.equalLevels) {
+        const ls = chart.addSeries(LineSeries, {
+          color: e.kind === 'EQH' ? RED : GREEN,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        })
+        ls.setData([
+          { time: e.fromTime as Time, value: e.level },
+          { time: e.toTime as Time, value: e.level },
+        ])
+        equalLinesRef.current.push(ls)
+      }
+    }
+
+    // Markers: BOS/CHoCH at the break bar + EQH/EQL at the confirming pivot.
+    // Combined into one sorted array (Lightweight Charts needs ascending time).
+    const markers: SeriesMarker<Time>[] = [
+      ...result.structures.map(s => ({
+        time: s.atTime as Time,
+        position: (s.bias === 'bullish' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
+        color: s.bias === 'bullish' ? GREEN : RED,
+        shape: (s.bias === 'bullish' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
+        text: s.kind,
+      })),
+      ...(showEqual ? result.equalLevels.map(e => ({
+        time: e.toTime as Time,
+        position: (e.kind === 'EQH' ? 'aboveBar' : 'belowBar') as 'aboveBar' | 'belowBar',
+        color: e.kind === 'EQH' ? RED : GREEN,
+        shape: 'circle' as const,
+        text: e.kind,
+      })) : []),
+    ].sort((a, b) => (a.time as number) - (b.time as number))
     createSeriesMarkers(series, markers)
 
     // Clear previous Strong/Weak price lines, then redraw.
@@ -103,7 +136,7 @@ export default function SMCChart({ candles, result }: { candles: Candle[]; resul
     }
 
     chart.timeScale().fitContent()
-  }, [candles, result])
+  }, [candles, result, showEqual])
 
   return (
     <div className="relative">

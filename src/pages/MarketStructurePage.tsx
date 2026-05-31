@@ -11,6 +11,8 @@ export default function MarketStructurePage() {
   const [symbol, setSymbol] = useState(() => localStorage.getItem('lab_symbol') || 'ETHUSDT')
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('lab_timeframe') || '1h')
   const [swingLength, setSwingLength] = useState(50)
+  const [showEqual, setShowEqual] = useState(true)
+  const [showOrderBlocks, setShowOrderBlocks] = useState(true)
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +64,16 @@ export default function MarketStructurePage() {
               className="field w-[64px]"
             />
           </label>
+          <button
+            type="button"
+            onClick={() => setShowOrderBlocks(v => !v)}
+            className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${showOrderBlocks ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
+          >Order blocks</button>
+          <button
+            type="button"
+            onClick={() => setShowEqual(v => !v)}
+            className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${showEqual ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
+          >EQH/EQL</button>
         </div>
       </div>
 
@@ -75,9 +87,33 @@ export default function MarketStructurePage() {
         {candles.length === 0 && !loading ? (
           <div className="flex h-[460px] min-h-[460px] items-center justify-center text-sm text-dim">No data.</div>
         ) : (
-          <SMCChart candles={candles} result={result} />
+          <SMCChart candles={candles} result={result} showEqual={showEqual} />
         )}
       </section>
+
+      {showOrderBlocks && (
+        <section className="card p-3">
+          <div className="mb-2 text-xs font-semibold text-text">
+            Order blocks <span className="text-dim font-normal">({result.orderBlocks.length} active)</span>
+          </div>
+          {result.orderBlocks.length === 0 ? (
+            <div className="text-[11px] text-dim italic">No un-mitigated order blocks in this window.</div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {result.orderBlocks.map((ob, i) => (
+                <div key={i} className="flex items-center justify-between text-[11px]">
+                  <span className={ob.bias === 'bullish' ? 'text-gain' : 'text-loss'}>
+                    {ob.bias === 'bullish' ? 'Bullish (demand)' : 'Bearish (supply)'}
+                  </span>
+                  <span className="font-mono tabular-nums text-dim">
+                    {ob.bottom} – {ob.top}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="card p-3">
         <div className="mb-2 text-xs font-semibold text-text">Recent structure events</div>
