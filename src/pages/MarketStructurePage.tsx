@@ -33,6 +33,8 @@ export default function MarketStructurePage() {
   const [swingLength, setSwingLength] = useState(50)
   const [riskUsd, setRiskUsd] = useState(3)
   const [slPct, setSlPct] = useState(1.5)
+  // Which structure entry the bot fires on: CHoCH only (mode 1) or BOS+CHoCH (mode 2).
+  const [entryRule, setEntryRule] = useState<'choch' | 'both'>('choch')
   const [visible, setVisible] = useState<Record<LayerKey, boolean>>({
     structure: true, internal: false, strongWeak: true, orderBlocks: true, equal: true, fvg: false, zones: false, mtf: false, trend: false,
   })
@@ -65,7 +67,7 @@ export default function MarketStructurePage() {
       asset,
       strategy: 'smc',
       timeframe,
-      params: { swingLength, mode: 1 }, // 1 = CHoCH-only (trend flips)
+      params: { swingLength, mode: entryRule === 'both' ? 2 : 1 }, // 1 = CHoCH only, 2 = BOS+CHoCH
       direction: 'both',
       slPct,
       riskUsd,
@@ -224,6 +226,17 @@ export default function MarketStructurePage() {
           Runs the SMC structure strategy live on {pairLabel} · {timeframe} (enters on Bullish/Bearish CHoCH). Sizing is risk-based.
         </p>
         <div className="flex flex-wrap items-end gap-3">
+          <label className="text-[11px] text-dim">
+            <span className="mb-1 block">Entry rule</span>
+            <select
+              value={entryRule}
+              onChange={e => setEntryRule(e.target.value as 'choch' | 'both')}
+              className="field w-[150px]"
+            >
+              <option value="choch">CHoCH only</option>
+              <option value="both">BOS + CHoCH</option>
+            </select>
+          </label>
           <label className="text-[11px] text-dim">
             <span className="mb-1 block">Risk $ / trade</span>
             <input type="number" min={1} step={1} value={riskUsd}
