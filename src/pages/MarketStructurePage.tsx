@@ -32,7 +32,10 @@ export default function MarketStructurePage() {
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('lab_timeframe') || '1h')
   const [swingLength, setSwingLength] = useState(50)
   const [riskUsd, setRiskUsd] = useState(3)
-  const [slPct, setSlPct] = useState(1.5)
+  // SL% and lookback are shared with the Scanner (localStorage) so the Strategy
+  // test here matches what the scan showed for the same coin.
+  const [slPct, setSlPct] = useState(() => +(localStorage.getItem('smc_sl_pct') || '1.5'))
+  const [lookbackDays, setLookbackDays] = useState(() => +(localStorage.getItem('smc_lookback_days') || '150'))
   // Which structure entry the bot fires on: CHoCH only (mode 1) or BOS+CHoCH (mode 2).
   const [entryRule, setEntryRule] = useState<'choch' | 'both'>('choch')
   // Exit mode for the deployed bot.
@@ -45,15 +48,18 @@ export default function MarketStructurePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => { localStorage.setItem('smc_sl_pct', String(slPct)) }, [slPct])
+  useEffect(() => { localStorage.setItem('smc_lookback_days', String(lookbackDays)) }, [lookbackDays])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    fetchKlines({ symbol, interval: timeframe })
+    fetchKlines({ symbol, interval: timeframe, startTime: Date.now() - lookbackDays * 86_400_000 })
       .then(c => { if (!cancelled) setCandles(c) })
       .catch(e => { if (!cancelled) setError((e as Error).message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [symbol, timeframe])
+  }, [symbol, timeframe, lookbackDays])
 
   const result = useMemo(() => computeSMC(candles, { swingLength }), [candles, swingLength])
   const lastPrice = candles.length ? candles[candles.length - 1].close : 0
@@ -118,6 +124,15 @@ export default function MarketStructurePage() {
               onChange={e => setSwingLength(Math.max(3, +e.target.value || 50))}
               className="field w-[64px]"
             />
+          </label>
+          <label className="flex items-center gap-1 text-[11px] text-dim">
+            Lookback
+            <input
+              type="number" min={30} step={10} value={lookbackDays}
+              onChange={e => setLookbackDays(Math.max(30, +e.target.value || 150))}
+              className="field w-[72px]"
+            />
+            <span>d</span>
           </label>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Play, Loader2 } from 'lucide-react'
 import type { SymbolInfo } from '@/lib/binance'
@@ -18,12 +18,17 @@ const PASS_TRADES = 20
 export default function SmcScanTab({ universe, onPickSymbol, onPickTimeframe }: Props) {
   const navigate = useNavigate()
   const [timeframes, setTimeframes] = useState<string[]>(['1h', '4h'])
-  const [slPct, setSlPct] = useState(1.5)
-  const [lookbackDays, setLookbackDays] = useState(120)
+  // SL% and lookback are shared with the Market Structure page (localStorage)
+  // so a coin's scan numbers match its Strategy test there.
+  const [slPct, setSlPct] = useState(() => +(localStorage.getItem('smc_sl_pct') || '1.5'))
+  const [lookbackDays, setLookbackDays] = useState(() => +(localStorage.getItem('smc_lookback_days') || '150'))
   const [rows, setRows] = useState<SmcScanRow[]>([])
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [running, setRunning] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => { localStorage.setItem('smc_sl_pct', String(slPct)) }, [slPct])
+  useEffect(() => { localStorage.setItem('smc_lookback_days', String(lookbackDays)) }, [lookbackDays])
 
   const toggleTf = (tf: string) =>
     setTimeframes(t => (t.includes(tf) ? t.filter(x => x !== tf) : [...t, tf]))
