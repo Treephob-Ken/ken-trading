@@ -120,6 +120,20 @@ export interface PortfolioSummary {
   byAsset: AssetRollup[]
 }
 
+// Account-value trend (from /api/portfolio/equity). Mirrors the bot's
+// EquitySeriesResponse — distinct from the realized PortfolioSummary above.
+export type EquityPeriod = 'day' | 'week' | 'month' | 'all'
+export interface EquitySeriesResponse {
+  period: EquityPeriod
+  points: { t: number; value: number }[]
+  pnlPoints: { t: number; value: number }[]
+  startValue: number
+  currentValue: number
+  returnPct: number
+  maxDrawdown: number
+  maxDrawdownPct: number
+}
+
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
 export function money(v: number, signed = false): string {

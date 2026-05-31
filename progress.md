@@ -4,7 +4,7 @@
 > Max ~200 lines. When something changes, **edit the relevant section** —
 > don't append a dated entry. Git history is the changelog.
 
-Last reviewed: 2026-05-26 (Phase C: HIP-3 UI polish — cross-dex positions, signal bots, Limit toggle)
+Last reviewed: 2026-05-31 (Portfolio page redesign — account-value trend, max drawdown, bot leaderboard, cross-filter)
 
 ---
 
@@ -66,6 +66,7 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Signal bots can target HIP-3 symbols (xyz:GOLD etc.) end-to-end | ✅ Phase C.2 |
 | Live SSE log tail across all bots | ✅ Logs page |
 | Login page redesign (dot-grid, framer-motion) | ✅ |
+| Portfolio page — account-value trend (HL portfolio), max drawdown, bot leaderboard, Power BI cross-filter | ✅ two-layer model (see gotcha) |
 
 ---
 
@@ -190,6 +191,20 @@ pm2 restart cloudflare-tunnel    # if tunnel drops
   position must be protected before we touch the order book. Old-run SL/TP
   (different oid) are still cancelled as orphans and immediately replaced —
   coverage never drops to zero.
+- **Portfolio page has two non-reconciling data layers — by design.**
+  (1) *Account layer* = `GET /api/portfolio/equity` → Hyperliquid `info.portfolio()`
+  account-value history (true equity incl. unrealized/funding/transfers). Only
+  `day/week/month/allTime` granularity exists on HL, so the hero trend chart has
+  its own Day/Week/Month/All toggle, independent of the page's detail-range
+  buttons. `mapEquitySeries()` in `bot/src/journal.ts` trims HL's leading $0
+  (pre-funding) points so the % return baseline is the first funded value.
+  (2) *Realized layer* = closed round-trips from `/api/portfolio/trips`, derived
+  **client-side** in `src/lib/portfolio.ts` (`botPerformance`, `realizedView`).
+  Powers the bot leaderboard, daily PnL, calendar, by-asset, closed-trades — and
+  cross-filters instantly when a bot card is clicked (no server round-trip). The
+  account-value line is account-wide and **cannot** be split per bot, so selecting
+  a bot swaps the trend chart to that bot's realized-PnL curve (header relabels).
+  The two layers' totals won't match — labels make this explicit.
 - **Kill-switch state is network-tagged.** `readState()` accepts a
   `currentNetwork` arg and drops the snapshot if it was taken on a different
   network. The GET endpoint (`/api/killswitch`) and PUT config endpoint both
