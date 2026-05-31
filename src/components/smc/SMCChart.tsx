@@ -14,14 +14,16 @@ import {
 } from 'lightweight-charts'
 import type { Candle } from '@/types'
 import type { SMCResult } from '@/lib/smc/types'
+import { OrderBlockPrimitive } from './primitives/orderBlockPrimitive'
 
 const GREEN = '#089981'
 const RED = '#f23645'
 
-export default function SMCChart({ candles, result, showEqual = true }: { candles: Candle[]; result: SMCResult; showEqual?: boolean }) {
+export default function SMCChart({ candles, result, showEqual = true, showOrderBlocks = true }: { candles: Candle[]; result: SMCResult; showEqual?: boolean; showOrderBlocks?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const obPrimitiveRef = useRef<OrderBlockPrimitive | null>(null)
   const priceLinesRef = useRef<IPriceLine[]>([])
   // One thin line series per structure break (pivot → break, drawn at the
   // pivot level). Kept in a ref so we can remove them when data changes.
@@ -45,9 +47,12 @@ export default function SMCChart({ candles, result, showEqual = true }: { candle
       upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
       wickUpColor: '#26a69a', wickDownColor: '#ef5350',
     })
+    const obPrimitive = new OrderBlockPrimitive()
+    series.attachPrimitive(obPrimitive)
     chartRef.current = chart
     seriesRef.current = series
-    return () => { chart.remove(); chartRef.current = null; seriesRef.current = null }
+    obPrimitiveRef.current = obPrimitive
+    return () => { chart.remove(); chartRef.current = null; seriesRef.current = null; obPrimitiveRef.current = null }
   }, [])
 
   // Push candles + SMC overlays whenever data changes.
@@ -67,7 +72,7 @@ export default function SMCChart({ candles, result, showEqual = true }: { candle
     for (const s of result.structures) {
       const ls = chart.addSeries(LineSeries, {
         color: s.bias === 'bullish' ? GREEN : RED,
-        lineWidth: 1,
+        lineWidth: 2,
         lineStyle: LineStyle.Solid,
         lastValueVisible: false,
         priceLineVisible: false,
@@ -135,8 +140,11 @@ export default function SMCChart({ candles, result, showEqual = true }: { candle
       }))
     }
 
+    // Order-block boxes (custom primitive drawn behind the candles).
+    obPrimitiveRef.current?.setBlocks(showOrderBlocks ? result.orderBlocks : [])
+
     chart.timeScale().fitContent()
-  }, [candles, result, showEqual])
+  }, [candles, result, showEqual, showOrderBlocks])
 
   return (
     <div className="relative">

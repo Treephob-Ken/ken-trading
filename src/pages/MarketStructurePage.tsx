@@ -87,7 +87,7 @@ export default function MarketStructurePage() {
         {candles.length === 0 && !loading ? (
           <div className="flex h-[460px] min-h-[460px] items-center justify-center text-sm text-dim">No data.</div>
         ) : (
-          <SMCChart candles={candles} result={result} showEqual={showEqual} />
+          <SMCChart candles={candles} result={result} showEqual={showEqual} showOrderBlocks={showOrderBlocks} />
         )}
       </section>
 
