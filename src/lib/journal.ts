@@ -84,6 +84,40 @@ export interface JournalSummary {
   byBot: BotRollup[]
 }
 
+// ─── Portfolio types (mirror bot/src/journal.ts) ──────────────────────────────
+
+export type PortfolioRange = '24h' | '7d' | '30d' | '90d' | '1y' | 'all'
+
+export interface AssetRollup {
+  asset: string
+  pnl: number
+  trades: number
+  wins: number
+  losses: number
+  winRate: number
+}
+
+export interface EquityPoint {
+  date: string
+  equity: number
+}
+
+export interface PortfolioSummary {
+  range: PortfolioRange
+  from: number
+  to: number
+  netPnl: number
+  fillsCount: number
+  roundTripCount: number
+  winRate: number
+  best: { pnl: number; asset: string; source: FillSource } | null
+  worst: { pnl: number; asset: string; source: FillSource } | null
+  dailySeries: DailyBucket[]
+  equitySeries: EquityPoint[]
+  byBot: BotRollup[]
+  byAsset: AssetRollup[]
+}
+
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
 export function money(v: number, signed = false): string {

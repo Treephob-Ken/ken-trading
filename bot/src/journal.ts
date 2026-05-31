@@ -455,3 +455,163 @@ export function rangeToBounds(range: string | undefined): { from: number; to: nu
   const r = (range === '7d' || range === '30d') ? range : '24h'
   return { ...rangeBoundsMs(r), range: r }
 }
+
+// ─── Portfolio summary ────────────────────────────────────────────────────────
+//
+// A richer summary tailored for the Portfolio page. Reuses the round-trip
+// pairing but adds: extended time ranges (90d / 1y / all), a by-asset
+// rollup, and a running-equity series that turns the daily PnL into a
+// cumulative line the UI can chart directly.
+
+export type PortfolioRange = '24h' | '7d' | '30d' | '90d' | '1y' | 'all'
+
+export interface AssetRollup {
+  asset: string
+  pnl: number
+  trades: number
+  wins: number
+  losses: number
+  winRate: number            // 0-100
+}
+
+export interface EquityPoint {
+  date: string               // YYYY-MM-DD (UTC)
+  equity: number             // cumulative PnL up to and including this day
+}
+
+export interface PortfolioSummary {
+  range: PortfolioRange
+  from: number
+  to: number
+  netPnl: number
+  fillsCount: number
+  roundTripCount: number
+  winRate: number            // 0-100 — wins / (wins + losses)
+  best: { pnl: number; asset: string; source: FillSource } | null
+  worst: { pnl: number; asset: string; source: FillSource } | null
+  dailySeries: DailyBucket[]
+  equitySeries: EquityPoint[]
+  byBot: BotRollup[]
+  byAsset: AssetRollup[]
+}
+
+function portfolioRangeBoundsMs(range: PortfolioRange): { from: number; to: number } {
+  const to = Date.now()
+  switch (range) {
+    case '24h': return { from: to - 86_400_000, to }
+    case '7d':  return { from: to - 7  * 86_400_000, to }
+    case '30d': return { from: to - 30 * 86_400_000, to }
+    case '90d': return { from: to - 90 * 86_400_000, to }
+    case '1y':  return { from: to - 365 * 86_400_000, to }
+    case 'all': return { from: to - 365 * 86_400_000, to }  // HL retention cap
+  }
+}
+
+export function portfolioRangeToBounds(
+  range: string | undefined,
+): { from: number; to: number; range: PortfolioRange } {
+  const valid: PortfolioRange[] = ['24h', '7d', '30d', '90d', '1y', 'all']
+  const r = valid.includes(range as PortfolioRange) ? (range as PortfolioRange) : '24h'
+  return { ...portfolioRangeBoundsMs(r), range: r }
+}
+
+export function summarizePortfolio(
+  fills: Fill[],
+  trips: RoundTrip[],
+  range: PortfolioRange,
+): PortfolioSummary {
+  const { from, to } = portfolioRangeBoundsMs(range)
+
+  const netPnl = trips.reduce((s, t) => s + t.closedPnl, 0)
+  const wins = trips.filter((t) => t.closedPnl > 0).length
+  const losses = trips.filter((t) => t.closedPnl < 0).length
+  const winRate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : 0
+
+  let best: PortfolioSummary['best'] = null
+  let worst: PortfolioSummary['worst'] = null
+  for (const t of trips) {
+    if (!best || t.closedPnl > best.pnl) best = { pnl: t.closedPnl, asset: t.asset, source: t.source }
+    if (!worst || t.closedPnl < worst.pnl) worst = { pnl: t.closedPnl, asset: t.asset, source: t.source }
+  }
+  if (best && best.pnl <= 0) best = null
+  if (worst && worst.pnl >= 0) worst = null
+
+  // Daily buckets — fill in every day in the window so charts are dense.
+  // For long ranges we still bucket by day; the UI compresses visually.
+  const buckets = new Map<string, DailyBucket>()
+  const dayMs = 86_400_000
+  const startDay = Math.floor(from / dayMs) * dayMs
+  for (let t = startDay; t <= to; t += dayMs) {
+    const k = dayKey(t)
+    buckets.set(k, { date: k, pnl: 0, trades: 0 })
+  }
+  for (const t of trips) {
+    const k = dayKey(t.exitTime)
+    const b = buckets.get(k) ?? { date: k, pnl: 0, trades: 0 }
+    b.pnl += t.closedPnl
+    b.trades += 1
+    buckets.set(k, b)
+  }
+  const dailySeries = [...buckets.values()].sort((a, b) => a.date.localeCompare(b.date))
+
+  // Equity series = cumulative PnL day-by-day. Starts at 0 on the first day
+  // of the window so the line shows the gain produced *within* the period.
+  let running = 0
+  const equitySeries: EquityPoint[] = dailySeries.map((d) => {
+    running += d.pnl
+    return { date: d.date, equity: running }
+  })
+
+  // By-bot rollup — keyed by source identity.
+  const botMap = new Map<string, BotRollup>()
+  for (const t of trips) {
+    const key = t.source.kind === 'manual' ? 'manual' : `${t.source.kind}:${t.source.botId}`
+    let entry = botMap.get(key)
+    if (!entry) {
+      entry = { source: t.source, pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0 }
+      botMap.set(key, entry)
+    }
+    entry.pnl += t.closedPnl
+    entry.trades += 1
+    if (t.closedPnl > 0) entry.wins += 1
+    else if (t.closedPnl < 0) entry.losses += 1
+  }
+  const byBot = [...botMap.values()].map((b) => ({
+    ...b,
+    winRate: b.wins + b.losses > 0 ? (b.wins / (b.wins + b.losses)) * 100 : 0,
+  })).sort((a, b) => b.pnl - a.pnl)
+
+  // By-asset rollup — same shape but keyed on coin.
+  const assetMap = new Map<string, AssetRollup>()
+  for (const t of trips) {
+    let entry = assetMap.get(t.asset)
+    if (!entry) {
+      entry = { asset: t.asset, pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0 }
+      assetMap.set(t.asset, entry)
+    }
+    entry.pnl += t.closedPnl
+    entry.trades += 1
+    if (t.closedPnl > 0) entry.wins += 1
+    else if (t.closedPnl < 0) entry.losses += 1
+  }
+  const byAsset = [...assetMap.values()].map((a) => ({
+    ...a,
+    winRate: a.wins + a.losses > 0 ? (a.wins / (a.wins + a.losses)) * 100 : 0,
+  })).sort((a, b) => b.pnl - a.pnl)
+
+  return {
+    range,
+    from,
+    to,
+    netPnl,
+    fillsCount: fills.length,
+    roundTripCount: trips.length,
+    winRate,
+    best,
+    worst,
+    dailySeries,
+    equitySeries,
+    byBot,
+    byAsset,
+  }
+}

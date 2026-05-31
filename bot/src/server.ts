@@ -74,8 +74,10 @@ import {
   fetchFillsFromHL,
   loadAuditLines,
   pairRoundTrips,
+  portfolioRangeToBounds,
   rangeToBounds,
   summarize,
+  summarizePortfolio,
 } from './journal.js'
 import { listPausedGridBotIds, listRunningGridBotIds, readGridRuntime, writeGridRuntime } from './grid-runtime.js'
 import { isNotifyEnabled, startFillNotifier } from './notify.js'
@@ -215,6 +217,10 @@ app.use(
           'wss://api.hyperliquid-testnet.xyz',
           'https://data-api.binance.vision',
           'wss://data-stream.binance.vision',
+          // Binance Futures endpoint — used by the scanner to fetch perp
+          // funding rates (premiumIndex). Without this entry the browser
+          // blocks every funding fetch silently and fundingApr becomes NaN.
+          'https://fapi.binance.com',
         ],
         frameAncestors: ["'none'"],
         objectSrc: ["'none'"],
@@ -1405,6 +1411,56 @@ app.get('/api/journal/summary', requireAuth, async (req: Request, res: Response)
     }
     for (const { pos, px } of latestPerAsset.values()) openValue += Math.abs(pos) * px
     res.json(summarize(fills, trips, range, openValue))
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Portfolio summary — richer than /api/journal/summary. Supports longer
+// ranges (90d/1y/all), adds a by-asset rollup, and returns a cumulative
+// equity series ready for charting.
+//
+// HL's userFillsByTime is the slow leg here (network + paging), so we
+// cache the result per (userId, range) for 60 s. The Portfolio page polls
+// this on user action only (refresh button / range switch), not on a
+// timer, but cache also protects against accidental rapid clicks.
+const portfolioCache = new Map<string, { at: number; data: unknown }>()
+const PORTFOLIO_CACHE_MS = 60_000
+app.get('/api/portfolio', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set. Add them in Settings.' }); return }
+    const { from, to, range } = portfolioRangeToBounds(typeof req.query.range === 'string' ? req.query.range : undefined)
+    const uid = userId(req) ?? 'single'
+    const cacheKey = `${uid}|${range}`
+    const hit = portfolioCache.get(cacheKey)
+    if (hit && Date.now() - hit.at < PORTFOLIO_CACHE_MS) {
+      res.json(hit.data)
+      return
+    }
+    const srcMap = buildAssetSourceMap(userId(req))
+    const fills = await fetchFillsFromHL(creds, from, to, srcMap)
+    const trips = pairRoundTrips(fills)
+    const data = summarizePortfolio(fills, trips, range)
+    portfolioCache.set(cacheKey, { at: Date.now(), data })
+    res.json(data)
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// Round-trip list for the Portfolio page's "Closed Trades" table. Same
+// fills/range plumbing as /api/portfolio but returns the trips directly
+// (newest first) so the UI can paginate + filter without re-fetching.
+app.get('/api/portfolio/trips', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const creds = MULTI_USER ? userCreds(req) : loadEnv()
+    if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set. Add them in Settings.' }); return }
+    const { from, to } = portfolioRangeToBounds(typeof req.query.range === 'string' ? req.query.range : undefined)
+    const srcMap = buildAssetSourceMap(userId(req))
+    const fills = await fetchFillsFromHL(creds, from, to, srcMap)
+    const trips = pairRoundTrips(fills)
+    res.json(trips)
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }

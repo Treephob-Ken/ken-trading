@@ -4,6 +4,7 @@ import {
   ArrowUpDown,
   BotMessageSquare,
   Brain,
+  Briefcase,
   CandlestickChart,
   LayoutGrid,
   LineChart,
@@ -28,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/bots',    icon: BotMessageSquare, label: 'Grid Bots'           },
   { path: '/fundamentals', icon: Brain,       label: 'Fundamentals'        },
   { path: '/trade',    icon: ArrowUpDown,      label: 'Trade'               },
+  { path: '/portfolio', icon: Briefcase,       label: 'Portfolio'           },
   { path: '/logs',     icon: Activity,         label: 'Logs'                },
   { path: '/settings', icon: Settings,         label: 'Settings'            },
 ]

@@ -9,6 +9,7 @@ import SignalBotsPage from '@/pages/SignalBotsPage'
 import GridBotsPage from '@/pages/GridBotsPage'
 import TradePage from '@/pages/TradePage'
 import LogsPage from '@/pages/LogsPage'
+import PortfolioPage from '@/pages/PortfolioPage'
 import SettingsPage from '@/pages/SettingsPage'
 import FundamentalsPage from '@/pages/FundamentalsPage'
 import ScannerPage from '@/pages/ScannerPage'
@@ -86,6 +87,9 @@ export default function App() {
 
           {/* Phase 5 — Logs */}
           <Route path="logs" element={<LogsPage />} />
+
+          {/* Portfolio — multi-range PnL dashboard, equity curve, by-asset/bot rollups */}
+          <Route path="portfolio" element={<PortfolioPage />} />
 
           {/* Scanner — batch-rank symbols × strategies, feeds Backtester + Grid pages */}
           <Route path="scanner" element={
