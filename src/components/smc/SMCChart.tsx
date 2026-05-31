@@ -3,6 +3,7 @@ import {
   createChart,
   createSeriesMarkers,
   CandlestickSeries,
+  LineSeries,
   ColorType,
   LineStyle,
   type IChartApi,
@@ -22,6 +23,9 @@ export default function SMCChart({ candles, result }: { candles: Candle[]; resul
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const priceLinesRef = useRef<IPriceLine[]>([])
+  // One thin line series per structure break (pivot → break, drawn at the
+  // pivot level). Kept in a ref so we can remove them when data changes.
+  const structureLinesRef = useRef<ISeriesApi<'Line'>[]>([])
 
   // Create the chart once.
   useEffect(() => {
@@ -53,6 +57,26 @@ export default function SMCChart({ candles, result }: { candles: Candle[]; resul
     series.setData(
       candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close })),
     )
+
+    // Structure lines: a horizontal segment from the broken pivot to the bar
+    // that broke it, at the pivot level. One 2-point line series per break.
+    for (const ls of structureLinesRef.current) chart.removeSeries(ls)
+    structureLinesRef.current = []
+    for (const s of result.structures) {
+      const ls = chart.addSeries(LineSeries, {
+        color: s.bias === 'bullish' ? GREEN : RED,
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      })
+      ls.setData([
+        { time: s.fromTime as Time, value: s.level },
+        { time: s.atTime as Time, value: s.level },
+      ])
+      structureLinesRef.current.push(ls)
+    }
 
     // BOS/CHoCH labels as series markers at the breaking bar.
     const markers: SeriesMarker<Time>[] = result.structures.map(s => ({
