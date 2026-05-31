@@ -893,12 +893,12 @@ export function generateSignals(
         level: b.level,
         color: b.bias === 'bullish' ? GREEN : RED,
       }))
-      return {
-        signals: r.signals as Signal[],
-        mainLines: [],
-        waveMarkers,
-        structureLines,
-      }
+      // entryMode: 0 = enter on the break; 1/2/3 = retest of level / OB / FVG.
+      const entryMode = params.entryMode | 0
+      const signals: Signal[] = entryMode >= 1
+        ? smcRetestSignals(highs, lows, closes, swingSize, 'both', entryMode === 2 ? 'ob' : entryMode === 3 ? 'fvg' : 'level')
+        : (r.signals as Signal[])
+      return { signals, mainLines: [], waveMarkers, structureLines }
     }
 
     case 'ichimoku': {

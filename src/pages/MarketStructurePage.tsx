@@ -36,8 +36,8 @@ export default function MarketStructurePage() {
   // test here matches what the scan showed for the same coin.
   const [slPct, setSlPct] = useState(() => +(localStorage.getItem('smc_sl_pct') || '1.5'))
   const [lookbackDays, setLookbackDays] = useState(() => +(localStorage.getItem('smc_lookback_days') || '150'))
-  // Which structure entry the bot fires on: CHoCH only (mode 1) or BOS+CHoCH (mode 2).
-  const [entryRule, setEntryRule] = useState<'choch' | 'both'>('choch')
+  // How the bot enters: on the break (CHoCH/BOS) or on the retest pull-back.
+  const [entryStrategy, setEntryStrategy] = useState<'choch' | 'both' | 'retestLevel' | 'retestOB' | 'retestFVG'>('both')
   // Exit mode for the deployed bot.
   const [exitMode, setExitMode] = useState<'flip' | 'rr' | 'mfe'>('mfe')
   const [rrTarget, setRrTarget] = useState(2)
@@ -79,7 +79,13 @@ export default function MarketStructurePage() {
       asset,
       strategy: 'smc',
       timeframe,
-      params: { swingLength, mode: entryRule === 'both' ? 2 : 1 }, // 1 = CHoCH only, 2 = BOS+CHoCH
+      // mode: 1=CHoCH-only, 2=BOS+CHoCH. entryMode: 0=break, 1=retest level,
+      // 2=retest OB, 3=retest FVG (retest uses BOS+CHoCH breaks internally).
+      params: {
+        swingLength,
+        mode: entryStrategy === 'choch' ? 1 : 2,
+        entryMode: entryStrategy === 'retestLevel' ? 1 : entryStrategy === 'retestOB' ? 2 : entryStrategy === 'retestFVG' ? 3 : 0,
+      },
       direction: 'both',
       slPct,
       riskUsd,
@@ -244,7 +250,7 @@ export default function MarketStructurePage() {
           </table>
         </div>
         <p className="mt-2 text-[10px] text-dim italic">
-          Includes retrace/retest entries (wait for the pull-back after a break). "(test-only)" rows aren't deployable yet — the bot still enters on the break. If a retest entry wins clearly, tell me and I'll wire it into the bot.
+          Includes retrace/retest entries (wait for the pull-back after a break) — now deployable: pick the winning combo's Entry + Exit in the Deploy card. Validate on another window/timeframe before risking real money.
         </p>
       </section>
 
@@ -255,18 +261,21 @@ export default function MarketStructurePage() {
           <span className="text-xs font-semibold text-text">Deploy as Signal Bot</span>
         </div>
         <p className="mb-3 text-[11px] text-dim">
-          Runs the SMC structure strategy live on {pairLabel} · {timeframe} (enters on Bullish/Bearish CHoCH). Sizing is risk-based.
+          Runs the SMC strategy live on {pairLabel} · {timeframe} with the Entry + Exit you pick below. Sizing is risk-based.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-[11px] text-dim">
-            <span className="mb-1 block">Entry rule</span>
+            <span className="mb-1 block">Entry</span>
             <select
-              value={entryRule}
-              onChange={e => setEntryRule(e.target.value as 'choch' | 'both')}
-              className="field w-[150px]"
+              value={entryStrategy}
+              onChange={e => setEntryStrategy(e.target.value as typeof entryStrategy)}
+              className="field w-[180px]"
             >
-              <option value="choch">CHoCH only</option>
-              <option value="both">BOS + CHoCH</option>
+              <option value="choch">CHoCH break</option>
+              <option value="both">BOS + CHoCH break</option>
+              <option value="retestLevel">Retest level (pull-back)</option>
+              <option value="retestOB">Retest order block</option>
+              <option value="retestFVG">Retest fair value gap</option>
             </select>
           </label>
           <label className="text-[11px] text-dim">

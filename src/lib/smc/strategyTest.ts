@@ -93,9 +93,9 @@ export function compareSmcEntries(candles: Candle[], result: SMCResult, slPct = 
     { name: 'CHoCH', signals: buildSignals(n, chochIdx), deployable: true },
     { name: 'BOS + CHoCH', signals: buildSignals(n, allIdx), deployable: true },
     { name: 'CHoCH in zone', signals: buildSignals(n, chochIdx.filter(inFavorableZone)), deployable: true },
-    { name: 'Retest level', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'level'), deployable: false },
-    { name: 'Retest OB', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'ob'), deployable: false },
-    { name: 'Retest FVG', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'fvg'), deployable: false },
+    { name: 'Retest level', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'level'), deployable: true },
+    { name: 'Retest OB', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'ob'), deployable: true },
+    { name: 'Retest FVG', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'fvg'), deployable: true },
   ]
 
   const out: EntryResult[] = []

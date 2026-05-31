@@ -312,6 +312,95 @@ function ewZigZag(candles: Candle[], threshPct: number): EWPivot[] {
   return out
 }
 
+// ── SMC retrace/retest entry signals ────────────────────────────────────────
+// VERBATIM COPY of src/lib/strategies.ts smcRetestSignals — keep in exact sync
+// (a fixture test in each package guards it). Self-contained + index-based so
+// it doesn't depend on smcStructure (whose signatures differ across trees).
+//
+//   breakMode:  'choch' = only CHoCH breaks; 'both' = BOS + CHoCH
+//   retestTarget: 'level' = broken pivot price; 'ob' = order-block candle;
+//                 'fvg' = the fair-value gap left by the impulse
+export const SMC_RETEST_WINDOW = 40
+
+export function smcRetestSignals(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  swingSize: number,
+  breakMode: 'choch' | 'both',
+  retestTarget: 'level' | 'ob' | 'fvg',
+): Signal[] {
+  const n = highs.length
+  const signals: Signal[] = new Array(n).fill(null)
+  const size = Math.max(2, Math.floor(swingSize))
+  if (n < size + 2) return signals
+
+  interface Brk { breakIdx: number; pivotIdx: number; level: number; long: boolean; isChoch: boolean }
+  const breaks: Brk[] = []
+  let leg = 0
+  let swingHigh: { level: number; idx: number; crossed: boolean } | null = null
+  let swingLow: { level: number; idx: number; crossed: boolean } | null = null
+  let bias: 0 | 1 | -1 = 0
+  for (let i = size; i < n; i++) {
+    const ref = i - size
+    let maxR = -Infinity
+    let minR = Infinity
+    for (let k = ref + 1; k <= i; k++) {
+      if (highs[k] > maxR) maxR = highs[k]
+      if (lows[k] < minR) minR = lows[k]
+    }
+    const prevLeg = leg
+    if (highs[ref] > maxR) leg = 0
+    else if (lows[ref] < minR) leg = 1
+    if (leg !== prevLeg) {
+      if (leg === 1) swingLow = { level: lows[ref], idx: ref, crossed: false }
+      else swingHigh = { level: highs[ref], idx: ref, crossed: false }
+    }
+    if (swingHigh && !swingHigh.crossed && closes[i] > swingHigh.level) {
+      breaks.push({ breakIdx: i, pivotIdx: swingHigh.idx, level: swingHigh.level, long: true, isChoch: bias === -1 })
+      swingHigh.crossed = true
+      bias = 1
+    }
+    if (swingLow && !swingLow.crossed && closes[i] < swingLow.level) {
+      breaks.push({ breakIdx: i, pivotIdx: swingLow.idx, level: swingLow.level, long: false, isChoch: bias === 1 })
+      swingLow.crossed = true
+      bias = -1
+    }
+  }
+
+  for (const b of breaks) {
+    if (breakMode === 'choch' && !b.isChoch) continue
+    let zoneTop: number
+    let zoneBottom: number
+    if (retestTarget === 'level') {
+      zoneTop = b.level
+      zoneBottom = b.level
+    } else if (retestTarget === 'ob') {
+      let ix = b.pivotIdx
+      for (let k = b.pivotIdx; k <= b.breakIdx; k++) {
+        if (b.long ? lows[k] < lows[ix] : highs[k] > highs[ix]) ix = k
+      }
+      zoneTop = highs[ix]
+      zoneBottom = lows[ix]
+    } else {
+      let fv: { top: number; bottom: number } | null = null
+      for (let i2 = Math.max(b.pivotIdx + 2, 2); i2 <= b.breakIdx; i2++) {
+        if (b.long && lows[i2] > highs[i2 - 2]) fv = { top: lows[i2], bottom: highs[i2 - 2] }
+        else if (!b.long && highs[i2] < lows[i2 - 2]) fv = { top: lows[i2 - 2], bottom: highs[i2] }
+      }
+      if (!fv) continue
+      zoneTop = fv.top
+      zoneBottom = fv.bottom
+    }
+    const end = Math.min(b.breakIdx + SMC_RETEST_WINDOW, n - 1)
+    for (let k = b.breakIdx + 1; k <= end; k++) {
+      const touched = b.long ? lows[k] <= zoneTop : highs[k] >= zoneBottom
+      if (touched) { signals[k] = b.long ? 'buy' : 'sell'; break }
+    }
+  }
+  return signals
+}
+
 // Returns one signal per candle, aligned to the input. NaN-tolerant: early
 // bars where the indicator is undefined yield a null (no-signal).
 export function generateSignals(
@@ -456,6 +545,13 @@ export function generateSignals(
     }
     case 'smc': {
       const swingSize = Math.max(2, Math.floor(params.swingLength || 50))
+      // entryMode: 0 = enter on the break (default); 1/2/3 = wait for the
+      // pull-back and enter on the retest of level / order-block / FVG.
+      const entryMode = params.entryMode | 0
+      if (entryMode >= 1) {
+        const target = entryMode === 2 ? 'ob' : entryMode === 3 ? 'fvg' : 'level'
+        return smcRetestSignals(highs, lows, closes, swingSize, 'both', target)
+      }
       const mode: SMCSignalMode = (params.mode | 0) === 2 ? 'both' : 'choch'
       return smcStructure(highs, lows, closes, swingSize, mode) as Signal[]
     }

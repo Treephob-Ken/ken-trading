@@ -23,10 +23,10 @@ describe('compareSmcEntries (entry × exit combos via runBacktest)', () => {
       expect(r.winRate).toBeLessThanOrEqual(100)
       expect(r.quality).toBe(0) // no trades → quality 0
     }
-    // The three retrace entries are present and flagged test-only.
+    // The three retrace entries are present and now deployable (bot supports them).
     expect(out.some(r => r.entry === 'Retest OB')).toBe(true)
     expect(out.some(r => r.entry === 'Retest FVG')).toBe(true)
-    expect(out.filter(r => r.entry.startsWith('Retest')).every(r => !r.deployable)).toBe(true)
+    expect(out.filter(r => r.entry.startsWith('Retest')).every(r => r.deployable)).toBe(true)
   })
 
   it('a long held through a rising series closes for a profit (Flip exit)', () => {
@@ -78,5 +78,21 @@ describe('smcRetestSignals', () => {
   it('returns all-null when there is not enough data', () => {
     const sig = smcRetestSignals([1, 2, 3], [1, 2, 3], [1, 2, 3], 50, 'both', 'level')
     expect(sig).toEqual([null, null, null])
+  })
+
+  // PARITY LOCK — this exact fixture + expected output is duplicated in
+  // bot/src/strategy/retestParity.check.ts. If either copy of smcRetestSignals
+  // changes its output, one of the two will fail and force a re-sync. Keep both
+  // in step. Canonical: triangle(H=c+0.2, L=c-0.2), swing 3, 'both', 'ob'.
+  it('matches the canonical bot/web parity fixture (ob target)', () => {
+    const closes = triangle()
+    const highs = closes.map(p => p + 0.2)
+    const lows = closes.map(p => p - 0.2)
+    const sig = smcRetestSignals(highs, lows, closes, 3, 'both', 'ob')
+    const buys = sig.map((s, i) => (s === 'buy' ? i : -1)).filter(i => i >= 0)
+    const sells = sig.map((s, i) => (s === 'sell' ? i : -1)).filter(i => i >= 0)
+    expect(sig.length).toBe(91)
+    expect(buys).toEqual([46, 87])
+    expect(sells).toEqual([65])
   })
 })
