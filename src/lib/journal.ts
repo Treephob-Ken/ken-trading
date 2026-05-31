@@ -112,6 +112,8 @@ export interface PortfolioSummary {
   winRate: number
   best: { pnl: number; asset: string; source: FillSource } | null
   worst: { pnl: number; asset: string; source: FillSource } | null
+  maxDrawdown: number
+  maxDrawdownPct: number
   dailySeries: DailyBucket[]
   equitySeries: EquityPoint[]
   byBot: BotRollup[]

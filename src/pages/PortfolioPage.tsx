@@ -19,6 +19,7 @@ import { money, pct, sourceLabel } from '@/lib/journal'
 import type {
   AssetRollup,
   BotRollup,
+  DailyBucket,
   PortfolioRange,
   PortfolioSummary,
   RoundTrip,
@@ -244,12 +245,21 @@ export default function PortfolioPage() {
 
       {/* ── Equity curve ────────────────────────────────────────────────── */}
       <div className="card p-3">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-semibold text-text">Equity curve · {range}</span>
           {summary && (
-            <span className={`font-mono text-xs ${summary.netPnl >= 0 ? 'text-gain' : 'text-loss'}`}>
-              {money(summary.netPnl, true)} net
-            </span>
+            <div className="flex items-center gap-3 font-mono text-xs">
+              <span className={summary.netPnl >= 0 ? 'text-gain' : 'text-loss'}>
+                {money(summary.netPnl, true)} net
+              </span>
+              <span
+                className="text-loss"
+                title="Max drawdown — worst peak-to-trough drop on the equity curve in this period"
+              >
+                MDD −{money(summary.maxDrawdown)}
+                {summary.maxDrawdownPct > 0 && ` (−${summary.maxDrawdownPct.toFixed(1)}%)`}
+              </span>
+            </div>
           )}
         </div>
         <div ref={eqContainerRef} className="w-full" style={{ height: 200 }} />
@@ -260,6 +270,9 @@ export default function PortfolioPage() {
         <div className="mb-2 text-xs font-semibold text-text">Daily PnL · {range}</div>
         <div ref={barContainerRef} className="w-full" style={{ height: 140 }} />
       </div>
+
+      {/* ── PnL Calendar (week × weekday grid) ──────────────────────────── */}
+      {summary && <PnlCalendar series={summary.dailySeries} />}
 
       {/* ── By Asset + By Bot tables ────────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -390,6 +403,148 @@ function RollupTable<T extends CommonRollupRow>({
           </tbody>
         </table>
       )}
+    </div>
+  )
+}
+
+// PnL Calendar — github-contributions-style grid where columns are weeks
+// and rows are weekdays (Mon..Sun). Cell brightness scales with the
+// magnitude of PnL relative to the largest abs PnL in the window. Hover
+// shows the exact figure; click does nothing (the Logs page is where the
+// per-trade drill-down lives).
+function PnlCalendar({ series }: { series: DailyBucket[] }) {
+  if (series.length === 0) return null
+
+  // Group buckets by ISO date for O(1) lookup, then walk every day from the
+  // first to the last in the window so empty days still get a slot.
+  const byDate = new Map<string, DailyBucket>()
+  for (const d of series) byDate.set(d.date, d)
+  const dates = [...byDate.keys()].sort()
+  const first = new Date(dates[0] + 'T00:00:00Z')
+  const last = new Date(dates[dates.length - 1] + 'T00:00:00Z')
+
+  // Align the first column to the Monday-of-week containing the start date,
+  // so every column is a full Mon..Sun stack. JS getUTCDay() returns 0=Sun.
+  const startOfWeek = new Date(first)
+  const dow = startOfWeek.getUTCDay() === 0 ? 6 : startOfWeek.getUTCDay() - 1
+  startOfWeek.setUTCDate(startOfWeek.getUTCDate() - dow)
+
+  const cells: { date: string; pnl: number; trades: number; inRange: boolean }[] = []
+  const cur = new Date(startOfWeek)
+  while (cur <= last) {
+    const key = cur.toISOString().slice(0, 10)
+    const bucket = byDate.get(key)
+    const inRange = cur >= first
+    cells.push({
+      date: key,
+      pnl: bucket?.pnl ?? 0,
+      trades: bucket?.trades ?? 0,
+      inRange,
+    })
+    cur.setUTCDate(cur.getUTCDate() + 1)
+  }
+
+  // Bucket cells into columns of 7 (Mon..Sun, top to bottom).
+  const columns: typeof cells[] = []
+  for (let i = 0; i < cells.length; i += 7) columns.push(cells.slice(i, i + 7))
+
+  const maxAbs = Math.max(1, ...series.map((d) => Math.abs(d.pnl)))
+
+  // Color rule mirrors ActivityHeatmap — three buckets of intensity per side.
+  const cellTone = (pnl: number) => {
+    if (pnl === 0) return 'bg-panel-2 border-border/30'
+    const intensity = Math.min(1, Math.abs(pnl) / maxAbs)
+    if (pnl > 0) {
+      if (intensity > 0.75) return 'bg-gain/70 border-gain/60'
+      if (intensity > 0.4)  return 'bg-gain/45 border-gain/40'
+      return 'bg-gain/25 border-gain/30'
+    }
+    if (intensity > 0.75) return 'bg-loss/70 border-loss/60'
+    if (intensity > 0.4)  return 'bg-loss/45 border-loss/40'
+    return 'bg-loss/25 border-loss/30'
+  }
+
+  // Month labels above the first column where a new month starts.
+  const monthLabels: { col: number; label: string }[] = []
+  let lastMonth = -1
+  columns.forEach((col, idx) => {
+    const firstInCol = col.find((c) => c.inRange)
+    if (!firstInCol) return
+    const m = new Date(firstInCol.date + 'T00:00:00Z').getUTCMonth()
+    if (m !== lastMonth) {
+      monthLabels.push({ col: idx, label: new Date(firstInCol.date).toLocaleString('en-US', { month: 'short' }) })
+      lastMonth = m
+    }
+  })
+
+  // Stats footer
+  const winDays = series.filter((d) => d.pnl > 0).length
+  const lossDays = series.filter((d) => d.pnl < 0).length
+  const bestDay = series.reduce((b, d) => (d.pnl > (b?.pnl ?? -Infinity) ? d : b), null as DailyBucket | null)
+  const worstDay = series.reduce((w, d) => (d.pnl < (w?.pnl ?? Infinity) ? d : w), null as DailyBucket | null)
+
+  return (
+    <div className="card p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-text">PnL calendar</span>
+        <div className="flex items-center gap-3 text-[10px] text-dim font-mono">
+          <span><span className="text-gain">{winDays}</span> green</span>
+          <span><span className="text-loss">{lossDays}</span> red</span>
+          {bestDay && bestDay.pnl > 0 && (
+            <span>best <span className="text-gain">{money(bestDay.pnl, true)}</span></span>
+          )}
+          {worstDay && worstDay.pnl < 0 && (
+            <span>worst <span className="text-loss">{money(worstDay.pnl, true)}</span></span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {/* Weekday labels column */}
+        <div className="flex flex-col gap-1 pt-4 text-[9px] text-dim font-mono">
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+            <div key={d} className="h-4 leading-4">{d}</div>
+          ))}
+        </div>
+        {/* Week columns */}
+        <div className="flex gap-1">
+          {columns.map((col, ci) => {
+            const monthLabel = monthLabels.find((m) => m.col === ci)
+            return (
+              <div key={ci} className="flex flex-col gap-1">
+                <div className="h-3 text-[9px] text-dim font-mono leading-3">
+                  {monthLabel?.label ?? ''}
+                </div>
+                {col.map((cell) => {
+                  if (!cell.inRange) return <div key={cell.date} className="h-4 w-4" />
+                  const tone = cellTone(cell.pnl)
+                  const tradesTxt = cell.trades === 0 ? 'no trades' : `${cell.trades} ${cell.trades === 1 ? 'trade' : 'trades'}`
+                  return (
+                    <div
+                      key={cell.date}
+                      title={`${cell.date} · ${tradesTxt} · ${money(cell.pnl, true)}`}
+                      className={`h-4 w-4 rounded-sm border ${tone}`}
+                    />
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="mt-2 flex items-center gap-1.5 text-[9px] text-dim">
+        <span>Less</span>
+        <div className="h-2.5 w-2.5 rounded-sm border border-loss/60 bg-loss/70" />
+        <div className="h-2.5 w-2.5 rounded-sm border border-loss/40 bg-loss/45" />
+        <div className="h-2.5 w-2.5 rounded-sm border border-loss/30 bg-loss/25" />
+        <div className="h-2.5 w-2.5 rounded-sm border border-border/30 bg-panel-2" />
+        <div className="h-2.5 w-2.5 rounded-sm border border-gain/30 bg-gain/25" />
+        <div className="h-2.5 w-2.5 rounded-sm border border-gain/40 bg-gain/45" />
+        <div className="h-2.5 w-2.5 rounded-sm border border-gain/60 bg-gain/70" />
+        <span>More</span>
+      </div>
     </div>
   )
 }

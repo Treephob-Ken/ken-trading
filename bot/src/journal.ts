@@ -489,6 +489,11 @@ export interface PortfolioSummary {
   winRate: number            // 0-100 — wins / (wins + losses)
   best: { pnl: number; asset: string; source: FillSource } | null
   worst: { pnl: number; asset: string; source: FillSource } | null
+  // Worst peak-to-trough drawdown on the equity series. Both expressed in
+  // dollars; pct is relative to the running peak at the time of the trough.
+  // Positive numbers; 0 if no drawdown.
+  maxDrawdown: number
+  maxDrawdownPct: number
   dailySeries: DailyBucket[]
   equitySeries: EquityPoint[]
   byBot: BotRollup[]
@@ -562,6 +567,22 @@ export function summarizePortfolio(
     return { date: d.date, equity: running }
   })
 
+  // Max drawdown — walk the equity series tracking the running peak. The
+  // worst trough-from-peak distance is the max drawdown. Pct uses the peak
+  // value as the denominator (so a $50 drop from a $200 peak = 25%). When
+  // the peak is 0 or negative we fall back to the absolute drop only.
+  let peak = 0
+  let maxDrawdown = 0
+  let maxDrawdownPct = 0
+  for (const p of equitySeries) {
+    if (p.equity > peak) peak = p.equity
+    const drop = peak - p.equity
+    if (drop > maxDrawdown) {
+      maxDrawdown = drop
+      maxDrawdownPct = peak > 0 ? (drop / peak) * 100 : 0
+    }
+  }
+
   // By-bot rollup — keyed by source identity.
   const botMap = new Map<string, BotRollup>()
   for (const t of trips) {
@@ -609,6 +630,8 @@ export function summarizePortfolio(
     winRate,
     best,
     worst,
+    maxDrawdown,
+    maxDrawdownPct,
     dailySeries,
     equitySeries,
     byBot,
