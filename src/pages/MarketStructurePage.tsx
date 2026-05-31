@@ -35,6 +35,8 @@ export default function MarketStructurePage() {
   const [slPct, setSlPct] = useState(1.5)
   // Which structure entry the bot fires on: CHoCH only (mode 1) or BOS+CHoCH (mode 2).
   const [entryRule, setEntryRule] = useState<'choch' | 'both'>('choch')
+  // Auto TP: bot computes its own MFE-based take-profit once running.
+  const [autoTp, setAutoTp] = useState(true)
   const [visible, setVisible] = useState<Record<LayerKey, boolean>>({
     structure: true, internal: false, strongWeak: true, orderBlocks: true, equal: true, fvg: false, zones: false, mtf: false, trend: false,
   })
@@ -72,6 +74,9 @@ export default function MarketStructurePage() {
       slPct,
       riskUsd,
       sizingSlPct: slPct,
+      // Auto TP = bot picks its own take-profit from MFE stats (P75) once it
+      // has ≥5 historical signals; until then it exits on the opposite signal.
+      useSuggestedTp: autoTp,
     }
     sessionStorage.setItem('pending_signal_bot_config', JSON.stringify(payload))
     navigate('/signal')
@@ -249,6 +254,15 @@ export default function MarketStructurePage() {
               onChange={e => setSlPct(Math.max(0.1, +e.target.value || 0.1))}
               className="field w-[90px]" />
           </label>
+          <div>
+            <span className="mb-1 block text-[11px] text-dim">Take profit</span>
+            <button
+              type="button"
+              onClick={() => setAutoTp(v => !v)}
+              className={`rounded-md border px-2.5 py-1.5 text-[11px] cursor-pointer ${autoTp ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
+              title="Auto TP: the bot computes its own take-profit from the strategy's historical max-favourable-excursion (P75). Off = exit on the opposite signal."
+            >{autoTp ? 'Auto (MFE)' : 'Off (flip)'}</button>
+          </div>
           <button type="button" onClick={deployToBot} className="btn-primary">
             <Rocket className="h-4 w-4" /> Deploy to Signal Bot
           </button>

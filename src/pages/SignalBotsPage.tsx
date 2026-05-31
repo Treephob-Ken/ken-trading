@@ -987,6 +987,8 @@ export default function SignalBotsPage() {
             riskUsd?: number; sizingSlPct?: number
             // Bot risk controls
             slPct?: number; tpPct?: number
+            // Auto-TP: bot computes its own MFE-based take-profit
+            useSuggestedTp?: boolean
             // MTF filter
             mtfEnabled?: boolean; mtfTimeframe?: string
           }
@@ -1014,6 +1016,7 @@ export default function SignalBotsPage() {
             tradeSide: (pre.direction === 'short' ? 'sell' : pre.direction === 'both' ? 'both' : 'buy') as TradeSide,
             slPct: pre.slPct ?? pre.sizingSlPct,
             tpPct: pre.tpPct,
+            useSuggestedTp: pre.useSuggestedTp,
             riskUsd: pre.riskUsd,
             mtfEnabled: pre.mtfEnabled,
             mtfTimeframe: pre.mtfTimeframe,
