@@ -51,7 +51,7 @@ async function pool<T, R>(items: T[], concurrency: number, worker: (item: T, i: 
 export function bestRule(rules: EntryResult[]): EntryResult {
   const traded = rules.filter(r => r.trades > 0)
   if (traded.length === 0) return rules[0]
-  return traded.reduce((a, b) => (b.returnPct > a.returnPct ? b : (b.returnPct === a.returnPct && b.trades > a.trades ? b : a)))
+  return traded.reduce((a, b) => (b.quality > a.quality ? b : (b.quality === a.quality && b.trades > a.trades ? b : a)))
 }
 
 export async function runSmcScan(
@@ -89,8 +89,8 @@ export async function runSmcScan(
 
   // Rank: positive-expectancy rows with more trades first.
   rows.sort((a, b) => {
-    const ra = a.best.returnPct, rb = b.best.returnPct
-    if (rb !== ra) return rb - ra
+    const qa = a.best.quality, qb = b.best.quality
+    if (qb !== qa) return qb - qa
     return b.best.trades - a.best.trades
   })
   return rows

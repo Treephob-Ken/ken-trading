@@ -65,7 +65,7 @@ export default function MarketStructurePage() {
   const lastPrice = candles.length ? candles[candles.length - 1].close : 0
   const summary = useMemo(() => summarizeSMC(result, lastPrice), [result, lastPrice])
   const strategyResults = useMemo(
-    () => compareSmcEntries(candles, result, slPct).sort((a, b) => b.returnPct - a.returnPct),
+    () => compareSmcEntries(candles, result, slPct).sort((a, b) => b.quality - a.quality),
     [candles, result, slPct],
   )
   const pairLabel = symbol.includes(':') ? symbol.split(':')[1] + '/USDC' : symbol.replace(/USDT$/, '/USDC')
@@ -206,13 +206,14 @@ export default function MarketStructurePage() {
           Strategy test <span className="font-normal text-dim">· {pairLabel} {timeframe} · SL {slPct}%, exit on opposite signal, fees on</span>
         </div>
         <p className="mb-3 text-[11px] text-dim">
-          Entry × exit combos (Flip / 2R / MFE), best return on top — same engine + fees as the Backtester. <span className="text-gain">Profit factor &gt; 1</span> = edge. Pick the winning combo's exit in the Deploy card below. This window only — not a guarantee.
+          Entry × exit combos, ranked by <b>Quality</b> (0-100: PF + sample size + win-rate + drawdown; Return% barely counts because an open position inflates it). <span className="text-gain">Quality ≥ 50</span> = worth a look. Pick the winning combo's exit in the Deploy card. This window only — not a guarantee.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead>
               <tr className="text-left text-dim">
                 <th className="py-1 pr-3">Entry rule</th>
+                <th className="py-1 pr-3 text-right">Quality</th>
                 <th className="py-1 pr-3 text-right">Trades</th>
                 <th className="py-1 pr-3 text-right">Win %</th>
                 <th className="py-1 pr-3 text-right">Return %</th>
@@ -225,6 +226,9 @@ export default function MarketStructurePage() {
                   <td className="py-1 pr-3 font-medium text-text">
                     {r.name}
                     {!r.deployable && <span className="ml-1 text-[9px] text-dim">(test-only)</span>}
+                  </td>
+                  <td className={`py-1 pr-3 text-right font-mono tabular-nums font-bold ${r.quality >= 50 ? 'text-gain' : r.quality >= 30 ? 'text-warn' : 'text-dim'}`}>
+                    {r.trades ? r.quality : '—'}
                   </td>
                   <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades}</td>
                   <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades ? `${r.winRate.toFixed(0)}%` : '—'}</td>

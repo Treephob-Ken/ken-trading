@@ -25,6 +25,29 @@ export interface EntryResult {
   returnPct: number    // total return % over the window, AFTER fees
   profitFactor: number
   maxDdPct: number
+  quality: number      // 0-100 composite (PF + sample + win-rate + drawdown)
+}
+
+// Tent: peaks on [lowPeak, highPeak], ramps to 0 at lowZero / highZero.
+function tent(x: number, lowZero: number, lowPeak: number, highPeak: number, highZero: number): number {
+  if (x <= lowZero || x >= highZero) return 0
+  if (x >= lowPeak && x <= highPeak) return 1
+  if (x < lowPeak) return (x - lowZero) / (lowPeak - lowZero)
+  return (highZero - x) / (highZero - highPeak)
+}
+
+// Quality score (0-100) — ranks combos by ROBUST edge, not raw return.
+// Return% is barely weighted because an unclosed position inflates it; the real
+// signal is profit factor + enough closed trades + a non-lottery win rate + low
+// drawdown. A PF-0 / 0%-win "mirage" row scores ~0.
+export function smcQuality(r: { trades: number; winRate: number; returnPct: number; profitFactor: number; maxDdPct: number }): number {
+  if (r.trades <= 0) return 0
+  const pf = Math.max(0, Math.min(1, (r.profitFactor - 1) / 1.5)) * 35         // PF 1→0, 2.5+→35
+  const tc = tent(r.trades, 4, 20, 120, 400) * 25                              // sweet spot 20-120
+  const wr = Math.max(0, Math.min(1, (r.winRate - 15) / 35)) * 20              // 15%→0, 50%+→20
+  const dd = (1 - Math.max(0, Math.min(1, r.maxDdPct / 80))) * 15              // 0%→15, 80%+→0
+  const ret = r.returnPct > 0 ? Math.min(5, (r.returnPct * 0.5 / 30) * 5) : 0  // tiny, haircut
+  return Math.round(Math.max(0, Math.min(100, pf + tc + wr + dd + ret)))
 }
 
 const LOOKBACK = 50
@@ -148,7 +171,7 @@ function buildSignals(n: number, idxs: Idx[]): Signal[] {
 function simulate(entry: string, exit: string, deployable: boolean, signals: Signal[], candles: Candle[], slPct: number, tpPct: number): EntryResult {
   const res = runBacktest(candles, signals, CAPITAL, FEE_RATE, 'both', slPct, tpPct, 'fixed', 2, 1.5)
   const m = res.metrics
-  return {
+  const base = {
     name: `${entry} · ${exit}`,
     entry, exit, deployable,
     trades: m.numTrades,
@@ -157,6 +180,7 @@ function simulate(entry: string, exit: string, deployable: boolean, signals: Sig
     profitFactor: m.profitFactor,
     maxDdPct: m.maxDrawdownPct,
   }
+  return { ...base, quality: smcQuality(base) }
 }
 
 // P75 of favourable excursion % across the signal's trades (until the opposite

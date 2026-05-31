@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Candle } from '@/types'
 import type { SMCResult, StructureBreak } from './types'
-import { compareSmcEntries } from './strategyTest'
+import { compareSmcEntries, smcQuality } from './strategyTest'
 
 function resultWith(structures: StructureBreak[]): SMCResult {
   return {
@@ -20,6 +20,7 @@ describe('compareSmcEntries (entry × exit combos via runBacktest)', () => {
       expect(r.trades).toBe(0)
       expect(r.winRate).toBeGreaterThanOrEqual(0)
       expect(r.winRate).toBeLessThanOrEqual(100)
+      expect(r.quality).toBe(0) // no trades → quality 0
     }
     // The three retrace entries are present and flagged test-only.
     expect(out.some(r => r.entry === 'Retest OB')).toBe(true)
@@ -39,5 +40,13 @@ describe('compareSmcEntries (entry × exit combos via runBacktest)', () => {
     const flip = out.find(x => x.entry === 'CHoCH' && x.exit === 'Flip')!
     expect(flip.trades).toBeGreaterThanOrEqual(1)
     expect(flip.returnPct).toBeGreaterThan(0)
+  })
+
+  it('quality sinks a PF-0 open-position mirage and rewards a solid combo', () => {
+    const mirage = smcQuality({ trades: 8, winRate: 0, returnPct: 119, profitFactor: 0, maxDdPct: 50 })
+    const solid = smcQuality({ trades: 40, winRate: 50, returnPct: 20, profitFactor: 1.8, maxDdPct: 20 })
+    expect(mirage).toBeLessThan(20)
+    expect(solid).toBeGreaterThan(mirage)
+    expect(solid).toBeGreaterThanOrEqual(50)
   })
 })
