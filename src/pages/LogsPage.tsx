@@ -213,7 +213,7 @@ export default function LogsPage() {
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-5">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-3 sm:p-5">
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>

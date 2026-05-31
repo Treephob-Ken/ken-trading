@@ -497,10 +497,13 @@ export default function GridBotsPage() {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden md:flex-row">
 
-      {/* ── Left sidebar: bot list + config form ── */}
-      <aside className="flex h-full w-[300px] shrink-0 flex-col overflow-hidden border-r border-border bg-panel/60">
+      {/* ── Left sidebar: bot list + config form ──
+          On mobile (<md) it stacks above the detail pane at full width, capped
+          at 50vh so the detail pane stays reachable. On md+ it reverts to the
+          desktop 300px fixed-width column. */}
+      <aside className="flex w-full shrink-0 flex-col overflow-hidden border-b border-border bg-panel/60 max-h-[50vh] md:h-full md:w-[300px] md:max-h-none md:border-b-0 md:border-r">
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">

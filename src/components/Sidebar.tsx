@@ -42,7 +42,7 @@ export default function Sidebar() {
   const { logout } = useAuth()
 
   return (
-    <aside className="relative flex flex-col h-screen w-[60px] shrink-0 border-r border-border bg-panel/90 backdrop-blur-sm z-50">
+    <aside className="relative flex flex-col h-dvh w-[60px] shrink-0 border-r border-border bg-panel/90 backdrop-blur-sm z-50">
       {/* ── Brand logo ── */}
       <div className="flex items-center justify-center h-[60px] shrink-0 border-b border-border">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-brand/30 bg-brand/10">
@@ -84,7 +84,8 @@ export default function Sidebar() {
                            text-xs font-medium text-text shadow-lg
                            opacity-0 translate-x-[-6px]
                            transition-all duration-150 ease-out
-                           group-hover:opacity-100 group-hover:translate-x-0"
+                           group-hover:opacity-100 group-hover:translate-x-0
+                           group-focus-within:opacity-100 group-focus-within:translate-x-0"
               >
                 {label}
                 <span className="absolute right-full top-1/2 -translate-y-1/2
@@ -122,7 +123,8 @@ export default function Sidebar() {
                           text-xs font-medium text-text shadow-lg
                           opacity-0 translate-x-[-6px]
                           transition-all duration-150 ease-out
-                          group-hover:opacity-100 group-hover:translate-x-0">
+                          group-hover:opacity-100 group-hover:translate-x-0
+                          group-focus-within:opacity-100 group-focus-within:translate-x-0">
             Log out
             <span className="absolute right-full top-1/2 -translate-y-1/2 border-[5px] border-transparent border-r-border" />
             <span className="absolute right-full top-1/2 -translate-y-1/2 translate-x-[1px] border-[5px] border-transparent border-r-panel" />

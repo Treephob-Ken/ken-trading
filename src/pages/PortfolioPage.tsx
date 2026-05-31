@@ -217,7 +217,7 @@ export default function PortfolioPage() {
   }, [eqData, hasEqData])
 
   return (
-    <main className="flex w-full flex-1 flex-col gap-5 px-6 py-5">
+    <main className="flex w-full flex-1 flex-col gap-5 px-3 py-4 sm:px-6 sm:py-5">
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -455,6 +455,7 @@ function RollupTable<T extends AssetRollupRow>({
       {rows.length === 0 ? (
         <div className="text-[11px] text-dim italic">{empty}</div>
       ) : (
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="text-left text-dim">
@@ -477,6 +478,7 @@ function RollupTable<T extends AssetRollupRow>({
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )

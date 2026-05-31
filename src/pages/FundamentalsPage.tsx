@@ -181,7 +181,7 @@ export default function FundamentalsPage() {
   useEffect(() => { void load() }, [load])
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden gap-4 px-5 py-5">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden gap-4 px-3 py-4 sm:px-5 sm:py-5">
       {/* ─── Header ─── */}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">

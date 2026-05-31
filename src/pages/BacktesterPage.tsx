@@ -426,7 +426,7 @@ export default function BacktesterPage({
   const dataCapped = candles.length >= MAX_BARS
 
   return (
-    <main className="flex w-full flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
+    <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5 lg:flex-row">
       <aside className="relative z-[35] flex h-fit w-full shrink-0 flex-col gap-4 lg:sticky lg:top-5 lg:max-h-[calc(100vh-40px)] lg:w-[300px] lg:overflow-y-auto lg:overflow-x-hidden lg:pr-1">
         <div className="card p-4">
           <Controls

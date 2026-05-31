@@ -81,7 +81,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[680px] flex-col gap-6 px-6 py-8">
+    <main className="mx-auto flex w-full max-w-[680px] flex-col gap-6 px-3 py-6 sm:px-6 sm:py-8">
 
       <div>
         <h1 className="text-lg font-semibold text-text">Settings</h1>

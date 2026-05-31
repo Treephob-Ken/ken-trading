@@ -258,7 +258,7 @@ export default function BuilderPage() {
   }, [result])
 
   return (
-    <main className="flex w-full flex-1 flex-col gap-4 px-6 py-5">
+    <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">

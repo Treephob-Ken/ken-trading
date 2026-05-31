@@ -439,7 +439,7 @@ export default function TradePage() {
   const positions = account?.allPositions ?? []
 
   return (
-    <main className="flex w-full flex-1 flex-col gap-4 px-6 py-5 lg:flex-row">
+    <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5 lg:flex-row">
 
       {/* ── Right (visual): Account + positions ── */}
       <div className="flex flex-1 flex-col gap-4 min-w-0 lg:order-2">
@@ -469,7 +469,7 @@ export default function TradePage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <StatTile
               question="How much is the account worth?"
               info="Account Value"
@@ -814,7 +814,7 @@ export default function TradePage() {
 
             {sizingMode === 'risk' ? (
               <>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <Field label="Risk ($)">
                     <input type="number" min="1" step="any" placeholder="50"
                       value={riskUsd}
