@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, Square, ArrowRight, Medal, Trophy } from 'lucide-react'
+import { Play, Square, ArrowRight, Medal, Search, Trophy, X } from 'lucide-react'
 import type { Direction, StrategyId } from '@/types'
 import type { SymbolInfo } from '@/lib/binance'
 import { defaultParams, STRATEGIES } from '@/lib/strategies'
@@ -116,12 +116,18 @@ export default function IndicatorScanTab({
   })
   const [sortKey, setSortKey] = useState<SortKey>('qualityScore')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // Free-text search across base coin symbol. Persisted so the user doesn't
+  // re-type "BTC" every time they navigate away and back.
+  const [search, setSearch] = useState<string>(
+    () => localStorage.getItem('scn_ind_search') ?? '',
+  )
 
   useEffect(() => { localStorage.setItem('scn_ind_minTrades', String(minTrades)) }, [minTrades])
   useEffect(() => { localStorage.setItem('scn_ind_direction', direction) }, [direction])
   useEffect(() => { localStorage.setItem('scn_ind_tfFilter', JSON.stringify(tfFilter)) }, [tfFilter])
   useEffect(() => { localStorage.setItem('scn_ind_stratFilter', JSON.stringify(stratFilter)) }, [stratFilter])
   useEffect(() => { localStorage.setItem('scn_ind_lookback', String(lookback)) }, [lookback])
+  useEffect(() => { localStorage.setItem('scn_ind_search', search) }, [search])
 
   const start = async () => {
     if (universe.length === 0) {
@@ -180,11 +186,13 @@ export default function IndicatorScanTab({
 
   // Filter + sort + grade
   const visible = useMemo(() => {
+    const q = search.trim().toUpperCase()
     const filtered = rows.filter(
       (r) =>
         r.numTrades >= minTrades &&
         tfFilter[r.timeframe] &&
-        stratFilter[r.strategyId],
+        stratFilter[r.strategyId] &&
+        (q === '' || r.base.toUpperCase().includes(q) || r.symbol.toUpperCase().includes(q)),
     )
     const dir = sortDir === 'desc' ? -1 : 1
     filtered.sort((a, b) => {
@@ -193,7 +201,7 @@ export default function IndicatorScanTab({
       return (av - bv) * dir
     })
     return filtered.map((r) => ({ row: r, verdict: gradeIndicatorRow(r) }))
-  }, [rows, minTrades, tfFilter, stratFilter, sortKey, sortDir])
+  }, [rows, minTrades, tfFilter, stratFilter, sortKey, sortDir, search])
 
   const top3 = visible.slice(0, 3)
   const bestPick = visible[0]
@@ -226,6 +234,31 @@ export default function IndicatorScanTab({
     <div className="flex flex-col gap-4">
       {/* ── Filter / action bar ─────────────────────────────────────────── */}
       <div className="card p-4 flex flex-wrap items-end gap-4">
+        {/* Search — filters the results table by base coin or ticker. */}
+        <div className="flex flex-col gap-1 min-w-[180px]">
+          <span className="text-[10px] text-dim uppercase tracking-wider">Search coin</span>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-dim" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="e.g. BTC, ETH, FET"
+              className="w-full rounded-md border border-border bg-panel-2 pl-7 pr-7 py-1 text-xs font-mono text-text outline-none focus:border-brand/60 placeholder:text-dim/60"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-dim hover:bg-panel hover:text-text"
+                aria-label="Clear search"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="flex flex-col gap-1">
           <span className="text-[10px] text-dim uppercase tracking-wider">Direction</span>
           <div className="flex gap-1">
