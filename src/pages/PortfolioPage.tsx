@@ -31,7 +31,7 @@ import type {
   PortfolioRange,
   RoundTrip,
 } from '@/lib/journal'
-import { botKey, botPerformance, realizedView, type BotPerf } from '@/lib/portfolio'
+import { botKey, botPerformance, dedupeByTime, realizedView, type BotPerf } from '@/lib/portfolio'
 
 const RANGES: { id: PortfolioRange; label: string }[] = [
   { id: '24h', label: 'Today' },
@@ -181,14 +181,13 @@ export default function PortfolioPage() {
     [trips, selectedBot],
   )
 
-  // Active equity-chart data: account value (all bots) or the bot's realized curve.
-  const eqData = useMemo(
-    () =>
-      heroIsAccount
-        ? (equity?.points ?? []).map((p) => ({ time: Math.floor(p.t / 1000) as UTCTimestamp, value: p.value }))
-        : view.equity.map((p) => ({ time: Math.floor(p.t / 1000) as UTCTimestamp, value: p.value })),
-    [heroIsAccount, equity, view],
-  )
+  // Active equity-chart data: account value (all bots) or the bot's realized
+  // curve, deduped to unique ascending second-resolution timestamps (Lightweight
+  // Charts throws otherwise — see dedupeByTime).
+  const eqData = useMemo(() => {
+    const src = heroIsAccount ? (equity?.points ?? []) : view.equity
+    return dedupeByTime(src).map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+  }, [heroIsAccount, equity, view])
   const hasEqData = eqData.length >= 2
 
   // ── Equity chart ─────────────────────────────────────────────────────────

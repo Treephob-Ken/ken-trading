@@ -38,6 +38,22 @@ function dayKeyUTC(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
+// Lightweight Charts requires unique, ascending timestamps and throws otherwise.
+// Round-trips can close in the same second (Close-All, multi-fill exits), which
+// collide once floored to seconds. Collapse duplicates keeping the latest
+// cumulative value, yielding strictly-ascending unique second-resolution points.
+// Input must already be ascending by `t` (cumulative series are).
+export function dedupeByTime(points: { t: number; value: number }[]): { time: number; value: number }[] {
+  const out: { time: number; value: number }[] = []
+  for (const p of points) {
+    const time = Math.floor(p.t / 1000)
+    const last = out[out.length - 1]
+    if (last && last.time === time) last.value = p.value
+    else out.push({ time, value: p.value })
+  }
+  return out
+}
+
 // Cumulative realized-PnL series + its peak-to-trough drawdown, ordered by exit time.
 function cumulative(trips: RoundTrip[]): {
   equity: { t: number; value: number }[]
