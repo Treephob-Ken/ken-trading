@@ -9,6 +9,7 @@ import {
   Hammer,
   LayoutGrid,
   LineChart,
+  Music4,
   Network,
   Radar,
   Radio,
@@ -34,6 +35,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/fundamentals', icon: Brain,       label: 'Fundamentals'        },
   { path: '/trade',    icon: ArrowUpDown,      label: 'Trade'               },
   { path: '/portfolio', icon: Briefcase,       label: 'Portfolio'           },
+  { path: '/room',     icon: Music4,           label: 'Jam Room'            },
   { path: '/logs',     icon: Activity,         label: 'Logs'                },
   { path: '/settings', icon: Settings,         label: 'Settings'            },
 ]
