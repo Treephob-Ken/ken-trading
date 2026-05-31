@@ -558,7 +558,7 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
   }
 
   return (
-    <div className="card overflow-hidden p-0">
+    <div className="card shrink-0 overflow-hidden p-0">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <h3 className="text-sm font-semibold text-text">
           Chart
@@ -612,12 +612,12 @@ function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfi
         </div>
       </div>
       {loadingCandles && !candles.length ? (
-        <div className="flex h-[300px] items-center justify-center text-sm text-dim">
+        <div className="flex h-[300px] min-h-[300px] items-center justify-center text-sm text-dim">
           Loading chart…
         </div>
       ) : (
         <div className="relative">
-          <div ref={mainRef} className="h-[300px] w-full" />
+          <div ref={mainRef} className="h-[300px] min-h-[300px] w-full" />
           <ChartHoverPanel
             hover={hover}
             candles={candles}
