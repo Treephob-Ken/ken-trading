@@ -20,7 +20,7 @@ import { BoxPrimitive, type SMCBox } from './primitives/boxPrimitive'
 const GREEN = '#089981'
 const RED = '#f23645'
 
-export default function SMCChart({ candles, result, showStructure = true, showStrongWeak = true, showEqual = true, showOrderBlocks = true, showFVG = false }: { candles: Candle[]; result: SMCResult; showStructure?: boolean; showStrongWeak?: boolean; showEqual?: boolean; showOrderBlocks?: boolean; showFVG?: boolean }) {
+export default function SMCChart({ candles, result, showStructure = true, showStrongWeak = true, showEqual = true, showOrderBlocks = true, showFVG = false, showZones = false, showMTF = false }: { candles: Candle[]; result: SMCResult; showStructure?: boolean; showStrongWeak?: boolean; showEqual?: boolean; showOrderBlocks?: boolean; showFVG?: boolean; showZones?: boolean; showMTF?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -146,11 +146,37 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
         axisLabelVisible: true, title: result.trailing.bottomLabel,
       }))
     }
+    // Equilibrium (50%) line for the premium/discount split.
+    if (showZones && result.zones) {
+      priceLinesRef.current.push(series.createPriceLine({
+        price: result.zones.equilibrium, color: '#878b94', lineWidth: 1, lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true, title: 'Equilibrium 50%',
+      }))
+    }
+    // MTF previous-period high/low levels (PDH/PDL, PWH/PWL, PMH/PML).
+    if (showMTF) {
+      for (const m of result.mtfLevels) {
+        priceLinesRef.current.push(series.createPriceLine({
+          price: m.high, color: '#2157f3', lineWidth: 1, lineStyle: LineStyle.Solid,
+          axisLabelVisible: true, title: `P${m.tf}H`,
+        }))
+        priceLinesRef.current.push(series.createPriceLine({
+          price: m.low, color: '#2157f3', lineWidth: 1, lineStyle: LineStyle.Solid,
+          axisLabelVisible: true, title: `P${m.tf}L`,
+        }))
+      }
+    }
 
     // Boxes (order blocks + fair value gaps) drawn behind the candles. FVGs
     // pushed first so order blocks sit on top where they overlap.
     const FVG_EXTEND = 10 // bars a fair value gap box stretches to the right
+    const firstTime = candles.length ? candles[0].time : 0
     const boxes: SMCBox[] = [
+      // Premium (upper, faint red) / discount (lower, faint green) full-width bands.
+      ...(showZones && result.zones ? [
+        { top: result.zones.top, bottom: result.zones.equilibrium, fromTime: firstTime, fill: 'rgba(242,54,69,0.05)' },
+        { top: result.zones.equilibrium, bottom: result.zones.bottom, fromTime: firstTime, fill: 'rgba(8,153,129,0.05)' },
+      ] : []),
       ...(showFVG ? result.fairValueGaps.map(g => {
         const idx = candles.findIndex(c => c.time === g.fromTime)
         const toIdx = idx >= 0 ? Math.min(idx + FVG_EXTEND, candles.length - 1) : candles.length - 1
@@ -168,7 +194,7 @@ export default function SMCChart({ candles, result, showStructure = true, showSt
     boxPrimitiveRef.current?.setBoxes(boxes)
 
     chart.timeScale().fitContent()
-  }, [candles, result, showStructure, showStrongWeak, showEqual, showOrderBlocks, showFVG])
+  }, [candles, result, showStructure, showStrongWeak, showEqual, showOrderBlocks, showFVG, showZones, showMTF])
 
   return (
     <div className="relative">
