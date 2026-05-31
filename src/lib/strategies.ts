@@ -12,10 +12,12 @@ import {
   psar,
   rsi,
   sma,
+  smcStructure,
   stochRsi,
   stochastic,
   supertrend,
   williamsR,
+  type SMCSignalMode,
 } from './indicators'
 
 export interface ParamDef {
@@ -219,6 +221,18 @@ export const STRATEGIES: StrategyMeta[] = [
       p('kijun', 'Kijun Period', 10, 60, 1, 26),
       p('senkouB', 'Senkou B Period', 20, 120, 1, 52),
       p('displacement', 'Displacement', 10, 60, 1, 26),
+    ],
+  },
+  {
+    id: 'smc',
+    name: 'SMC Structure (BOS/CHoCH)',
+    category: 'Trend',
+    description:
+      'Smart Money Concepts swing structure (LuxAlgo port). Detects swing pivots and fires when price closes through the last pivot — Bullish CHoCH/BOS = buy, Bearish CHoCH/BOS = sell. mode=1 fires CHoCH only (regime flips, fewer/cleaner); mode=2 also fires BOS (continuation, more signals).',
+    params: [
+      p('swingLength', 'Swing Length', 10, 200, 1, 50),
+      // 1 = CHoCH-only (just trend reversals), 2 = CHoCH + BOS (also continuations).
+      p('mode', 'Signal Mode (1=CHoCH, 2=Both)', 1, 2, 1, 1),
     ],
   },
 ]
@@ -752,6 +766,23 @@ export function generateSignals(
           ],
           refLines: [threshold],
         },
+      }
+    }
+
+    case 'smc': {
+      const swingSize = Math.max(2, Math.floor(params.swingLength || 50))
+      const mode: SMCSignalMode = (params.mode | 0) === 2 ? 'both' : 'choch'
+      const r = smcStructure(highs, lows, closes, times, swingSize, mode)
+      // Pivot dots overlay on the main chart so the user can see where the
+      // structure breaks happened. Lows below the candle, highs above.
+      const swingHighLine: LinePoint[] = r.swingHighs.map((p) => ({ time: p.time, value: p.level }))
+      const swingLowLine:  LinePoint[] = r.swingLows.map((p)  => ({ time: p.time, value: p.level }))
+      return {
+        signals: r.signals as Signal[],
+        mainLines: [
+          { id: 'smc-swing-high', color: 'rgba(239,68,68,0.6)', data: swingHighLine },
+          { id: 'smc-swing-low',  color: 'rgba(34,197,94,0.6)', data: swingLowLine },
+        ],
       }
     }
 

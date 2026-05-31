@@ -16,10 +16,12 @@ import {
   psar,
   rsi,
   sma,
+  smcStructure,
   stochRsi,
   stochastic,
   supertrend,
   williamsR,
+  type SMCSignalMode,
 } from './indicators.js'
 
 export interface Candle {
@@ -50,6 +52,7 @@ export type StrategyId =
   | 'traderxo'
   | 'adx'
   | 'ichimoku'
+  | 'smc'
 
 export interface ParamDef {
   key: string
@@ -237,6 +240,17 @@ export const STRATEGIES: StrategyMeta[] = [
       p('kijun', 'Kijun Period', 10, 60, 1, 26),
       p('senkouB', 'Senkou B Period', 20, 120, 1, 52),
       p('displacement', 'Displacement', 10, 60, 1, 26),
+    ],
+  },
+  {
+    id: 'smc',
+    name: 'SMC Structure (BOS/CHoCH)',
+    category: 'Trend',
+    description:
+      'Smart Money Concepts swing structure (LuxAlgo port). Buy on Bullish CHoCH/BOS, sell on Bearish CHoCH/BOS. mode=1 = CHoCH only (trend reversals), mode=2 = CHoCH + BOS (also continuations).',
+    params: [
+      p('swingLength', 'Swing Length', 10, 200, 1, 50),
+      p('mode', 'Signal Mode (1=CHoCH, 2=Both)', 1, 2, 1, 1),
     ],
   },
 ]
@@ -439,6 +453,11 @@ export function generateSignals(
         (i) => crossUp(ich.tenkan, ich.kijun, i) && aboveCloud(i),
         (i) => crossDown(ich.tenkan, ich.kijun, i) && belowCloud(i),
       )
+    }
+    case 'smc': {
+      const swingSize = Math.max(2, Math.floor(params.swingLength || 50))
+      const mode: SMCSignalMode = (params.mode | 0) === 2 ? 'both' : 'choch'
+      return smcStructure(highs, lows, closes, swingSize, mode) as Signal[]
     }
   }
 }
@@ -681,6 +700,11 @@ export function generateChartData(
           { id: 'senkouB', color: 'rgba(239,68,68,0.6)', data: toLine(times, ich.senkouB) },
         ],
       }
+    }
+    case 'smc': {
+      // No chart overlay from the bot side — the bot only needs signals; the
+      // web Backtester renders swing pivots itself. Return empty lines.
+      return { mainLines: [] }
     }
   }
 }

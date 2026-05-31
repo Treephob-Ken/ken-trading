@@ -507,3 +507,66 @@ export function crossDown(a: number[], b: number[], i: number): boolean {
   if ([a0, a1, b0, b1].some(Number.isNaN)) return false
   return a0 >= b0 && a1 < b1
 }
+
+// ── Smart Money Concepts — swing structure (BOS / CHoCH) ─────────────────────
+// Mirror of src/lib/indicators.ts smcStructure. Keep these two implementations
+// in lock-step — the bot must trade exactly what the backtester shows.
+export type SMCSignalMode = 'choch' | 'both'
+
+export function smcStructure(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  swingSize: number,
+  signalMode: SMCSignalMode,
+): ('buy' | 'sell' | null)[] {
+  const n = highs.length
+  const signals: ('buy' | 'sell' | null)[] = new Array(n).fill(null)
+  if (n < swingSize + 2 || swingSize < 2) return signals
+
+  let leg = 0
+  let prevLeg = 0
+  let pendingHigh: { level: number; crossed: boolean } | null = null
+  let pendingLow:  { level: number; crossed: boolean } | null = null
+  let bias: 0 | 1 | -1 = 0
+
+  for (let i = swingSize; i < n; i++) {
+    const refIdx = i - swingSize
+    let maxRange = -Infinity
+    let minRange = Infinity
+    for (let k = refIdx + 1; k <= i; k++) {
+      if (highs[k] > maxRange) maxRange = highs[k]
+      if (lows[k] < minRange) minRange = lows[k]
+    }
+    const newLegHigh = highs[refIdx] > maxRange
+    const newLegLow  = lows[refIdx]  < minRange
+
+    prevLeg = leg
+    if (newLegHigh) leg = 0
+    else if (newLegLow) leg = 1
+    const startOfNewLeg = leg !== prevLeg
+
+    if (startOfNewLeg) {
+      if (leg === 1) {
+        pendingLow = { level: lows[refIdx], crossed: false }
+      } else {
+        pendingHigh = { level: highs[refIdx], crossed: false }
+      }
+    }
+
+    if (pendingHigh && !pendingHigh.crossed && closes[i] > pendingHigh.level) {
+      const isChoch = bias === -1
+      pendingHigh.crossed = true
+      bias = 1
+      if (signalMode === 'both' || isChoch) signals[i] = 'buy'
+    }
+    if (pendingLow && !pendingLow.crossed && closes[i] < pendingLow.level) {
+      const isChoch = bias === 1
+      pendingLow.crossed = true
+      bias = -1
+      if (signalMode === 'both' || isChoch) signals[i] = 'sell'
+    }
+  }
+
+  return signals
+}

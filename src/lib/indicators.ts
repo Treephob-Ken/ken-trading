@@ -528,3 +528,100 @@ export function crossDown(a: number[], b: number[], i: number): boolean {
   if ([a0, a1, b0, b1].some(Number.isNaN)) return false
   return a0 >= b0 && a1 < b1
 }
+
+// ── Smart Money Concepts — swing structure (BOS / CHoCH) ─────────────────────
+//
+// Port of the core swing-structure detector from LuxAlgo's Smart Money Concepts
+// Pine indicator. Walks the bars maintaining a leg state (bullish/bearish),
+// places a swing pivot at the start of each new leg, then fires a signal when
+// price closes through the most recent pivot:
+//
+//   close > last swing high → "Bullish CHoCH" (if prior bias was bearish)
+//                            or "Bullish BOS"  (if prior bias was already bullish)
+//   close < last swing low  → "Bearish CHoCH" (if prior bias was bullish)
+//                            or "Bearish BOS"  (if prior bias was already bearish)
+//
+// signalMode controls which fire as trade signals:
+//   'choch'     → only CHoCH (regime flips). Fewer but higher-conviction signals.
+//   'both'      → CHoCH + BOS. Continuation trades included; more signals.
+
+export interface SMCResult {
+  // Per-bar buy/sell signals (null = no signal).
+  signals: ('buy' | 'sell' | null)[]
+  // Side history of the most-recent swing pivots — useful for charting later.
+  swingHighs: { time: number; level: number; bar: number }[]
+  swingLows:  { time: number; level: number; bar: number }[]
+}
+
+export type SMCSignalMode = 'choch' | 'both'
+
+export function smcStructure(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  times: number[],
+  swingSize: number,
+  signalMode: SMCSignalMode,
+): SMCResult {
+  const n = highs.length
+  const signals: ('buy' | 'sell' | null)[] = new Array(n).fill(null)
+  const swingHighs: SMCResult['swingHighs'] = []
+  const swingLows:  SMCResult['swingLows']  = []
+  if (n < swingSize + 2 || swingSize < 2) return { signals, swingHighs, swingLows }
+
+  // Pine `var leg = 0` → start bearish; flips when newLegHigh / newLegLow fires.
+  let leg = 0       // 0 = bearish leg, 1 = bullish leg
+  let prevLeg = 0
+  // Most recent pivots — these are what we watch for cross breaks.
+  let pendingHigh: { level: number; bar: number; crossed: boolean } | null = null
+  let pendingLow:  { level: number; bar: number; crossed: boolean } | null = null
+  // Trend bias — flipped on each cross. 0 unknown, 1 bullish, -1 bearish.
+  let bias: 0 | 1 | -1 = 0
+
+  for (let i = swingSize; i < n; i++) {
+    // Mirror PineScript's leg() — was the bar `swingSize` ago the highest /
+    // lowest of the rolling window that includes the current bar?
+    const refIdx = i - swingSize
+    let maxRange = -Infinity
+    let minRange = Infinity
+    for (let k = refIdx + 1; k <= i; k++) {
+      if (highs[k] > maxRange) maxRange = highs[k]
+      if (lows[k] < minRange) minRange = lows[k]
+    }
+    const newLegHigh = highs[refIdx] > maxRange
+    const newLegLow  = lows[refIdx]  < minRange
+
+    prevLeg = leg
+    if (newLegHigh) leg = 0
+    else if (newLegLow) leg = 1
+    const startOfNewLeg = leg !== prevLeg
+
+    if (startOfNewLeg) {
+      if (leg === 1) {
+        // New bullish leg → swing low confirmed at refIdx.
+        pendingLow = { level: lows[refIdx], bar: refIdx, crossed: false }
+        swingLows.push({ time: times[refIdx], level: lows[refIdx], bar: refIdx })
+      } else {
+        // New bearish leg → swing high confirmed at refIdx.
+        pendingHigh = { level: highs[refIdx], bar: refIdx, crossed: false }
+        swingHighs.push({ time: times[refIdx], level: highs[refIdx], bar: refIdx })
+      }
+    }
+
+    // BOS / CHoCH detection — close cross through the latest pivot.
+    if (pendingHigh && !pendingHigh.crossed && closes[i] > pendingHigh.level) {
+      const isChoch = bias === -1
+      pendingHigh.crossed = true
+      bias = 1
+      if (signalMode === 'both' || isChoch) signals[i] = 'buy'
+    }
+    if (pendingLow && !pendingLow.crossed && closes[i] < pendingLow.level) {
+      const isChoch = bias === 1
+      pendingLow.crossed = true
+      bias = -1
+      if (signalMode === 'both' || isChoch) signals[i] = 'sell'
+    }
+  }
+
+  return { signals, swingHighs, swingLows }
+}

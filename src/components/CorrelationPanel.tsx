@@ -36,6 +36,7 @@ const SHORT_NAMES: Record<StrategyId, string> = {
   traderxo: 'TXO',
   adx: 'ADX',
   ichimoku: 'ICHI',
+  smc: 'SMC',
 }
 
 export default function CorrelationPanel({
