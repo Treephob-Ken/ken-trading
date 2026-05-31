@@ -10,7 +10,7 @@
 import type { Candle } from '@/types'
 import type { SMCResult, SMCSettings, StructureBreak, TrailingExtremes } from './types'
 
-const DEFAULTS: SMCSettings = { swingLength: 50 }
+const DEFAULTS: SMCSettings = { swingLength: 50, orderBlockCount: 5, equalLength: 3, equalThreshold: 0.1 }
 
 export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {}): SMCResult {
   const cfg: SMCSettings = { ...DEFAULTS, ...settings }
@@ -18,7 +18,7 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   const n = candles.length
   const structures: StructureBreak[] = []
 
-  if (n < size + 2) return { structures: [], trailing: null }
+  if (n < size + 2) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [] }
 
   const high = candles.map(c => c.high)
   const low = candles.map(c => c.low)
@@ -98,5 +98,5 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
     bottomLabel: bias === 1 ? 'Strong Low' : 'Weak Low',
   }
 
-  return { structures, trailing }
+  return { structures, trailing, orderBlocks: [], equalLevels: [] }
 }
