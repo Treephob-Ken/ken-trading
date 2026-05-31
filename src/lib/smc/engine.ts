@@ -19,7 +19,7 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   const n = candles.length
   const structures: StructureBreak[] = []
 
-  if (n === 0) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [], fairValueGaps: [], zones: null, mtfLevels: [] }
+  if (n === 0) return { structures: [], internalStructures: [], trendBias: [], trailing: null, orderBlocks: [], equalLevels: [], fairValueGaps: [], zones: null, mtfLevels: [] }
   // Swing structure needs enough bars for the pivot window; EQH/EQL (shorter
   // length) runs independently below even when this is false.
   const hasSwing = n >= size + 2
@@ -52,6 +52,9 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
 
   interface ActiveOB { bias: 'bullish' | 'bearish'; top: number; bottom: number; fromTime: number; fromIndex: number }
   const activeOBs: ActiveOB[] = []
+
+  // Per-bar swing trend bias (for trend candle coloring).
+  const trendBias: number[] = new Array(n).fill(0)
 
   // leg: 0 = bearish leg, 1 = bullish leg (matches LuxAlgo BEARISH_LEG / BULLISH_LEG).
   let leg = 0
@@ -130,6 +133,8 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
       swingLow.crossed = true
       bias = -1
     }
+
+    trendBias[i] = bias
   }
 
   const trailing: TrailingExtremes | null = hasSwing ? {
@@ -222,7 +227,52 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   // Previous-period high/low from the loaded candles (PDH/PDL, PWH/PWL, PMH/PML).
   const mtfLevels = computeMtfLevels(high, low, time)
 
-  return { structures, trailing, orderBlocks, equalLevels, fairValueGaps, zones, mtfLevels }
+  // Internal structure — same detection at a short length (LuxAlgo uses 5).
+  const internalStructures = detectStructureBreaks(high, low, close, time, 5)
+
+  return { structures, internalStructures, trendBias, trailing, orderBlocks, equalLevels, fairValueGaps, zones, mtfLevels }
+}
+
+// Causal swing BOS/CHoCH detection (no order blocks / trailing). Used for the
+// internal-structure pass and reused by the strategy comparison.
+export function detectStructureBreaks(
+  high: number[], low: number[], close: number[], time: number[], size: number,
+): StructureBreak[] {
+  const n = high.length
+  const out: StructureBreak[] = []
+  const s = Math.max(2, Math.floor(size))
+  if (n < s + 2) return out
+  let leg = 0
+  let swingHigh: { level: number; time: number; crossed: boolean } | null = null
+  let swingLow: { level: number; time: number; crossed: boolean } | null = null
+  let bias: 0 | 1 | -1 = 0
+  for (let i = s; i < n; i++) {
+    const ref = i - s
+    let maxR = -Infinity
+    let minR = Infinity
+    for (let k = ref + 1; k <= i; k++) {
+      if (high[k] > maxR) maxR = high[k]
+      if (low[k] < minR) minR = low[k]
+    }
+    const prevLeg = leg
+    if (high[ref] > maxR) leg = 0
+    else if (low[ref] < minR) leg = 1
+    if (leg !== prevLeg) {
+      if (leg === 1) swingLow = { level: low[ref], time: time[ref], crossed: false }
+      else swingHigh = { level: high[ref], time: time[ref], crossed: false }
+    }
+    if (swingHigh && !swingHigh.crossed && close[i] > swingHigh.level) {
+      out.push({ kind: bias === -1 ? 'CHoCH' : 'BOS', bias: 'bullish', level: swingHigh.level, fromTime: swingHigh.time, atTime: time[i] })
+      swingHigh.crossed = true
+      bias = 1
+    }
+    if (swingLow && !swingLow.crossed && close[i] < swingLow.level) {
+      out.push({ kind: bias === 1 ? 'CHoCH' : 'BOS', bias: 'bearish', level: swingLow.level, fromTime: swingLow.time, atTime: time[i] })
+      swingLow.crossed = true
+      bias = -1
+    }
+  }
+  return out
 }
 
 // Bucket bars by UTC day/week/month and return the most-recent COMPLETED

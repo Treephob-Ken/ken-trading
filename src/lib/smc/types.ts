@@ -78,6 +78,10 @@ export interface MTFLevel {
 
 export interface SMCResult {
   structures: StructureBreak[]
+  // Internal (shorter-length) structure breaks — minor swings inside the big ones.
+  internalStructures: StructureBreak[]
+  // Per-bar swing trend (1 bullish, -1 bearish, 0 unknown) for trend candle coloring.
+  trendBias: number[]
   // null when there isn't enough data to establish extremes.
   trailing: TrailingExtremes | null
   // Most-recent un-mitigated order blocks (newest first), capped to orderBlockCount.
