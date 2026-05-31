@@ -222,7 +222,10 @@ export default function MarketStructurePage() {
             <tbody>
               {strategyResults.map(r => (
                 <tr key={r.name} className="border-t border-border">
-                  <td className="py-1 pr-3 font-medium text-text">{r.name}</td>
+                  <td className="py-1 pr-3 font-medium text-text">
+                    {r.name}
+                    {!r.deployable && <span className="ml-1 text-[9px] text-dim">(test-only)</span>}
+                  </td>
                   <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades}</td>
                   <td className="py-1 pr-3 text-right font-mono tabular-nums">{r.trades ? `${r.winRate.toFixed(0)}%` : '—'}</td>
                   <td className={`py-1 pr-3 text-right font-mono tabular-nums ${r.returnPct > 0 ? 'text-gain' : r.returnPct < 0 ? 'text-loss' : 'text-dim'}`}>
@@ -237,7 +240,7 @@ export default function MarketStructurePage() {
           </table>
         </div>
         <p className="mt-2 text-[10px] text-dim italic">
-          Tests only structure entries (causal). Order-block / FVG tap entries come later — they need careful look-ahead-free handling.
+          Includes retrace/retest entries (wait for the pull-back after a break). "(test-only)" rows aren't deployable yet — the bot still enters on the break. If a retest entry wins clearly, tell me and I'll wire it into the bot.
         </p>
       </section>
 

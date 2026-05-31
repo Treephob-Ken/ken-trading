@@ -11,17 +11,20 @@ function resultWith(structures: StructureBreak[]): SMCResult {
 }
 
 describe('compareSmcEntries (entry × exit combos via runBacktest)', () => {
-  it('returns 3 entries × 3 exits = 9 combos with sane numbers', () => {
+  it('returns 6 entries × 3 exits = 18 combos with sane numbers', () => {
     const out = compareSmcEntries([], resultWith([]), 1.5)
-    expect(out.length).toBe(9)
+    expect(out.length).toBe(18)
     for (const r of out) {
       expect(r.name).toContain(' · ')
       expect(['Flip', '2R', 'MFE']).toContain(r.exit)
       expect(r.trades).toBe(0)
       expect(r.winRate).toBeGreaterThanOrEqual(0)
       expect(r.winRate).toBeLessThanOrEqual(100)
-      expect(r.deployable).toBe(true)
     }
+    // The three retrace entries are present and flagged test-only.
+    expect(out.some(r => r.entry === 'Retest OB')).toBe(true)
+    expect(out.some(r => r.entry === 'Retest FVG')).toBe(true)
+    expect(out.filter(r => r.entry.startsWith('Retest')).every(r => !r.deployable)).toBe(true)
   })
 
   it('a long held through a rising series closes for a profit (Flip exit)', () => {
