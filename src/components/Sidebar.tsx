@@ -9,6 +9,7 @@ import {
   Hammer,
   LayoutGrid,
   LineChart,
+  Network,
   Radar,
   Radio,
   Settings,
@@ -25,6 +26,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { path: '/backtest', icon: LineChart,       label: 'Strategy Backtester' },
   { path: '/scanner',  icon: Radar,            label: 'Scanner'             },
+  { path: '/structure', icon: Network,         label: 'Market Structure'    },
   { path: '/grid',    icon: LayoutGrid,       label: 'Grid Optimizer'      },
   { path: '/builder', icon: Hammer,           label: 'Strategy Builder'    },
   { path: '/signal',  icon: Radio,            label: 'Signal Bots'         },

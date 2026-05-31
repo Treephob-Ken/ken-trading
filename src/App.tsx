@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from '@/contexts/AuthContext'
 import Sidebar from '@/components/Sidebar'
@@ -15,6 +15,8 @@ import SettingsPage from '@/pages/SettingsPage'
 import FundamentalsPage from '@/pages/FundamentalsPage'
 import ScannerPage from '@/pages/ScannerPage'
 import KillSwitchBanner from '@/components/KillSwitchBanner'
+
+const MarketStructurePage = lazy(() => import('@/pages/MarketStructurePage'))
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -98,6 +100,13 @@ export default function App() {
           {/* Scanner — batch-rank symbols × strategies, feeds Backtester + Grid pages */}
           <Route path="scanner" element={
             <ScannerPage onSymbol={setSymbol} onTimeframe={setTimeframe} />
+          } />
+
+          {/* Market Structure — LuxAlgo SMC port (swing structure, BOS/CHoCH, strong/weak) */}
+          <Route path="structure" element={
+            <Suspense fallback={<div className="p-6 text-sm text-dim">Loading…</div>}>
+              <MarketStructurePage />
+            </Suspense>
           } />
 
           {/* Fundamentals — sentiment, valuation, regime, verdict */}
