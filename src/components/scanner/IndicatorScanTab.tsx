@@ -241,7 +241,9 @@ export default function IndicatorScanTab({
   return (
     <div className="flex flex-col gap-4">
       {/* ── Filter / action bar ─────────────────────────────────────────── */}
-      <div className="card p-4 flex flex-wrap items-end gap-4">
+      {/* relative + isolate creates a stacking context so the CoinPicker
+          popover layers above the sibling Strategies / Best Pick cards. */}
+      <div className="card relative z-20 isolate p-4 flex flex-wrap items-end gap-4">
         {/* Coin picker — combobox of bases in the current scan results. */}
         <div className="flex flex-col gap-1 min-w-[200px]">
           <span className="text-[10px] text-dim uppercase tracking-wider">Coin</span>
@@ -857,7 +859,7 @@ function CoinPicker({
         )}
       </div>
       {open && (
-        <div className="absolute z-40 mt-1 w-full overflow-hidden rounded-md border border-border bg-panel-2 shadow-2xl">
+        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-md border border-border bg-panel shadow-2xl">
           <div className="max-h-72 overflow-auto py-1">
             <button
               type="button"
