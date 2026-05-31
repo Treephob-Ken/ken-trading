@@ -273,7 +273,9 @@ export class GridBot {
     if (lev === 1) return
     try {
       await this.clients.exchange.updateLeverage({
-        asset: this.meta.index,
+        // Must be assetId (HL global ID), not the in-dex index. For HIP-3
+        // perps these differ and using index targets the wrong asset.
+        asset: this.meta.assetId,
         isCross: true,
         leverage: lev,
       })

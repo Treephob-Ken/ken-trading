@@ -632,7 +632,14 @@ export async function setAssetLeverage(
   const meta = await getAssetMeta(info, normalized)
   const capped = Math.min(Math.floor(leverage), meta.maxLeverage || leverage)
   try {
-    await exchange.updateLeverage({ asset: meta.index, isCross, leverage: capped })
+    // Use `assetId`, NOT `index`. For main perps the two are equal so the bug
+    // never surfaced — but HIP-3 perps have `assetId = 100000 + dexIndex*10000
+    // + index`, while `index` is a small in-dex offset that maps to a totally
+    // different main-perp asset. Passing `index` to HL's updateLeverage on a
+    // HIP-3 coin silently updates a different asset's leverage and leaves the
+    // HIP-3 coin stuck at 1x, causing "Insufficient margin" rejections on the
+    // actual order even when balance is plenty.
+    await exchange.updateLeverage({ asset: meta.assetId, isCross, leverage: capped })
     return { ok: true, appliedLeverage: capped }
   } catch (e) {
     const msg = (e as Error).message
