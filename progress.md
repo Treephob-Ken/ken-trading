@@ -197,7 +197,13 @@ pm2 restart cloudflare-tunnel    # if tunnel drops
   `day/week/month/allTime` granularity exists on HL, so the hero trend chart has
   its own Day/Week/Month/All toggle, independent of the page's detail-range
   buttons. `mapEquitySeries()` in `bot/src/journal.ts` trims HL's leading $0
-  (pre-funding) points so the % return baseline is the first funded value.
+  (pre-funding) points from the chart. **Return % and max drawdown are based on
+  HL `pnlHistory` (real trading PnL, excludes deposits/withdrawals), NOT start→end
+  account value** — else a tiny first balance funded up by deposits reports an
+  absurd return (the "$5 → $157 = +3047%" bug). Return % = periodPnl ÷ avg funded
+  capital. Hero = account value (headline) + Net PnL ($) + "% on avg capital".
+  The monthly PnL calendar + insights (`MonthlyPnlCalendar` in `PortfolioPage.tsx`)
+  is realized round-trip data, cross-filtered like the rest.
   (2) *Realized layer* = closed round-trips from `/api/portfolio/trips`, derived
   **client-side** in `src/lib/portfolio.ts` (`botPerformance`, `realizedView`).
   Powers the bot leaderboard, daily PnL, calendar, by-asset, closed-trades — and
