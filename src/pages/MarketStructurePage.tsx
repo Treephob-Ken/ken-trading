@@ -35,8 +35,9 @@ export default function MarketStructurePage() {
   const [slPct, setSlPct] = useState(1.5)
   // Which structure entry the bot fires on: CHoCH only (mode 1) or BOS+CHoCH (mode 2).
   const [entryRule, setEntryRule] = useState<'choch' | 'both'>('choch')
-  // Auto TP: bot computes its own MFE-based take-profit once running.
-  const [autoTp, setAutoTp] = useState(true)
+  // Exit mode for the deployed bot.
+  const [exitMode, setExitMode] = useState<'flip' | 'rr' | 'mfe'>('mfe')
+  const [rrTarget, setRrTarget] = useState(2)
   const [visible, setVisible] = useState<Record<LayerKey, boolean>>({
     structure: true, internal: false, strongWeak: true, orderBlocks: true, equal: true, fvg: false, zones: false, mtf: false, trend: false,
   })
@@ -57,7 +58,10 @@ export default function MarketStructurePage() {
   const result = useMemo(() => computeSMC(candles, { swingLength }), [candles, swingLength])
   const lastPrice = candles.length ? candles[candles.length - 1].close : 0
   const summary = useMemo(() => summarizeSMC(result, lastPrice), [result, lastPrice])
-  const strategyResults = useMemo(() => compareSmcEntries(candles, result, slPct), [candles, result, slPct])
+  const strategyResults = useMemo(
+    () => compareSmcEntries(candles, result, slPct).sort((a, b) => b.returnPct - a.returnPct),
+    [candles, result, slPct],
+  )
   const pairLabel = symbol.includes(':') ? symbol.split(':')[1] + '/USDC' : symbol.replace(/USDT$/, '/USDC')
 
   const pickSymbol = (s: string) => { setSymbol(s); localStorage.setItem('lab_symbol', s) }
@@ -74,9 +78,10 @@ export default function MarketStructurePage() {
       slPct,
       riskUsd,
       sizingSlPct: slPct,
-      // Auto TP = bot picks its own take-profit from MFE stats (P75) once it
-      // has ≥5 historical signals; until then it exits on the opposite signal.
-      useSuggestedTp: autoTp,
+      // Exit: flip = opposite signal (no TP); rr = fixed take-profit at N×SL;
+      // mfe = bot computes its own TP from historical favourable excursion (P75).
+      ...(exitMode === 'rr' ? { tpPct: +(rrTarget * slPct).toFixed(2) } : {}),
+      ...(exitMode === 'mfe' ? { useSuggestedTp: true } : {}),
     }
     sessionStorage.setItem('pending_signal_bot_config', JSON.stringify(payload))
     navigate('/signal')
@@ -186,7 +191,7 @@ export default function MarketStructurePage() {
           Strategy test <span className="font-normal text-dim">· {pairLabel} {timeframe} · SL {slPct}%, exit on opposite signal, fees on</span>
         </div>
         <p className="mb-3 text-[11px] text-dim">
-          Which entry rule would have made money here — same engine + fees as the Backtester, same exit the bot uses. <span className="text-gain">Profit factor &gt; 1</span> = edge. This window only — not a guarantee of future results.
+          Entry × exit combos (Flip / 2R / MFE), best return on top — same engine + fees as the Backtester. <span className="text-gain">Profit factor &gt; 1</span> = edge. Pick the winning combo's exit in the Deploy card below. This window only — not a guarantee.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
@@ -254,15 +259,26 @@ export default function MarketStructurePage() {
               onChange={e => setSlPct(Math.max(0.1, +e.target.value || 0.1))}
               className="field w-[90px]" />
           </label>
-          <div>
-            <span className="mb-1 block text-[11px] text-dim">Take profit</span>
-            <button
-              type="button"
-              onClick={() => setAutoTp(v => !v)}
-              className={`rounded-md border px-2.5 py-1.5 text-[11px] cursor-pointer ${autoTp ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
-              title="Auto TP: the bot computes its own take-profit from the strategy's historical max-favourable-excursion (P75). Off = exit on the opposite signal."
-            >{autoTp ? 'Auto (MFE)' : 'Off (flip)'}</button>
-          </div>
+          <label className="text-[11px] text-dim">
+            <span className="mb-1 block">Exit (TP)</span>
+            <select
+              value={exitMode}
+              onChange={e => setExitMode(e.target.value as 'flip' | 'rr' | 'mfe')}
+              className="field w-[150px]"
+            >
+              <option value="mfe">Auto (MFE)</option>
+              <option value="rr">Fixed R:R</option>
+              <option value="flip">Flip (opposite signal)</option>
+            </select>
+          </label>
+          {exitMode === 'rr' && (
+            <label className="text-[11px] text-dim">
+              <span className="mb-1 block">R:R target</span>
+              <input type="number" min={1} step={0.5} value={rrTarget}
+                onChange={e => setRrTarget(Math.max(1, +e.target.value || 2))}
+                className="field w-[72px]" />
+            </label>
+          )}
           <button type="button" onClick={deployToBot} className="btn-primary">
             <Rocket className="h-4 w-4" /> Deploy to Signal Bot
           </button>
