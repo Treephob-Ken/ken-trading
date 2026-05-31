@@ -9,7 +9,7 @@
 
 import type { Candle } from '@/types'
 import { atr } from '../indicators'
-import type { OrderBlock, SMCResult, SMCSettings, StructureBreak, TrailingExtremes } from './types'
+import type { EqualLevel, OrderBlock, SMCResult, SMCSettings, StructureBreak, TrailingExtremes } from './types'
 
 const DEFAULTS: SMCSettings = { swingLength: 50, orderBlockCount: 5, equalLength: 3, equalThreshold: 0.1 }
 
@@ -19,7 +19,10 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   const n = candles.length
   const structures: StructureBreak[] = []
 
-  if (n < size + 2) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [] }
+  if (n === 0) return { structures: [], trailing: null, orderBlocks: [], equalLevels: [] }
+  // Swing structure needs enough bars for the pivot window; EQH/EQL (shorter
+  // length) runs independently below even when this is false.
+  const hasSwing = n >= size + 2
 
   const high = candles.map(c => c.high)
   const low = candles.map(c => c.low)
@@ -31,10 +34,19 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   const vol = atr(high, low, close, 200)
   const parsedHigh: number[] = new Array(n)
   const parsedLow: number[] = new Array(n)
+  // volBase = ATR(200), falling back to cumulative mean true range until ATR is
+  // available (LuxAlgo's "Cumulative Mean Range" measure). Used for EQH/EQL.
+  const volBase: number[] = new Array(n)
+  let trSum = 0
   for (let i = 0; i < n; i++) {
     const highVol = high[i] - low[i] >= 2 * vol[i] // NaN vol → false → no swap
     parsedHigh[i] = highVol ? low[i] : high[i]
     parsedLow[i] = highVol ? high[i] : low[i]
+    const tr = i === 0
+      ? high[i] - low[i]
+      : Math.max(high[i] - low[i], Math.abs(high[i] - close[i - 1]), Math.abs(low[i] - close[i - 1]))
+    trSum += tr
+    volBase[i] = Number.isNaN(vol[i]) ? trSum / (i + 1) : vol[i]
   }
 
   interface ActiveOB { bias: 'bullish' | 'bearish'; top: number; bottom: number; fromTime: number; fromIndex: number }
@@ -53,7 +65,7 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
   let bottom = low[0]
   let bottomTime = time[0]
 
-  for (let i = size; i < n; i++) {
+  for (let i = size; hasSwing && i < n; i++) {
     const ref = i - size
     let maxR = -Infinity
     let minR = Infinity
@@ -119,19 +131,56 @@ export function computeSMC(candles: Candle[], settings: Partial<SMCSettings> = {
     }
   }
 
-  const trailing: TrailingExtremes = {
+  const trailing: TrailingExtremes | null = hasSwing ? {
     top,
     topTime,
     topLabel: bias === -1 ? 'Strong High' : 'Weak High',
     bottom,
     bottomTime,
     bottomLabel: bias === 1 ? 'Strong Low' : 'Weak Low',
-  }
+  } : null
 
   const orderBlocks: OrderBlock[] = activeOBs
     .slice(-cfg.orderBlockCount)
     .reverse()
     .map(({ bias, top, bottom, fromTime }) => ({ bias, top, bottom, fromTime }))
 
-  return { structures, trailing, orderBlocks, equalLevels: [] }
+  // EQH/EQL: a separate, shorter pivot pass. Two consecutive same-side pivots
+  // within `equalThreshold × volBase` of each other are an equal high/low.
+  const equalLevels: EqualLevel[] = []
+  const sizeE = Math.max(2, Math.floor(cfg.equalLength))
+  if (n >= sizeE + 2) {
+    let legE = 0
+    let lastHigh: { level: number; time: number } | null = null
+    let lastLow: { level: number; time: number } | null = null
+    for (let i = sizeE; i < n; i++) {
+      const ref = i - sizeE
+      let maxR = -Infinity
+      let minR = Infinity
+      for (let k = ref + 1; k <= i; k++) {
+        if (high[k] > maxR) maxR = high[k]
+        if (low[k] < minR) minR = low[k]
+      }
+      const prev = legE
+      if (high[ref] > maxR) legE = 0
+      else if (low[ref] < minR) legE = 1
+      if (legE === prev) continue
+      const thr = cfg.equalThreshold * volBase[ref]
+      if (legE === 0) {
+        const lvl = high[ref]
+        if (lastHigh && Math.abs(lvl - lastHigh.level) < thr) {
+          equalLevels.push({ kind: 'EQH', level: lvl, fromTime: lastHigh.time, toTime: time[ref] })
+        }
+        lastHigh = { level: lvl, time: time[ref] }
+      } else {
+        const lvl = low[ref]
+        if (lastLow && Math.abs(lvl - lastLow.level) < thr) {
+          equalLevels.push({ kind: 'EQL', level: lvl, fromTime: lastLow.time, toTime: time[ref] })
+        }
+        lastLow = { level: lvl, time: time[ref] }
+      }
+    }
+  }
+
+  return { structures, trailing, orderBlocks, equalLevels }
 }

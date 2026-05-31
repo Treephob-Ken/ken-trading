@@ -108,3 +108,23 @@ describe('computeSMC — order blocks', () => {
     expect(r.orderBlocks.length).toBeLessThanOrEqual(2)
   })
 })
+
+describe('computeSMC — equal highs/lows', () => {
+  it('detects an EQH when two swing highs sit at the same price', () => {
+    // Two tops at 10 separated by a dip → equal highs.
+    const doubleTop = [0, 2, 4, 6, 8, 10, 8, 6, 8, 10, 8, 6, 4]
+    const r = computeSMC(doubleTop.map((p, i) => ({
+      time: 1_700_000_000 + i * 60, open: p, high: p, low: p, close: p, volume: 1,
+    })), { equalLength: 3 })
+    expect(r.equalLevels.some(e => e.kind === 'EQH')).toBe(true)
+  })
+
+  it('does NOT call clearly different highs equal', () => {
+    // Tops at 10 then 16 → not equal.
+    const steppingUp = [0, 2, 4, 6, 8, 10, 8, 6, 4, 8, 12, 16, 14, 12, 10]
+    const r = computeSMC(steppingUp.map((p, i) => ({
+      time: 1_700_000_000 + i * 60, open: p, high: p, low: p, close: p, volume: 1,
+    })), { equalLength: 3 })
+    expect(r.equalLevels.filter(e => e.kind === 'EQH').length).toBe(0)
+  })
+})
