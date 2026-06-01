@@ -4,6 +4,7 @@
 
 import {
   adx,
+  atr,
   bollinger,
   ema,
   macd,
@@ -46,6 +47,9 @@ function computeSeries(ref: SeriesRef, candles: Candle[]): number[] {
 
   switch (ref.id) {
     case 'price': return closes
+    case 'volume': return candles.map((c) => c.volume)
+    case 'volume_ma': return sma(candles.map((c) => c.volume), Math.max(2, Math.floor(ref.params.length ?? 20)))
+    case 'atr': return atr(highs, lows, closes, Math.max(2, Math.floor(ref.params.length ?? 14)))
     case 'rsi':   return rsi(closes, Math.max(2, Math.floor(ref.params.length ?? 14)))
     case 'ema':   return ema(closes, Math.max(2, Math.floor(ref.params.length ?? 20)))
     case 'sma':   return sma(closes, Math.max(2, Math.floor(ref.params.length ?? 20)))

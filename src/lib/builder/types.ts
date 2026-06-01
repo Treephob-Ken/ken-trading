@@ -27,6 +27,7 @@ export type SeriesId =
   | 'bb_upper' | 'bb_mid' | 'bb_lower'
   | 'adx' | 'plus_di' | 'minus_di'
   | 'stoch_k' | 'stoch_d'
+  | 'volume' | 'volume_ma' | 'atr'
 
 export interface SeriesRef {
   id: SeriesId
@@ -126,6 +127,17 @@ export interface CustomStrategySpec {
   // "no auto-stop" — the user can manage manually via the brackets panel.
   tpPct?: number
   slPct?: number
+
+  // Stop sizing. 'pct' (default) = fixed tpPct/slPct above. 'atr' = stop a
+  // distance of (ATR(atrLength) × atrMult) from entry, take-profit at `rr`×
+  // that distance (risk:reward). riskPct = % of capital risked per trade when
+  // ATR sizing (volatility position mode). Used by the Builder backtest; live
+  // bot deploy still uses %-stops until ATR stops are wired bot-side.
+  stopMode?: 'pct' | 'atr'
+  atrLength?: number
+  atrMult?: number
+  rr?: number
+  riskPct?: number
 
   // Bookkeeping (set server-side on save).
   createdAt?: number

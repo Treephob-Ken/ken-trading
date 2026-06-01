@@ -11,6 +11,7 @@ export type SeriesId =
   | 'bb_upper' | 'bb_mid' | 'bb_lower'
   | 'adx' | 'plus_di' | 'minus_di'
   | 'stoch_k' | 'stoch_d'
+  | 'volume' | 'volume_ma' | 'atr'
 
 export interface SeriesRef {
   id: SeriesId
@@ -55,6 +56,12 @@ export interface CustomStrategySpec {
   exitShort?:  ConditionGroup
   tpPct?: number
   slPct?: number
+  // ATR-stop sizing (Builder backtest). Live bot still uses %-stops for now.
+  stopMode?: 'pct' | 'atr'
+  atrLength?: number
+  atrMult?: number
+  rr?: number
+  riskPct?: number
   createdAt?: number
   updatedAt?: number
 }

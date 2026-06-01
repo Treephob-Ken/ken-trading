@@ -25,6 +25,9 @@ export function runBacktest(
   positionMode: 'fixed' | 'compounding' | 'volatility' = 'fixed',
   targetRiskPct = 2,
   atrMultiplier = 1.5,
+  // Volatility mode only: if > 0, take-profit sits at rrTarget × the ATR stop
+  // distance (risk:reward), overriding takeProfitPct. 0 = use takeProfitPct.
+  rrTarget = 0,
 ): BacktestResult {
   let equity = initialCapital
   let position: 'flat' | TradeSide = 'flat'
@@ -76,11 +79,15 @@ export function runBacktest(
       
       slPrice = side === 'long' ? price - stopLossDist : price + stopLossDist
       tpPrice =
-        takeProfitPct > 0
+        rrTarget > 0
           ? side === 'long'
-            ? price * (1 + takeProfitPct / 100)
-            : price * (1 - takeProfitPct / 100)
-          : 0
+            ? price + stopLossDist * rrTarget
+            : price - stopLossDist * rrTarget
+          : takeProfitPct > 0
+            ? side === 'long'
+              ? price * (1 + takeProfitPct / 100)
+              : price * (1 - takeProfitPct / 100)
+            : 0
     } else {
       entryEquity = positionMode === 'fixed' ? initialCapital : equity
       entryPrice = price

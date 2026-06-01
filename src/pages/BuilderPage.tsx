@@ -55,6 +55,9 @@ const SERIES_CATALOGUE: SeriesMeta[] = [
   { id: 'minus_di',   label: '-DI',               defaultParams: { length: 14 }, paramFields: [{ key: 'length', label: 'Length', min: 5, max: 50, default: 14 }] },
   { id: 'stoch_k',    label: 'Stochastic %K',     defaultParams: { kLen: 14, kSmooth: 3, dLen: 3 }, paramFields: [{ key: 'kLen', label: 'K Len', min: 2, max: 50, default: 14 }, { key: 'kSmooth', label: 'K Smooth', min: 1, max: 10, default: 3 }, { key: 'dLen', label: 'D Len', min: 2, max: 50, default: 3 }] },
   { id: 'stoch_d',    label: 'Stochastic %D',     defaultParams: { kLen: 14, kSmooth: 3, dLen: 3 }, paramFields: [{ key: 'kLen', label: 'K Len', min: 2, max: 50, default: 14 }, { key: 'kSmooth', label: 'K Smooth', min: 1, max: 10, default: 3 }, { key: 'dLen', label: 'D Len', min: 2, max: 50, default: 3 }] },
+  { id: 'volume',     label: 'Volume',            defaultParams: {}, paramFields: [] },
+  { id: 'volume_ma',  label: 'Volume MA',         defaultParams: { length: 20 }, paramFields: [{ key: 'length', label: 'Length', min: 2, max: 200, default: 20 }] },
+  { id: 'atr',        label: 'ATR',               defaultParams: { length: 14 }, paramFields: [{ key: 'length', label: 'Length', min: 2, max: 100, default: 14 }] },
 ]
 const SERIES_BY_ID = new Map(SERIES_CATALOGUE.map((s) => [s.id, s]))
 
@@ -93,6 +96,32 @@ function newEmptySpec(): CustomStrategySpec {
     exitLong:  { combinator: 'ANY', conditions: [] },
     tpPct: 4,
     slPct: 2,
+    stopMode: 'pct',
+  }
+}
+
+// Ready-made "Breakout + Volume Filter, follow-trend" strategy (the YouTube
+// setup): long only above EMA-200, enter when close breaks the upper Bollinger
+// Band on above-average volume, stop = ATR(14)×2, take-profit at 2R.
+function breakoutVolumeTemplate(): CustomStrategySpec {
+  const s = (id: SeriesId, params: Record<string, number> = {}): SeriesRef => ({ id, params })
+  return {
+    id: nextId(),
+    name: 'Breakout + Volume Filter',
+    entryLong: {
+      combinator: 'ALL',
+      conditions: [
+        { kind: 'state', id: nextId(), a: s('price'), op: 'above', b: s('ema', { length: 200 }) },
+        { kind: 'cross', id: nextId(), a: s('price'), op: 'crossUp', b: s('bb_upper', { length: 20, mult: 2 }) },
+        { kind: 'state', id: nextId(), a: s('volume'), op: 'above', b: s('volume_ma', { length: 20 }) },
+      ],
+    },
+    exitLong: { combinator: 'ANY', conditions: [] }, // exit via ATR stop / take-profit only
+    stopMode: 'atr',
+    atrLength: 14,
+    atrMult: 2,
+    rr: 2,
+    riskPct: 3,
   }
 }
 
@@ -160,7 +189,10 @@ export default function BuilderPage() {
       const candles: Candle[] = await fetchKlines({ symbol, interval: timeframe, startTime: from })
       if (candles.length < 30) throw new Error('Not enough candles in this window — try a longer lookback.')
       const signals = evaluateCustomStrategy(spec, candles)
-      const r = runBacktest(candles, signals, 10_000, 0.001, 'long', spec.slPct ?? 0, spec.tpPct ?? 0)
+      const r = spec.stopMode === 'atr'
+        // ATR stops: SL = ATR(14)×atrMult, TP at rr×stop distance, risking riskPct of capital.
+        ? runBacktest(candles, signals, 10_000, 0.001, 'long', 0, 0, 'volatility', spec.riskPct ?? 1, spec.atrMult ?? 2, spec.rr ?? 2)
+        : runBacktest(candles, signals, 10_000, 0.001, 'long', spec.slPct ?? 0, spec.tpPct ?? 0)
       setResult(r)
       if (r.trades.length === 0) {
         setNotice('Strategy produced 0 trades. Try loosening conditions or different symbol/timeframe.')
@@ -270,6 +302,9 @@ export default function BuilderPage() {
           <button type="button" onClick={newStrategy} disabled={busy} className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50">
             <Plus className="h-3 w-3" /> New
           </button>
+          <button type="button" onClick={() => { setSpec(breakoutVolumeTemplate()); setResult(null); setNotice('Loaded the Breakout + Volume Filter template (EMA-200 trend, BB breakout, volume filter, ATR×2 stop, 2R).') }} disabled={busy} className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50" title="Load the Breakout + Volume Filter strategy">
+            <Hammer className="h-3 w-3" /> Breakout+Vol
+          </button>
           <button type="button" onClick={savePreset} disabled={busy} className="flex items-center gap-1 rounded-md border border-brand/40 bg-brand/10 px-2 py-1 text-[11px] text-brand hover:bg-brand/15 disabled:opacity-50">
             <Save className="h-3 w-3" /> Save
           </button>
@@ -308,8 +343,26 @@ export default function BuilderPage() {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <NumberField label="Lookback (days)" value={lookbackDays} onChange={setLookbackDays} min={7} max={365} />
-            <NumberField label="TP %" value={spec.tpPct ?? 0} onChange={(v) => setSpec((s) => ({ ...s, tpPct: v || undefined }))} min={0} max={100} step={0.1} />
-            <NumberField label="SL %" value={spec.slPct ?? 0} onChange={(v) => setSpec((s) => ({ ...s, slPct: v || undefined }))} min={0} max={100} step={0.1} />
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] text-dim uppercase">Stop mode</span>
+              <select value={spec.stopMode ?? 'pct'} onChange={(e) => setSpec((s) => ({ ...s, stopMode: e.target.value as 'pct' | 'atr' }))}
+                className="rounded-md border border-border bg-panel-2 px-2 py-1 text-xs text-text outline-none focus:border-brand/60">
+                <option value="pct">Fixed %</option>
+                <option value="atr">ATR × / RR</option>
+              </select>
+            </label>
+            {spec.stopMode === 'atr' ? (
+              <>
+                <NumberField label="ATR ×" value={spec.atrMult ?? 2} onChange={(v) => setSpec((s) => ({ ...s, atrMult: v }))} min={0.5} max={10} step={0.1} />
+                <NumberField label="R:R" value={spec.rr ?? 2} onChange={(v) => setSpec((s) => ({ ...s, rr: v }))} min={0.5} max={10} step={0.1} />
+                <NumberField label="Risk %" value={spec.riskPct ?? 1} onChange={(v) => setSpec((s) => ({ ...s, riskPct: v }))} min={0.1} max={20} step={0.1} />
+              </>
+            ) : (
+              <>
+                <NumberField label="TP %" value={spec.tpPct ?? 0} onChange={(v) => setSpec((s) => ({ ...s, tpPct: v || undefined }))} min={0} max={100} step={0.1} />
+                <NumberField label="SL %" value={spec.slPct ?? 0} onChange={(v) => setSpec((s) => ({ ...s, slPct: v || undefined }))} min={0} max={100} step={0.1} />
+              </>
+            )}
             {summary && (
               <div className="rounded-md border border-border bg-panel-2 p-2">
                 <div className="text-[10px] text-dim uppercase">Backtest</div>
