@@ -240,7 +240,9 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const sizeOk = typeof sizeRaw === 'number' && Number.isFinite(sizeRaw) && sizeRaw > 0
   const size = sizeOk ? sizeRaw : 0
 
-  if (!riskUsd && !investment && !sizeOk) {
+  // Custom (Builder) strategies size from a % of live equity (Risk % in the
+  // spec), so they don't need riskUsd/investment/size here.
+  if (!isCustom && !riskUsd && !investment && !sizeOk) {
     throw new Error('Provide a risk per trade (riskUsd), a budget (investment), or a fixed size')
   }
 
@@ -986,29 +988,41 @@ class SignalBot {
           this.log.info(`Using suggested TP ${openTpPct}% (manual was ${cfg.tpPct ?? '—'}%)`)
         }
 
-        // ATR-based stops for custom strategies: derive SL%/TP% (and risk-based
-        // size) from ATR at the signal bar (index length-2). Distances are
-        // expressed as a % of the reference close so placeOrder's fill-relative
-        // bracket keeps the ATR×mult distance proportionally. Guarded so
-        // built-in bots and %-stop custom bots are untouched.
+        // Custom (Builder) strategies: size from a % of LIVE account equity
+        // (the single Risk % set in the Builder — the same number that drives
+        // the backtest, so deploy matches the test). In ATR stop mode, also
+        // derive SL%/TP% from ATR at the signal bar (index length-2), expressed
+        // as a % of the reference close so placeOrder's fill-relative bracket
+        // keeps the ATR×mult distance. Built-in bots are untouched.
         if ((cfg.strategyId as string) === 'custom' && cfg.customStrategyId) {
           const spec = loadSpec(cfg.customStrategyId, this.userId)
-          if (spec && spec.stopMode === 'atr') {
-            const len = Math.max(2, Math.floor(spec.atrLength ?? 14))
-            const mult = spec.atrMult ?? 2
-            const rr = spec.rr ?? 2
-            const idx = candles.length - 2 // last closed bar = the signal bar
-            const atrVal = atr(candles.map((c) => c.high), candles.map((c) => c.low), candles.map((c) => c.close), len)[idx]
-            const refPx = candles[idx]?.close ?? 0
-            if (Number.isFinite(atrVal) && atrVal > 0 && refPx > 0) {
-              const slPct = (atrVal * mult / refPx) * 100
-              openSlPct = slPct
-              openTpPct = slPct * rr
-              if (cfg.riskUsd && cfg.riskUsd > 0) openSize = (cfg.riskUsd / (slPct / 100)) / refPx
-              this.log.info(`ATR stop: ATR(${len})=${atrVal.toFixed(2)} ×${mult} → SL ${slPct.toFixed(2)}% / TP ${(slPct * rr).toFixed(2)}% (RR ${rr})${cfg.riskUsd ? ` · size ${openSize.toFixed(6)}` : ''}`)
-            } else {
-              this.log.warn('ATR stop: ATR unavailable on signal bar — using configured SL/TP')
+          if (spec) {
+            const refPx = candles[candles.length - 2]?.close ?? 0
+            if (spec.stopMode === 'atr') {
+              const len = Math.max(2, Math.floor(spec.atrLength ?? 14))
+              const mult = spec.atrMult ?? 2
+              const rr = spec.rr ?? 2
+              const atrVal = atr(candles.map((c) => c.high), candles.map((c) => c.low), candles.map((c) => c.close), len)[candles.length - 2]
+              if (Number.isFinite(atrVal) && atrVal > 0 && refPx > 0) {
+                openSlPct = (atrVal * mult / refPx) * 100
+                openTpPct = openSlPct * rr
+              } else {
+                this.log.warn('ATR stop: ATR unavailable on signal bar — using configured SL/TP')
+              }
             }
+            // risk $ = equity × Risk%  (legacy riskUsd still honoured if set);
+            // size = risk $ / stop-distance(price).
+            const riskPct = spec.riskPct ?? 1
+            const riskAmount = cfg.riskUsd && cfg.riskUsd > 0 ? cfg.riskUsd : state.accountValue * (riskPct / 100)
+            if (openSlPct && openSlPct > 0 && refPx > 0) {
+              const stopDistPx = refPx * (openSlPct / 100)
+              if (stopDistPx > 0) openSize = riskAmount / stopDistPx
+            }
+            this.log.info(
+              `Custom sizing: risk $${riskAmount.toFixed(2)} ` +
+                `(${cfg.riskUsd ? 'fixed $' : `${riskPct}% of $${state.accountValue.toFixed(2)} equity`}) · ` +
+                `SL ${(openSlPct ?? 0).toFixed(2)}% / TP ${(openTpPct ?? 0).toFixed(2)}% · size ${openSize.toFixed(6)}`,
+            )
           }
         }
 

@@ -1357,9 +1357,10 @@ export default function SignalBotsPage() {
                     Entry conditions: {customSpec?.entryLong?.conditions.length ?? 0} long
                     {customSpec?.entryShort?.conditions.length ? ` · ${customSpec.entryShort.conditions.length} short` : ''}
                   </div>
-                  {customSpec?.stopMode === 'atr' && (
-                    <div className="text-dim/70 text-[10px]">SL/TP and position size are computed from ATR per trade (Risk $ below). The TP/SL % fields don’t apply.</div>
-                  )}
+                  <div className="text-dim/70 text-[10px]">
+                    Position size = <span className="text-text">Risk % of your account</span> ÷ stop distance, per trade (set in the Builder).
+                    {customSpec?.stopMode === 'atr' ? ' SL/TP come from ATR — the TP/SL % and sizing fields below don’t apply.' : ' The sizing fields below don’t apply.'}
+                  </div>
                 </div>
               )}
 
