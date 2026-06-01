@@ -45,6 +45,34 @@ describe('evaluateCustomStrategy — stateless re-entry', () => {
   })
 })
 
+describe('evaluateCustomStrategy — short-only re-entry', () => {
+  // Price oscillates; "short when price < 100", SL/TP only. Must re-enter each
+  // time it pops back above and breaks down again — same fix as long-only.
+  const shortSeries: Candle[] =
+    [101, 101, 98, 97, 101, 101, 98, 97, 101, 101, 98, 97, 101].map((c, i) => bar(1000 + i * 60, c, 2))
+  const shortEntryOnly: CustomStrategySpec = {
+    id: 's1', name: 'price<100, SL/TP only',
+    direction: 'short',
+    entryLong: { combinator: 'ALL', conditions: [] },
+    exitLong: { combinator: 'ANY', conditions: [] },
+    entryShort: { combinator: 'ALL', conditions: [{ kind: 'compare', id: 'a', series: { id: 'price', params: {} }, op: '<', value: 100 }] },
+    exitShort: { combinator: 'ANY', conditions: [] },
+    stopMode: 'pct', tpPct: 1, slPct: 5,
+  }
+
+  it('emits sell (open short) on every bar below the threshold', () => {
+    const sig = evaluateCustomStrategy(shortEntryOnly, shortSeries)
+    expect(sig.filter((s) => s === 'sell').length).toBeGreaterThan(1)
+    expect(sig.every((s) => s === 'sell' || s === null)).toBe(true)
+  })
+
+  it('re-enters short after a SL/TP exit → more than one trade', () => {
+    const sig = evaluateCustomStrategy(shortEntryOnly, shortSeries)
+    const r = runBacktest(shortSeries, sig, 10_000, 0, 'short', 5, 1)
+    expect(r.trades.length).toBeGreaterThan(1)
+  })
+})
+
 describe('evaluateCustomStrategy — both directions', () => {
   const bothSpec: CustomStrategySpec = {
     id: 't2', name: 'flip', direction: 'both',
