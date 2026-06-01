@@ -31,6 +31,7 @@ import {
   type StrategyId,
 } from './strategy/strategies.js'
 import { cancelOrdersByOid, getAccountState, getAssetInfo, placeOrder, snapshotAssetOrderOids } from './trade.js'
+import { atr } from './strategy/indicators.js'
 import { computeMfeStats, type MfeResult } from './strategy/mfe.js'
 import { evaluateCustomStrategy } from './strategy/builder-evaluate.js'
 import { loadSpec } from './strategy/builder-store.js'
@@ -978,18 +979,47 @@ class SignalBot {
         this.lastTradeAt = Date.now()
         // TP overrides per-side: suggested mode picks median MFE when fresh,
         // otherwise falls back to cfg.tpPct. SL is unaffected.
-        const effectiveTpPct = this.resolveTpPct(openSide)
-        if (cfg.useSuggestedTp && effectiveTpPct !== cfg.tpPct) {
-          this.log.info(`Using suggested TP ${effectiveTpPct}% (manual was ${cfg.tpPct ?? '—'}%)`)
+        let openTpPct = this.resolveTpPct(openSide)
+        let openSlPct = cfg.slPct
+        let openSize = tradeSize
+        if (cfg.useSuggestedTp && openTpPct !== cfg.tpPct) {
+          this.log.info(`Using suggested TP ${openTpPct}% (manual was ${cfg.tpPct ?? '—'}%)`)
         }
+
+        // ATR-based stops for custom strategies: derive SL%/TP% (and risk-based
+        // size) from ATR at the signal bar (index length-2). Distances are
+        // expressed as a % of the reference close so placeOrder's fill-relative
+        // bracket keeps the ATR×mult distance proportionally. Guarded so
+        // built-in bots and %-stop custom bots are untouched.
+        if ((cfg.strategyId as string) === 'custom' && cfg.customStrategyId) {
+          const spec = loadSpec(cfg.customStrategyId, this.userId)
+          if (spec && spec.stopMode === 'atr') {
+            const len = Math.max(2, Math.floor(spec.atrLength ?? 14))
+            const mult = spec.atrMult ?? 2
+            const rr = spec.rr ?? 2
+            const idx = candles.length - 2 // last closed bar = the signal bar
+            const atrVal = atr(candles.map((c) => c.high), candles.map((c) => c.low), candles.map((c) => c.close), len)[idx]
+            const refPx = candles[idx]?.close ?? 0
+            if (Number.isFinite(atrVal) && atrVal > 0 && refPx > 0) {
+              const slPct = (atrVal * mult / refPx) * 100
+              openSlPct = slPct
+              openTpPct = slPct * rr
+              if (cfg.riskUsd && cfg.riskUsd > 0) openSize = (cfg.riskUsd / (slPct / 100)) / refPx
+              this.log.info(`ATR stop: ATR(${len})=${atrVal.toFixed(2)} ×${mult} → SL ${slPct.toFixed(2)}% / TP ${(slPct * rr).toFixed(2)}% (RR ${rr})${cfg.riskUsd ? ` · size ${openSize.toFixed(6)}` : ''}`)
+            } else {
+              this.log.warn('ATR stop: ATR unavailable on signal bar — using configured SL/TP')
+            }
+          }
+        }
+
         const result = await placeOrder({
           asset: cfg.asset,
           side: openSide,
-          size: tradeSize,
+          size: openSize,
           orderType: 'market',
           maxSlippagePct: cfg.slippagePct,
-          tpPct: effectiveTpPct,
-          slPct: cfg.slPct,
+          tpPct: openTpPct,
+          slPct: openSlPct,
         }, this.creds)
         if (result.filled) {
           this.tradesExecuted++
