@@ -74,6 +74,23 @@ export class MetalJam {
     }
   }
 
+  // One-shot cymbal crash for a winning-trade reaction. Only audible while the
+  // riff is playing (otherwise there's no live AudioContext / user gesture).
+  crash(): void {
+    if (!this.playing || !this.ctx || !this.master || !this.noiseBuf) return
+    const t = this.ctx.currentTime
+    const src = this.ctx.createBufferSource()
+    src.buffer = this.noiseBuf
+    const hp = this.ctx.createBiquadFilter()
+    hp.type = 'highpass'
+    hp.frequency.value = 5000
+    const g = this.ctx.createGain()
+    g.gain.setValueAtTime(0.5, t)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9)
+    src.connect(hp); hp.connect(g); g.connect(this.master)
+    src.start(t); src.stop(t + 0.95)
+  }
+
   setVolume(v: number): void {
     this.volume = Math.max(0, Math.min(1, v))
     if (this.master && this.ctx) {

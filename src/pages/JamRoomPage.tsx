@@ -24,10 +24,15 @@ interface BandCat {
   id: string
   label: string
   sub: string
+  coin: string
   mood: CatMood
   instrument: Instrument
   color: string
 }
+
+// One-shot reaction fired when a coin's P&L flips or a position closes.
+interface Fx { kind: 'win' | 'loss'; at: number }
+const FX_MS = 1500
 
 const CAT_COLORS = ['#e8843c', '#9aa7b2', '#6ab04c', '#e056fd', '#f6c945', '#4aa3df', '#d35400', '#bdc3c7']
 const INSTRUMENTS: Instrument[] = ['guitar', 'drums', 'bass', 'mic']
@@ -47,6 +52,36 @@ function toCoin(s: string): string {
 
 function rigClass(mood: CatMood): string {
   return mood === 'rock' ? 'cat-rock' : mood === 'idle' ? 'cat-idle' : mood === 'sad' ? 'cat-sad' : 'cat-sleep'
+}
+
+// Speech-bubble text. During a reaction it shows the event; otherwise the mood.
+function bubbleText(mood: CatMood, pnl: number, fx: Fx | null): string {
+  if (fx) return fx.kind === 'win' ? 'WIN! 🎸' : 'ouch… 😿'
+  if (mood === 'sleep') return 'zzz'
+  if (mood === 'rock') return `+$${pnl.toFixed(2)} 🤘`
+  if (mood === 'sad') return `−$${Math.abs(pnl).toFixed(2)} 😿`
+  return 'watching 👀'
+}
+
+function JamBubble({ text }: { text: string }) {
+  return (
+    <div key={text} className="jam-bubble relative mb-1 whitespace-nowrap rounded-md border border-border bg-panel px-1.5 py-0.5 font-mono text-[9px] font-bold text-text shadow-lg">
+      {text}
+      <span className="absolute left-1/2 top-full -translate-x-1/2 border-[4px] border-transparent border-t-panel" />
+    </div>
+  )
+}
+
+const CONFETTI_COLORS = ['#f6c945', '#e84bd0', '#4aa3df', '#6ab04c', '#ef5350']
+function Confetti() {
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-0 z-30 h-0 w-0">
+      {Array.from({ length: 10 }).map((_, i) => (
+        <span key={i} className="confetti-bit absolute block h-1.5 w-1.5 rounded-[1px]"
+          style={{ left: `${Math.random() * 44 - 22}px`, background: CONFETTI_COLORS[i % CONFETTI_COLORS.length], animationDelay: `${Math.random() * 0.3}s` }} />
+      ))}
+    </div>
+  )
 }
 
 // Probe a list of candidate URLs, resolve the first that actually loads.
@@ -77,6 +112,12 @@ export default function JamRoomPage() {
   const jamRef = useRef<MetalJam | null>(null)
   const [playing, setPlaying] = useState(false)
   const [volume, setVolume] = useState(0.5)
+
+  // Live trade reactions: remember each coin's last P&L sign so we can fire a
+  // win/loss pop when it flips or the position closes. Keyed by coin.
+  const [fx, setFx] = useState<Record<string, Fx>>({})
+  const prevSignRef = useRef<Record<string, number>>({})
+  const initedRef = useRef(false)
 
   // Probe for user-supplied art once on mount.
   useEffect(() => {
@@ -111,6 +152,34 @@ export default function JamRoomPage() {
           const c = toCoin(p.asset)
           map[c] = (map[c] ?? 0) + (Number(p.unrealizedPnl) || 0)
         }
+
+        // Detect win/loss transitions vs the previous poll. A vanished position
+        // means a close — we react by its LAST-seen sign (realized pnl is gone
+        // from /api/account, so the remembered unrealized sign is the signal).
+        const sign = (v: number) => (v > PNL_EPS ? 1 : v < -PNL_EPS ? -1 : 0)
+        const curSigns: Record<string, number> = {}
+        for (const c in map) curSigns[c] = sign(map[c])
+        if (initedRef.current) {
+          const prev = prevSignRef.current
+          const events: Record<string, Fx> = {}
+          const now = Date.now()
+          for (const c of new Set([...Object.keys(prev), ...Object.keys(curSigns)])) {
+            const ps = prev[c] ?? 0
+            const cs = c in curSigns ? curSigns[c] : 'gone' as const
+            if (cs === 'gone') {
+              if (ps === 1) events[c] = { kind: 'win', at: now }
+              else if (ps === -1) events[c] = { kind: 'loss', at: now }
+            } else if (cs === 1 && ps !== 1) events[c] = { kind: 'win', at: now }
+            else if (cs === -1 && ps !== -1) events[c] = { kind: 'loss', at: now }
+          }
+          if (Object.keys(events).length) {
+            setFx((f) => ({ ...f, ...events }))
+            if (Object.values(events).some((e) => e.kind === 'win')) jamRef.current?.crash()
+          }
+        }
+        prevSignRef.current = curSigns
+        initedRef.current = true
+
         setSignalBots(sig)
         setGridBots(grid)
         setPnlByCoin(map)
@@ -126,6 +195,20 @@ export default function JamRoomPage() {
 
   useEffect(() => () => { jamRef.current?.dispose() }, [])
 
+  // Clear reactions once they've played, so cats return to their mood loop.
+  useEffect(() => {
+    if (Object.keys(fx).length === 0) return
+    const t = setTimeout(() => {
+      setFx((cur) => {
+        const now = Date.now()
+        const next: Record<string, Fx> = {}
+        for (const k in cur) if (now - cur[k].at < FX_MS) next[k] = cur[k]
+        return next
+      })
+    }, FX_MS + 100)
+    return () => clearTimeout(t)
+  }, [fx])
+
   const moodFor = (running: boolean, coin: string): CatMood => {
     if (!running) return 'sleep'
     const pnl = pnlByCoin[coin] ?? 0
@@ -139,13 +222,13 @@ export default function JamRoomPage() {
     let i = 0
     for (const b of signalBots) {
       const coin = toCoin(b.symbol)
-      all.push({ id: `s-${b.id}`, label: b.name || coin, sub: `${coin} · signal`,
+      all.push({ id: `s-${b.id}`, label: b.name || coin, sub: `${coin} · signal`, coin,
         mood: moodFor(b.running, coin), instrument: INSTRUMENTS[i % INSTRUMENTS.length], color: CAT_COLORS[i % CAT_COLORS.length] })
       i++
     }
     for (const b of gridBots) {
       const coin = toCoin(b.asset)
-      all.push({ id: `g-${b.id}`, label: b.name || coin, sub: `${coin} · grid`,
+      all.push({ id: `g-${b.id}`, label: b.name || coin, sub: `${coin} · grid`, coin,
         mood: moodFor(b.running, coin), instrument: INSTRUMENTS[i % INSTRUMENTS.length], color: CAT_COLORS[i % CAT_COLORS.length] })
       i++
     }
@@ -232,13 +315,20 @@ export default function JamRoomPage() {
         {useImgRoom && cats.slice(0, IMG_SLOTS.length).map((c, i) => {
           const s = IMG_SLOTS[i]
           const url = moodImg(c.mood)
+          const pnl = pnlByCoin[c.coin] ?? 0
+          const f = fx[c.coin]
+          const fxOn = !!f && Date.now() - f.at < FX_MS
           return (
             <div key={c.id} className="absolute flex flex-col items-center"
               style={{ left: `${s.l}%`, top: `${s.t}%`, width: `${s.w}%`, transform: 'translate(-50%,-100%)', zIndex: Math.round(s.t) }}>
-              <div className={`cat-rig ${rigClass(c.mood)} w-full`}>
-                {url
-                  ? <img src={url} alt={c.label} className="block w-full drop-shadow-[0_2px_0_rgba(0,0,0,0.4)]" style={{ imageRendering: 'pixelated' }} />
-                  : <PixelCat mood={c.mood} instrument={c.instrument} color={c.color} beatMs={beatMs} label="" />}
+              <JamBubble text={bubbleText(c.mood, pnl, fxOn ? f : null)} />
+              <div className="relative w-full">
+                {fxOn && f.kind === 'win' && <Confetti />}
+                <div className={`w-full ${fxOn ? (f.kind === 'win' ? 'cat-fx-win' : 'cat-fx-loss') : `cat-rig ${rigClass(c.mood)}`}`}>
+                  {url
+                    ? <img src={url} alt={c.label} className="block w-full drop-shadow-[0_2px_0_rgba(0,0,0,0.4)]" style={{ imageRendering: 'pixelated' }} />
+                    : <PixelCat mood={c.mood} instrument={c.instrument} color={c.color} beatMs={beatMs} label="" />}
+                </div>
               </div>
               <div className="mt-0.5 max-w-[120px] truncate text-center font-mono text-[10px] font-bold text-text drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
                 {c.label}
@@ -251,11 +341,18 @@ export default function JamRoomPage() {
         {!useImgRoom && cats.slice(0, CAT_SLOTS.length).map((c, i) => {
           const slot = CAT_SLOTS[i]
           const p = iso(slot.x, slot.y, 0)
+          const pnl = pnlByCoin[c.coin] ?? 0
+          const f = fx[c.coin]
+          const fxOn = !!f && Date.now() - f.at < FX_MS
           return (
-            <div key={c.id} className="absolute"
+            <div key={c.id} className="absolute flex flex-col items-center"
               style={{ left: `${(p.x / VIEW_W) * 100}%`, top: `${(p.y / VIEW_H) * 100}%`,
-                transform: 'translate(-50%, -86%) scale(0.82)', zIndex: 10 + Math.round((slot.x + slot.y) * 10) }}>
-              <PixelCat mood={c.mood} instrument={c.instrument} color={c.color} beatMs={beatMs} label={c.label} sub={c.sub} />
+                transform: 'translate(-50%, -92%)', zIndex: 10 + Math.round((slot.x + slot.y) * 10) }}>
+              <JamBubble text={bubbleText(c.mood, pnl, fxOn ? f : null)} />
+              <div className="relative" style={{ transform: 'scale(0.82)' }}>
+                {fxOn && f.kind === 'win' && <Confetti />}
+                <PixelCat mood={c.mood} instrument={c.instrument} color={c.color} beatMs={beatMs} label={c.label} sub={c.sub} />
+              </div>
             </div>
           )
         })}
