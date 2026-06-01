@@ -58,6 +58,8 @@ interface StrategyMeta {
 type TradeSide = 'both' | 'buy' | 'sell'
 interface SignalBotConfig {
   symbol: string; timeframe: string; strategyId: string
+  // Set when strategyId === 'custom' — points at a Strategy Builder spec.
+  customStrategyId?: string
   params: Record<string, number>; asset: string; size: number
   slippagePct: number; cooldownSec: number; tradeSide: TradeSide
   tpPct?: number; slPct?: number
@@ -735,6 +737,28 @@ export default function SignalBotsPage() {
   const running = status?.running ?? false
   const selectedMeta = strategies.find(s => s.id === cfg?.strategyId)
 
+  // For custom (Strategy Builder) bots, fetch the spec so we can show what the
+  // bot actually trades — direction, ATR/% stops, condition counts — since
+  // those live in the spec, not the bot config.
+  interface CustomSpecInfo {
+    name: string
+    direction?: 'long' | 'short' | 'both'
+    stopMode?: 'pct' | 'atr'
+    atrMult?: number; rr?: number; atrLength?: number
+    entryLong?: { conditions: unknown[] }; entryShort?: { conditions: unknown[] }
+  }
+  const [customSpec, setCustomSpec] = useState<CustomSpecInfo | null>(null)
+  const customId = cfg?.strategyId === 'custom' ? cfg.customStrategyId : undefined
+  useEffect(() => {
+    if (!customId) { setCustomSpec(null); return }
+    let cancelled = false
+    apiFetch(`/api/builder/strategies/${customId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((s: CustomSpecInfo | null) => { if (!cancelled) setCustomSpec(s) })
+      .catch(() => { if (!cancelled) setCustomSpec(null) })
+    return () => { cancelled = true }
+  }, [customId])
+
   // Default blank config for new bots
   function blankCfg(): SignalBotConfig {
     const firstStrat = strategies[0]
@@ -1296,9 +1320,15 @@ export default function SignalBotsPage() {
 
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Strategy">
-                  <select disabled={running} value={cfg.strategyId} onChange={(e) => onStrategyChange(e.target.value)} className={inputCls}>
-                    {strategies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+                  {cfg.strategyId === 'custom' ? (
+                    <div className={`${inputCls} flex items-center`} title="Built in the Strategy Builder">
+                      {customSpec?.name ?? 'Custom (Builder)'}
+                    </div>
+                  ) : (
+                    <select disabled={running} value={cfg.strategyId} onChange={(e) => onStrategyChange(e.target.value)} className={inputCls}>
+                      {strategies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  )}
                 </Field>
                 <Field label="Timeframe">
                   <select disabled={running} value={cfg.timeframe} onChange={(e) => patch({ timeframe: e.target.value })} className={inputCls}>
@@ -1306,6 +1336,32 @@ export default function SignalBotsPage() {
                   </select>
                 </Field>
               </div>
+
+              {/* Read-only summary for custom (Builder) strategies — direction,
+                  stops, condition counts all live in the spec, not the config. */}
+              {cfg.strategyId === 'custom' && (
+                <div className="rounded-lg border border-brand/30 bg-brand/5 p-2.5 text-[11px] space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-text">⚙ Custom strategy · {customSpec?.name ?? '…'}</span>
+                    <a href="/builder" className="text-brand hover:underline text-[10px] whitespace-nowrap">Edit in Builder →</a>
+                  </div>
+                  <div className="text-dim">
+                    Direction: <span className="text-text">{cfg.tradeSide === 'both' ? 'Long & Short' : cfg.tradeSide === 'sell' ? 'Short only' : 'Long only'}</span>
+                    {' · '}Stops: <span className="text-text">{
+                      customSpec?.stopMode === 'atr'
+                        ? `ATR(${customSpec.atrLength ?? 14})×${customSpec.atrMult ?? 2} · ${customSpec.rr ?? 2}R`
+                        : (cfg.slPct || cfg.tpPct) ? `Fixed SL ${cfg.slPct ?? 0}% / TP ${cfg.tpPct ?? 0}%` : 'set in Builder'
+                    }</span>
+                  </div>
+                  <div className="text-dim">
+                    Entry conditions: {customSpec?.entryLong?.conditions.length ?? 0} long
+                    {customSpec?.entryShort?.conditions.length ? ` · ${customSpec.entryShort.conditions.length} short` : ''}
+                  </div>
+                  {customSpec?.stopMode === 'atr' && (
+                    <div className="text-dim/70 text-[10px]">SL/TP and position size are computed from ATR per trade (Risk $ below). The TP/SL % fields don’t apply.</div>
+                  )}
+                </div>
+              )}
 
               {selectedMeta?.description && (
                 <p className="text-[10px] leading-relaxed text-dim">{selectedMeta.description}</p>
