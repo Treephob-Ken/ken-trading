@@ -104,14 +104,16 @@ function newEmptySpec(): CustomStrategySpec {
 }
 
 // Ready-made "Breakout + Volume Filter, follow-trend" strategy (the YouTube
-// setup): long only above EMA-200, enter when close breaks the upper Bollinger
-// Band on above-average volume, stop = ATR(14)×2, take-profit at 2R.
+// setup), two-sided: above EMA-200 go long on an upper-band breakout with a
+// volume spike; below EMA-200 go short on a lower-band breakdown with a volume
+// spike. Stop = ATR(14)×2, take-profit at 2R. Long & Short = always-in-market
+// (the opposite breakout flips the position), exits handled by the stops.
 function breakoutVolumeTemplate(): CustomStrategySpec {
   const s = (id: SeriesId, params: Record<string, number> = {}): SeriesRef => ({ id, params })
   return {
     id: nextId(),
     name: 'Breakout + Volume Filter',
-    direction: 'long',
+    direction: 'both',
     entryLong: {
       combinator: 'ALL',
       conditions: [
@@ -121,6 +123,15 @@ function breakoutVolumeTemplate(): CustomStrategySpec {
       ],
     },
     exitLong: { combinator: 'ANY', conditions: [] }, // exit via ATR stop / take-profit only
+    entryShort: {
+      combinator: 'ALL',
+      conditions: [
+        { kind: 'state', id: nextId(), a: s('price'), op: 'below', b: s('ema', { length: 200 }) },
+        { kind: 'cross', id: nextId(), a: s('price'), op: 'crossDown', b: s('bb_lower', { length: 20, mult: 2 }) },
+        { kind: 'state', id: nextId(), a: s('volume'), op: 'above', b: s('volume_ma', { length: 20 }) },
+      ],
+    },
+    exitShort: { combinator: 'ANY', conditions: [] },
     stopMode: 'atr',
     atrLength: 14,
     atrMult: 2,
@@ -313,7 +324,7 @@ export default function BuilderPage() {
           <button type="button" onClick={newStrategy} disabled={busy} className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50">
             <Plus className="h-3 w-3" /> New
           </button>
-          <button type="button" onClick={() => { setSpec(breakoutVolumeTemplate()); setResult(null); setNotice('Loaded the Breakout + Volume Filter template (EMA-200 trend, BB breakout, volume filter, ATR×2 stop, 2R).') }} disabled={busy} className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50" title="Load the Breakout + Volume Filter strategy">
+          <button type="button" onClick={() => { setSpec(breakoutVolumeTemplate()); setResult(null); setNotice('Loaded Breakout + Volume Filter (Long & Short): long above EMA-200 on upper-band breakout, short below on lower-band breakdown, both with a volume spike · ATR×2 stop · 2R.') }} disabled={busy} className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50" title="Load the Breakout + Volume Filter strategy (long & short)">
             <Hammer className="h-3 w-3" /> Breakout+Vol
           </button>
           <button type="button" onClick={savePreset} disabled={busy} className="flex items-center gap-1 rounded-md border border-brand/40 bg-brand/10 px-2 py-1 text-[11px] text-brand hover:bg-brand/15 disabled:opacity-50">
