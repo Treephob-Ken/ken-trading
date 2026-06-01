@@ -154,7 +154,7 @@ components:
     rounded: "{rounded.md}"
   button-primary-disabled:
     backgroundColor: "{colors.primary-disabled}"
-    textColor: "{colors.muted}"
+    textColor: "{colors.border-strong}"
     rounded: "{rounded.md}"
   button-primary-pill:
     backgroundColor: "{colors.primary}"
@@ -180,13 +180,13 @@ components:
     typography: "{typography.button}"
   button-trading-up:
     backgroundColor: "{colors.trading-up}"
-    textColor: "{colors.on-dark}"
+    textColor: "{colors.ink}"
     typography: "{typography.button}"
     rounded: "{rounded.sm}"
     padding: 8px 20px
   button-trading-down:
     backgroundColor: "{colors.trading-down}"
-    textColor: "{colors.on-dark}"
+    textColor: "{colors.ink}"
     typography: "{typography.button}"
     rounded: "{rounded.sm}"
     padding: 8px 20px
@@ -316,7 +316,7 @@ components:
     rounded: "{rounded.lg}"
     padding: 24px
   conversion-cell:
-    backgroundColor: transparent
+    backgroundColor: "{colors.canvas-light}"
     textColor: "{colors.body-on-light}"
     typography: "{typography.body-md}"
   trader-row:
@@ -329,6 +329,43 @@ components:
     textColor: "{colors.body-on-light}"
     typography: "{typography.body-md}"
     padding: 64px
+  nav-dropdown-dark:
+    backgroundColor: "{colors.surface-elevated-dark}"
+    textColor: "{colors.on-dark}"
+    typography: "{typography.nav-link}"
+    rounded: "{rounded.lg}"
+    padding: 8px 16px
+  input-muted-light:
+    backgroundColor: "{colors.surface-strong-light}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.md}"
+    padding: 10px 16px
+  markets-column-header:
+    backgroundColor: transparent
+    textColor: "{colors.muted-strong}"
+    typography: "{typography.caption}"
+  button-check-now:
+    backgroundColor: "{colors.accent-turquoise}"
+    textColor: "{colors.ink}"
+    typography: "{typography.button}"
+    rounded: "{rounded.md}"
+    padding: 8px 20px
+  badge-info:
+    backgroundColor: "{colors.canvas-dark}"
+    textColor: "{colors.info}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.sm}"
+    padding: 2px 8px
+  skeleton-block:
+    backgroundColor: "{colors.muted}"
+    rounded: "{rounded.sm}"
+  focus-ring:
+    backgroundColor: "{colors.info-ring}"
+  divider-on-dark:
+    backgroundColor: "{colors.hairline-on-dark}"
+  divider-on-light:
+    backgroundColor: "{colors.hairline-on-light}"
 ---
 
 ## Overview

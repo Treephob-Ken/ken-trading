@@ -273,84 +273,12 @@
   }
 }
 
-/* ── Jam Room — pixel-cat band animations ──────────────────────────────
-   Each cat's mood maps to one of these. Headbang speed is driven by the
-   --beat custom property (set from the metal riff's BPM) so the band nods
-   in time with the music.
-─────────────────────────────────────────────────────────────────────── */
-.cat-rig { transform-origin: 50% 100%; }
-.cat-rock  { animation: cat-headbang var(--beat, 420ms) ease-in-out infinite; }
-.cat-idle  { animation: cat-breathe 2.6s ease-in-out infinite; }
-.cat-sad   { animation: cat-sway 3.4s ease-in-out infinite; transform: translateY(2px); }
-.cat-sleep { animation: cat-breathe 4.2s ease-in-out infinite; }
-
-@keyframes cat-headbang {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  45%      { transform: translateY(3px) rotate(-9deg); }
-  55%      { transform: translateY(3px) rotate(-9deg); }
-}
-@keyframes cat-breathe {
-  0%, 100% { transform: scaleY(1); }
-  50%      { transform: scaleY(1.05); }
-}
-@keyframes cat-sway {
-  0%, 100% { transform: translateY(2px) rotate(-3deg); }
-  50%      { transform: translateY(2px) rotate(3deg); }
-}
-@keyframes zzz-float {
-  0%   { opacity: 0; transform: translateY(2px) scale(0.8); }
-  25%  { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-14px) scale(1.1); }
-}
-.zzz { animation: zzz-float 2.4s ease-out infinite; }
-@keyframes note-float {
-  0%   { opacity: 0; transform: translateY(0) translateX(0); }
-  20%  { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-22px) translateX(8px); }
-}
-.jam-note { animation: note-float 1.6s ease-out infinite; }
-@keyframes stage-flicker {
-  0%, 100% { opacity: 0.85; }
-  50%      { opacity: 1; }
-}
-.stage-light { animation: stage-flicker 2.2s ease-in-out infinite; }
-
-/* One-shot trade reactions (win = jump + squash, loss = shake). These override
-   the looping mood animation while active. */
-.cat-fx-win  { animation: cat-pop 0.6s ease-out 2; }
-.cat-fx-loss { animation: cat-shake 0.45s ease-in-out 2; }
-@keyframes cat-pop {
-  0%   { transform: translateY(0) scaleX(1) scaleY(1); }
-  25%  { transform: translateY(-16px) scaleX(0.9) scaleY(1.12); }
-  55%  { transform: translateY(0) scaleX(1.12) scaleY(0.9); }
-  100% { transform: translateY(0) scaleX(1) scaleY(1); }
-}
-@keyframes cat-shake {
-  0%, 100% { transform: translateX(0) rotate(0deg); }
-  20% { transform: translateX(-3px) rotate(-4deg); }
-  40% { transform: translateX(3px) rotate(4deg); }
-  60% { transform: translateX(-2px) rotate(-2deg); }
-  80% { transform: translateX(2px) rotate(2deg); }
-}
-@keyframes confetti-fall {
-  0%   { opacity: 1; transform: translateY(-6px) rotate(0deg); }
-  100% { opacity: 0; transform: translateY(34px) rotate(220deg); }
-}
-.confetti-bit { animation: confetti-fall 1.1s ease-in forwards; }
-@keyframes bubble-pop {
-  0%   { opacity: 0; transform: translateY(4px) scale(0.85); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
-}
-.jam-bubble { animation: bubble-pop 0.25s ease-out; }
-
 /* ── Accessibility: reduced motion ─────────────────────────────────────
    Kill our refresh-spin, hover-grow and any view-transitions for users
    who request it. The chart library has its own internal animations.
 ─────────────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .animate-spin { animation: none !important; }
-  .cat-rock, .cat-idle, .cat-sad, .cat-sleep,
-  .zzz, .jam-note, .stage-light { animation: none !important; }
   *, *::before, *::after { transition-duration: 0.01ms !important; }
   ::view-transition-group(*),
   ::view-transition-old(*),
