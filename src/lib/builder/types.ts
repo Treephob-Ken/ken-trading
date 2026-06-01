@@ -142,6 +142,9 @@ export interface CustomStrategySpec {
   atrMult?: number
   rr?: number
   riskPct?: number
+  // $ risked per trade when deployed live (drives ATR/risk position sizing).
+  // Saved with the preset so reloading restores it.
+  riskUsd?: number
 
   // Bookkeeping (set server-side on save).
   createdAt?: number

@@ -63,6 +63,7 @@ export interface CustomStrategySpec {
   atrMult?: number
   rr?: number
   riskPct?: number
+  riskUsd?: number
   createdAt?: number
   updatedAt?: number
 }

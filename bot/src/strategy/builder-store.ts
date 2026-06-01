@@ -59,16 +59,26 @@ export function saveSpec(spec: CustomStrategySpec, userId?: string): CustomStrat
   spec.updatedAt = now
   if (!spec.createdAt) spec.createdAt = now
   // Minimal hardening: keep only known fields, no random bloat from clients.
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
   const clean: CustomStrategySpec = {
     id: spec.id,
     name: (spec.name ?? 'Untitled').toString().slice(0, 100),
     description: spec.description?.toString().slice(0, 500),
+    direction: spec.direction === 'short' || spec.direction === 'both' ? spec.direction : 'long',
     entryLong: spec.entryLong,
     exitLong: spec.exitLong,
     entryShort: spec.entryShort,
     exitShort: spec.exitShort,
-    tpPct: typeof spec.tpPct === 'number' ? spec.tpPct : undefined,
-    slPct: typeof spec.slPct === 'number' ? spec.slPct : undefined,
+    tpPct: num(spec.tpPct),
+    slPct: num(spec.slPct),
+    // ATR-stop + risk fields — must be persisted or deploy/scan from a saved
+    // preset would silently drop the ATR stops, direction and risk sizing.
+    stopMode: spec.stopMode === 'atr' ? 'atr' : 'pct',
+    atrLength: num(spec.atrLength),
+    atrMult: num(spec.atrMult),
+    rr: num(spec.rr),
+    riskPct: num(spec.riskPct),
+    riskUsd: num(spec.riskUsd),
     createdAt: spec.createdAt,
     updatedAt: spec.updatedAt,
   }
