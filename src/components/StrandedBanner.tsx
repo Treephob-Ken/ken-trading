@@ -155,7 +155,7 @@ export default function StrandedBanner({
           type="button"
           onClick={onResume}
           disabled={busy !== null}
-          className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-bg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Play className="h-3.5 w-3.5" />
           {busy === 'resume' ? 'Resuming…' : 'Resume bot'}

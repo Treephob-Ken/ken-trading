@@ -562,7 +562,7 @@ export default function BacktesterPage({
                 )
                 navigate('/signal')
               }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-bg hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               title={canDeploy ? undefined : 'Set Stop Loss % above before deploying'}
             >
               <Rocket className="h-4 w-4" />

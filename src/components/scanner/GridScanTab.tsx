@@ -294,7 +294,7 @@ export default function GridScanTab({
             type="button"
             onClick={start}
             disabled={universe.length === 0}
-            className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-bg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Play className="h-4 w-4" />
             {rows.length > 0 ? 'Re-scan' : 'Scan'}

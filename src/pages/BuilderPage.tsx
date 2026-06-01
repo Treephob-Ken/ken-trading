@@ -273,7 +273,7 @@ export default function BuilderPage() {
           <button type="button" onClick={savePreset} disabled={busy} className="flex items-center gap-1 rounded-md border border-brand/40 bg-brand/10 px-2 py-1 text-[11px] text-brand hover:bg-brand/15 disabled:opacity-50">
             <Save className="h-3 w-3" /> Save
           </button>
-          <button type="button" onClick={runBacktestNow} disabled={busy} className="flex items-center gap-1 rounded-md bg-brand px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
+          <button type="button" onClick={runBacktestNow} disabled={busy} className="flex items-center gap-1 rounded-md bg-brand px-3 py-1 text-[11px] font-semibold text-bg hover:opacity-90 disabled:opacity-50">
             <Play className="h-3 w-3" /> Backtest
           </button>
           <button type="button" onClick={deployAsBot} disabled={busy} className="flex items-center gap-1 rounded-md border border-gain/40 bg-gain/10 px-2 py-1 text-[11px] text-gain hover:bg-gain/15 disabled:opacity-50">

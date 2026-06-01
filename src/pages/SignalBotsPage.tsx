@@ -1709,7 +1709,7 @@ export default function SignalBotsPage() {
                 type="button"
                 disabled={running || busy || (!dirty && !isNew)}
                 onClick={saveConfig}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 <Save className="h-3.5 w-3.5" />
                 {isNew ? 'Create Bot' : dirty ? 'Save Config' : 'Saved'}
@@ -1884,7 +1884,7 @@ export default function SignalBotsPage() {
               <button
                 type="button"
                 onClick={startNew}
-                className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white mx-auto hover:opacity-90 transition-opacity"
+                className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-bg mx-auto hover:opacity-90 transition-opacity"
               >
                 <Plus className="h-4 w-4" /> New Signal Bot
               </button>

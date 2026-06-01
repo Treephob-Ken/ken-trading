@@ -35,7 +35,7 @@ const RANGES: { key: RangeKey; label: string }[] = [
 const segWrap = 'flex items-center rounded-xl border border-border bg-panel-2 p-0.5'
 const segBtn = (active: boolean) =>
   `rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
-    active ? 'bg-brand text-white' : 'text-dim hover:text-text'
+    active ? 'bg-brand text-bg' : 'text-dim hover:text-text'
   }`
 
 export default function FiltersBar({ state, onChange, bots, assets, showResult }: Props) {

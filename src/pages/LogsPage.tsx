@@ -248,7 +248,7 @@ export default function LogsPage() {
               title={t.hint}
               onClick={() => transition(() => setTab(t.id))}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                tab === t.id ? 'bg-brand text-white' : 'text-dim hover:text-text'
+                tab === t.id ? 'bg-brand text-bg' : 'text-dim hover:text-text'
               }`}
             >
               {t.label}

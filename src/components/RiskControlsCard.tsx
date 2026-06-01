@@ -199,7 +199,7 @@ export default function RiskControlsCard() {
           type="button"
           disabled={busy}
           onClick={save}
-          className="rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           {busy ? 'Saving…' : 'Save settings'}
         </button>

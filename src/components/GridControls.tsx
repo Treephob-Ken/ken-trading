@@ -226,7 +226,7 @@ export default function GridControls(props: GridControlsProps) {
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-dim">Export to Bot</p>
             <button
               onClick={props.onExport}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-brand py-2.5 text-sm font-semibold text-brand transition hover:bg-brand hover:text-white active:scale-[.98]"
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-brand py-2.5 text-sm font-semibold text-brand transition hover:bg-brand hover:text-bg active:scale-[.98]"
             >
               <Download className="h-4 w-4" />
               Download grid.config.json

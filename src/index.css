@@ -5,21 +5,24 @@
 @tailwind utilities;
 
 @layer base {
+  /* Palette mapped from DESIGN.md (Binance design system). Brand = Binance
+     Yellow #FCD535 (black text on yellow), near-black canvas #0b0e11, trading
+     green/red for P&L, turquoise/info as secondary accents. */
   :root {
-    --bg: 0 0% 0%;
-    --panel: 0 0% 4%;
-    --panel-2: 0 0% 9%;
-    --border: 217 20% 16%;
-    --border-strong: 217 20% 24%;
-    --text: 210 20% 94%;
-    --muted: 215 15% 62%;
-    --dim: 215 14% 50%;
-    --brand: 213 94% 65%;
-    --gain: 151 83% 43%;
-    --loss: 358 75% 59%;
+    --bg: 210 21% 5%;        /* canvas-dark   #0b0e11 */
+    --panel: 213 16% 14%;    /* surface-card  #1e2329 */
+    --panel-2: 214 14% 20%;  /* surface-elev  #2b3139 */
+    --border: 214 14% 20%;   /* hairline-dark #2b3139 */
+    --border-strong: 215 13% 28%;
+    --text: 216 16% 93%;     /* body          #eaecef */
+    --muted: 217 11% 60%;    /* muted-strong  #929aa5 */
+    --dim: 216 11% 49%;      /* muted         #707a8a */
+    --brand: 48 97% 60%;     /* Binance yellow #FCD535 */
+    --gain: 157 84% 43%;     /* trading-up    #0ecb81 */
+    --loss: 352 90% 62%;     /* trading-down  #f6465d */
     --warn: 40 96% 53%;
-    --accent: 262 83% 68%;
-    --accent-2: 262 83% 58%;
+    --accent: 177 62% 46%;   /* turquoise     #2dbdb6 */
+    --accent-2: 217 91% 60%; /* info          #3b82f6 */
   }
 
   html,
@@ -86,7 +89,7 @@
 
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold
-           bg-brand text-white transition-all duration-200 hover:opacity-90 active:scale-[0.97]
+           bg-brand text-bg transition-all duration-200 hover:opacity-90 active:scale-[0.97]
            disabled:opacity-40 disabled:cursor-not-allowed shadow-sm;
   }
 

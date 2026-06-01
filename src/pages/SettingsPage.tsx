@@ -194,7 +194,7 @@ export default function SettingsPage() {
             type="button"
             disabled={busy || (!agentKey && !hlUser && !(creds?.hlNetwork !== network))}
             onClick={save}
-            className="flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             <Save className="h-4 w-4" />
             {busy ? 'Saving…' : 'Save Credentials'}
