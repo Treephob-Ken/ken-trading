@@ -159,8 +159,12 @@ export default function BuilderPage() {
   const [symbol, setSymbol] = useState(() => localStorage.getItem('builder_symbol') || 'BTCUSDT')
   const [timeframe, setTimeframe] = useState<string>(() => localStorage.getItem('builder_tf') || '1h')
   const [lookbackDays, setLookbackDays] = useState(90)
+  // $ risked per trade when the bot opens a position (drives ATR risk-sizing,
+  // and %-stop risk-sizing). Set at deploy time; persisted across sessions.
+  const [riskUsd, setRiskUsd] = useState<number>(() => Number(localStorage.getItem('builder_risk_usd')) || 5)
   useEffect(() => { localStorage.setItem('builder_symbol', symbol) }, [symbol])
   useEffect(() => { localStorage.setItem('builder_tf', timeframe) }, [timeframe])
+  useEffect(() => { localStorage.setItem('builder_risk_usd', String(riskUsd)) }, [riskUsd])
 
   const hlSymbols = useHLAssets()
   const [busy, setBusy] = useState(false)
@@ -273,6 +277,7 @@ export default function BuilderPage() {
       const asset = symbol.replace(/USDT$/i, '').replace(/USDC$/i, '').toUpperCase()
       const dir = savedSpec.direction ?? 'long'
       const tradeSide = dir === 'short' ? 'sell' : dir === 'both' ? 'both' : 'buy'
+      const isAtr = savedSpec.stopMode === 'atr'
       const body = {
         name: savedSpec.name,
         symbol,
@@ -282,11 +287,16 @@ export default function BuilderPage() {
         params: {},
         asset,
         size: 0,
+        // Risk-based sizing: $ per trade. With ATR stops the bot derives the
+        // SL%/TP% (and therefore size) from ATR per trade; with %-stops it uses
+        // the fixed slPct/tpPct below. Either way riskUsd drives position size.
+        riskUsd: riskUsd > 0 ? riskUsd : undefined,
         slippagePct: 1,
         cooldownSec: 60,
         tradeSide,
-        tpPct: savedSpec.tpPct ?? 0,
-        slPct: savedSpec.slPct ?? 0,
+        // ATR mode: leave fixed stops at 0 — the bot computes them from ATR.
+        tpPct: isAtr ? 0 : (savedSpec.tpPct ?? 0),
+        slPct: isAtr ? 0 : (savedSpec.slPct ?? 0),
       }
       const res = await apiFetch('/api/signal/bots', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -394,6 +404,7 @@ export default function BuilderPage() {
                 <NumberField label="SL %" value={spec.slPct ?? 0} onChange={(v) => setSpec((s) => ({ ...s, slPct: v || undefined }))} min={0} max={100} step={0.1} />
               </>
             )}
+            <NumberField label="Risk $ / trade (deploy)" value={riskUsd} onChange={setRiskUsd} min={1} max={100000} step={1} />
             {summary && (
               <div className="rounded-md border border-border bg-panel-2 p-2">
                 <div className="text-[10px] text-dim uppercase">Backtest</div>
