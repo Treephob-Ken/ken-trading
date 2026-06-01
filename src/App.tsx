@@ -18,6 +18,7 @@ import KillSwitchBanner from '@/components/KillSwitchBanner'
 
 const MarketStructurePage = lazy(() => import('@/pages/MarketStructurePage'))
 const JamRoomPage = lazy(() => import('@/pages/JamRoomPage'))
+const CommandCenterPage = lazy(() => import('@/pages/CommandCenterPage'))
 
 // ─── Shared layout for auth-gated pages ───────────────────────────────────────
 function AppShell() {
@@ -107,6 +108,13 @@ export default function App() {
           <Route path="structure" element={
             <Suspense fallback={<div className="p-6 text-sm text-dim">Loading…</div>}>
               <MarketStructurePage />
+            </Suspense>
+          } />
+
+          {/* Command Center — pixel/neon ops dashboard wired to live bot data */}
+          <Route path="command" element={
+            <Suspense fallback={<div className="p-6 text-sm text-dim">Loading…</div>}>
+              <CommandCenterPage />
             </Suspense>
           } />
 

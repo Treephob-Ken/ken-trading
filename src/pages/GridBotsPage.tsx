@@ -156,7 +156,10 @@ function GridBotChart({
     })
 
     let cancelled = false
-    fetchKlines({ symbol: `${asset.toUpperCase()}USDT`, interval: timeframe })
+    // HIP-3 dex perps (e.g. "xyz:CRCL") have no Binance pair — pass the coin
+    // name through unchanged so fetchKlines routes it to HL's candle endpoint.
+    const chartSymbol = asset.includes(':') ? asset : `${asset.toUpperCase()}USDT`
+    fetchKlines({ symbol: chartSymbol, interval: timeframe })
       .then((candles) => {
         if (cancelled || !candles.length) return
         candleSeries.setData(

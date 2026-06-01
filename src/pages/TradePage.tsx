@@ -1294,7 +1294,11 @@ function PositionChart({
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    fetchKlines({ symbol: `${asset.toUpperCase()}USDT`, interval: POS_CHART_TF })
+    // HIP-3 dex perps (e.g. "xyz:CRCL") have no Binance pair — pass the coin
+    // name through unchanged so fetchKlines routes it to HL's candle endpoint.
+    // Plain coins get the Binance "{BASE}USDT" shape.
+    const chartSymbol = asset.includes(':') ? asset : `${asset.toUpperCase()}USDT`
+    fetchKlines({ symbol: chartSymbol, interval: POS_CHART_TF })
       .then((data) => { if (!cancelled) { setCandles(data); setLoading(false) } })
       .catch((e: unknown) => {
         if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false) }
