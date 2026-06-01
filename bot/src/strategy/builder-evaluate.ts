@@ -207,20 +207,26 @@ function evalGroup(group: ConditionGroup | undefined, i: number, cache: Cache): 
   return false
 }
 
+// Stateless — emits on every bar a condition is true; the bot's position state
+// dedups (skip when already in side). Mirrors src/lib/builder/evaluate.ts.
+//   long: buy=entryLong, sell=exitLong · short: sell=entryShort, buy=exitShort
+//   both: buy=entryLong, sell=entryShort (opposite entry flips; exits ignored)
 export function evaluateCustomStrategy(spec: CustomStrategySpec, candles: Candle[]): Signal[] {
   const n = candles.length
   const signals: Signal[] = new Array(n).fill(null)
   if (n === 0) return signals
   const cache = buildCache(spec, candles)
-  let pos: 'flat' | 'long' | 'short' = 'flat'
+  const dir = spec.direction ?? 'long'
   for (let i = 0; i < n; i++) {
-    if (pos === 'flat') {
-      if (evalGroup(spec.entryLong, i, cache)) { signals[i] = 'buy'; pos = 'long' }
-      else if (evalGroup(spec.entryShort, i, cache)) { signals[i] = 'sell'; pos = 'short' }
-    } else if (pos === 'long') {
-      if (evalGroup(spec.exitLong, i, cache)) { signals[i] = 'sell'; pos = 'flat' }
+    if (dir === 'long') {
+      if (evalGroup(spec.entryLong, i, cache)) signals[i] = 'buy'
+      else if (evalGroup(spec.exitLong, i, cache)) signals[i] = 'sell'
+    } else if (dir === 'short') {
+      if (evalGroup(spec.entryShort, i, cache)) signals[i] = 'sell'
+      else if (evalGroup(spec.exitShort, i, cache)) signals[i] = 'buy'
     } else {
-      if (evalGroup(spec.exitShort, i, cache)) { signals[i] = 'buy'; pos = 'flat' }
+      if (evalGroup(spec.entryLong, i, cache)) signals[i] = 'buy'
+      else if (evalGroup(spec.entryShort, i, cache)) signals[i] = 'sell'
     }
   }
   return signals

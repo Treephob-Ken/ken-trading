@@ -50,6 +50,7 @@ export interface CustomStrategySpec {
   id: string
   name: string
   description?: string
+  direction?: 'long' | 'short' | 'both'
   entryLong: ConditionGroup
   exitLong:  ConditionGroup
   entryShort?: ConditionGroup

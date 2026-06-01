@@ -283,10 +283,19 @@ function evalGroup(group: ConditionGroup | undefined, i: number, cache: Cache): 
   return false
 }
 
-// Public: compile and run the spec → per-bar Signal stream. Uses a flat
-// state machine — flat / long / short. Entries only fire from flat; exits
-// only from the matching side. This matches how the existing backtest
-// engine interprets signals.
+// Public: compile and run the spec → per-bar Signal stream.
+//
+// STATELESS by design — it emits a signal on every bar a condition is true and
+// lets runBacktest / the bot's position state dedup (open only when flat, skip
+// when already in side). This is how the built-in strategies behave, and it's
+// what makes SL/TP-only strategies (empty exit groups) re-enter after a stop:
+// a stateful machine would stay "long" forever and only ever take one trade.
+//
+// Direction:
+//   long  — buy on entryLong, sell on exitLong
+//   short — sell on entryShort, buy on exitShort
+//   both  — always-in-market: buy on entryLong, sell on entryShort; the
+//           opposite entry flips the position, so exit groups are ignored.
 export function evaluateCustomStrategy(
   spec: CustomStrategySpec,
   candles: Candle[],
@@ -296,28 +305,19 @@ export function evaluateCustomStrategy(
   if (n === 0) return signals
 
   const cache = buildCache(spec, candles)
-  let pos: 'flat' | 'long' | 'short' = 'flat'
+  const dir = spec.direction ?? 'long'
 
   for (let i = 0; i < n; i++) {
-    if (pos === 'flat') {
-      if (evalGroup(spec.entryLong, i, cache)) {
-        signals[i] = 'buy'
-        pos = 'long'
-      } else if (evalGroup(spec.entryShort, i, cache)) {
-        signals[i] = 'sell'
-        pos = 'short'
-      }
-    } else if (pos === 'long') {
-      if (evalGroup(spec.exitLong, i, cache)) {
-        signals[i] = 'sell'
-        pos = 'flat'
-      }
+    if (dir === 'long') {
+      if (evalGroup(spec.entryLong, i, cache)) signals[i] = 'buy'
+      else if (evalGroup(spec.exitLong, i, cache)) signals[i] = 'sell'
+    } else if (dir === 'short') {
+      if (evalGroup(spec.entryShort, i, cache)) signals[i] = 'sell'
+      else if (evalGroup(spec.exitShort, i, cache)) signals[i] = 'buy'
     } else {
-      // short
-      if (evalGroup(spec.exitShort, i, cache)) {
-        signals[i] = 'buy'
-        pos = 'flat'
-      }
+      // both — opposite entry flips; exits handled by stops, not conditions.
+      if (evalGroup(spec.entryLong, i, cache)) signals[i] = 'buy'
+      else if (evalGroup(spec.entryShort, i, cache)) signals[i] = 'sell'
     }
   }
 

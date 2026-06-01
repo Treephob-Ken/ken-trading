@@ -31,6 +31,8 @@ import type { BacktestResult, Candle } from '@/types'
 
 const TIMEFRAMES = ['15m', '30m', '1h', '4h', '1d'] as const
 
+type GroupKey = 'entryLong' | 'exitLong' | 'entryShort' | 'exitShort'
+
 // ── Catalogues — what the user can pick from ─────────────────────────────────
 
 interface SeriesMeta {
@@ -92,6 +94,7 @@ function newEmptySpec(): CustomStrategySpec {
   return {
     id: nextId(),
     name: 'My custom strategy',
+    direction: 'long',
     entryLong: { combinator: 'ALL', conditions: [] },
     exitLong:  { combinator: 'ANY', conditions: [] },
     tpPct: 4,
@@ -108,6 +111,7 @@ function breakoutVolumeTemplate(): CustomStrategySpec {
   return {
     id: nextId(),
     name: 'Breakout + Volume Filter',
+    direction: 'long',
     entryLong: {
       combinator: 'ALL',
       conditions: [
@@ -164,19 +168,23 @@ export default function BuilderPage() {
   useEffect(() => { refreshPresets() }, [])
 
   // ── Mutators ───────────────────────────────────────────────────────────────
-  const updateGroup = (which: 'entryLong' | 'exitLong', mut: (g: ConditionGroup) => ConditionGroup) => {
-    setSpec((s) => ({ ...s, [which]: mut(s[which]) }))
+  // Short groups are optional on the spec; default to an empty group so the
+  // user can build them without a separate "init" step.
+  const emptyGroup = (which: GroupKey): ConditionGroup =>
+    ({ combinator: which.startsWith('exit') ? 'ANY' : 'ALL', conditions: [] })
+  const updateGroup = (which: GroupKey, mut: (g: ConditionGroup) => ConditionGroup) => {
+    setSpec((s) => ({ ...s, [which]: mut(s[which] ?? emptyGroup(which)) }))
   }
-  const addBlock = (which: 'entryLong' | 'exitLong', kind: ConditionBlock['kind']) => {
+  const addBlock = (which: GroupKey, kind: ConditionBlock['kind']) => {
     updateGroup(which, (g) => ({ ...g, conditions: [...g.conditions, newBlock(kind)] }))
   }
-  const removeBlock = (which: 'entryLong' | 'exitLong', id: string) => {
+  const removeBlock = (which: GroupKey, id: string) => {
     updateGroup(which, (g) => ({ ...g, conditions: g.conditions.filter((b) => b.id !== id) }))
   }
-  const replaceBlock = (which: 'entryLong' | 'exitLong', updated: ConditionBlock) => {
+  const replaceBlock = (which: GroupKey, updated: ConditionBlock) => {
     updateGroup(which, (g) => ({ ...g, conditions: g.conditions.map((b) => (b.id === updated.id ? updated : b)) }))
   }
-  const setCombinator = (which: 'entryLong' | 'exitLong', c: Combinator) => {
+  const setCombinator = (which: GroupKey, c: Combinator) => {
     updateGroup(which, (g) => ({ ...g, combinator: c }))
   }
 
@@ -189,10 +197,11 @@ export default function BuilderPage() {
       const candles: Candle[] = await fetchKlines({ symbol, interval: timeframe, startTime: from })
       if (candles.length < 30) throw new Error('Not enough candles in this window — try a longer lookback.')
       const signals = evaluateCustomStrategy(spec, candles)
+      const dir = spec.direction ?? 'long'
       const r = spec.stopMode === 'atr'
         // ATR stops: SL = ATR(14)×atrMult, TP at rr×stop distance, risking riskPct of capital.
-        ? runBacktest(candles, signals, 10_000, 0.001, 'long', 0, 0, 'volatility', spec.riskPct ?? 1, spec.atrMult ?? 2, spec.rr ?? 2)
-        : runBacktest(candles, signals, 10_000, 0.001, 'long', spec.slPct ?? 0, spec.tpPct ?? 0)
+        ? runBacktest(candles, signals, 10_000, 0.001, dir, 0, 0, 'volatility', spec.riskPct ?? 1, spec.atrMult ?? 2, spec.rr ?? 2)
+        : runBacktest(candles, signals, 10_000, 0.001, dir, spec.slPct ?? 0, spec.tpPct ?? 0)
       setResult(r)
       if (r.trades.length === 0) {
         setNotice('Strategy produced 0 trades. Try loosening conditions or different symbol/timeframe.')
@@ -251,6 +260,8 @@ export default function BuilderPage() {
 
       // Create the signal bot but don't auto-start — per the user's pref.
       const asset = symbol.replace(/USDT$/i, '').replace(/USDC$/i, '').toUpperCase()
+      const dir = savedSpec.direction ?? 'long'
+      const tradeSide = dir === 'short' ? 'sell' : dir === 'both' ? 'both' : 'buy'
       const body = {
         name: savedSpec.name,
         symbol,
@@ -262,7 +273,7 @@ export default function BuilderPage() {
         size: 0,
         slippagePct: 1,
         cooldownSec: 60,
-        tradeSide: 'buy',
+        tradeSide,
         tpPct: savedSpec.tpPct ?? 0,
         slPct: savedSpec.slPct ?? 0,
       }
@@ -340,6 +351,15 @@ export default function BuilderPage() {
                 {TIMEFRAMES.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
               </select>
             </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] text-dim uppercase">Direction</span>
+              <select value={spec.direction ?? 'long'} onChange={(e) => setSpec((s) => ({ ...s, direction: e.target.value as 'long' | 'short' | 'both' }))}
+                className="rounded-md border border-border bg-panel-2 px-2 py-1 text-xs text-text outline-none focus:border-brand/60">
+                <option value="long">Long only</option>
+                <option value="short">Short only</option>
+                <option value="both">Long &amp; Short</option>
+              </select>
+            </label>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <NumberField label="Lookback (days)" value={lookbackDays} onChange={setLookbackDays} min={7} max={365} />
@@ -401,19 +421,36 @@ export default function BuilderPage() {
         </div>
       </div>
 
-      {/* Entry / Exit groups */}
-      <GroupCard title="Entry Long" subtitle="Open a long position when…"
-        group={spec.entryLong}
-        onCombinator={(c) => setCombinator('entryLong', c)}
-        onAdd={(k) => addBlock('entryLong', k)}
-        onRemove={(id) => removeBlock('entryLong', id)}
-        onUpdate={(b) => replaceBlock('entryLong', b)} />
-      <GroupCard title="Exit Long" subtitle="Close the long when…"
-        group={spec.exitLong}
-        onCombinator={(c) => setCombinator('exitLong', c)}
-        onAdd={(k) => addBlock('exitLong', k)}
-        onRemove={(id) => removeBlock('exitLong', id)}
-        onUpdate={(b) => replaceBlock('exitLong', b)} />
+      {/* Entry / Exit groups — shown per direction. In 'both', exits are
+          ignored (opposite entry flips), so we hide them. */}
+      {(() => {
+        const dir = spec.direction ?? 'long'
+        const showLong = dir === 'long' || dir === 'both'
+        const showShort = dir === 'short' || dir === 'both'
+        const showExits = dir !== 'both'
+        const eg = (k: GroupKey): ConditionGroup => spec[k] ?? { combinator: k.startsWith('exit') ? 'ANY' : 'ALL', conditions: [] }
+        const card = (k: GroupKey, title: string, subtitle: string) => (
+          <GroupCard title={title} subtitle={subtitle} group={eg(k)}
+            onCombinator={(c) => setCombinator(k, c)}
+            onAdd={(kind) => addBlock(k, kind)}
+            onRemove={(id) => removeBlock(k, id)}
+            onUpdate={(b) => replaceBlock(k, b)} />
+        )
+        return (
+          <>
+            {showLong && card('entryLong', 'Entry Long', 'Open a long position when…')}
+            {showLong && showExits && card('exitLong', 'Exit Long', 'Close the long when…')}
+            {showShort && card('entryShort', 'Entry Short', 'Open a short position when…')}
+            {showShort && showExits && card('exitShort', 'Exit Short', 'Close the short when…')}
+            {dir === 'both' && (
+              <p className="text-[11px] text-dim italic px-1">
+                Long &amp; Short mode is always-in-market: a long signal flips any short (and vice-versa),
+                and stops close trades — so exit-condition groups are hidden.
+              </p>
+            )}
+          </>
+        )
+      })()}
     </main>
   )
 }

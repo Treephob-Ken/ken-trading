@@ -114,8 +114,12 @@ export interface CustomStrategySpec {
   name: string
   description?: string
 
-  // Long side — required. If both entryLong and entryShort are present, the
-  // strategy is two-sided; if entryShort is missing, longs only.
+  // Trade direction. 'long' uses entryLong/exitLong; 'short' uses
+  // entryShort/exitShort; 'both' is always-in-market — the opposite entry
+  // flips the position, so exit groups are ignored (stops close trades).
+  // Missing = 'long' (back-compat with specs saved before this field).
+  direction?: 'long' | 'short' | 'both'
+
   entryLong: ConditionGroup
   exitLong:  ConditionGroup
 
