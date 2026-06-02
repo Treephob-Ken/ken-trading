@@ -155,6 +155,61 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+// Number input that lets you clear/retype freely. While focused it shows a raw
+// string draft (so "", "3.", "0.5" are all editable and the leading zero isn't
+// glued on); on blur it reconciles to the committed value. Empty → undefined.
+function NumInput({ value, onChange, disabled, placeholder, min, step }: {
+  value: number | undefined
+  onChange: (v: number | undefined) => void
+  disabled?: boolean; placeholder?: string; min?: string; step?: string
+}) {
+  const [focused, setFocused] = useState(false)
+  const [draft, setDraft] = useState('')
+  const display = focused ? draft : (value === undefined || Number.isNaN(value) ? '' : String(value))
+  return (
+    <input type="number" inputMode="decimal" disabled={disabled} placeholder={placeholder} min={min} step={step ?? 'any'}
+      className={inputCls}
+      value={display}
+      onFocus={() => { setDraft(value === undefined || Number.isNaN(value) ? '' : String(value)); setFocused(true) }}
+      onBlur={() => setFocused(false)}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        const t = e.target.value.trim()
+        if (t === '') { onChange(undefined); return }
+        const n = Number(t)
+        if (Number.isFinite(n)) onChange(n)
+      }} />
+  )
+}
+
+// Position-size input shown in $ but stored as a coin quantity. Uses a focused
+// draft so editing isn't round-tripped through the live price (which was
+// re-formatting every keystroke and gluing a "0" you couldn't delete).
+function UsdSizeInput({ qty, price, disabled, onQty }: {
+  qty: number; price: number | null; disabled?: boolean; onQty: (q: number) => void
+}) {
+  const [focused, setFocused] = useState(false)
+  const [draft, setDraft] = useState('')
+  const usd = price && price > 0 ? qty * price : qty
+  const display = focused ? draft : (usd > 0 ? (price ? usd.toFixed(2) : String(qty)) : '')
+  return (
+    <input type="number" inputMode="decimal" disabled={disabled} step="any" min="0"
+      className={inputCls}
+      value={display}
+      onFocus={() => { setDraft(usd > 0 ? String(Math.round(usd * 100) / 100) : ''); setFocused(true) }}
+      onBlur={() => setFocused(false)}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        const t = e.target.value.trim()
+        if (t === '') { onQty(0); return }
+        const v = Number(t)
+        if (!Number.isFinite(v)) return
+        const q = price && price > 0 ? v / price : v
+        onQty(parseFloat(q.toFixed(6)))
+      }} />
+  )
+}
+
 // ── Signal chart sub-component ────────────────────────────────────────────────
 
 function SignalChart({ botId, cfg }: { botId: string | null; cfg: SignalBotConfig }) {
@@ -1432,27 +1487,13 @@ export default function SignalBotsPage() {
 
               {!riskMode ? (
                 <Field label="Position Size ($)">
-                  <input
-                    type="number" disabled={running} step="any" min="0"
-                    value={assetPrice ? (cfg.size * assetPrice).toFixed(2) : cfg.size}
-                    onChange={(e) => {
-                      const usd = Number(e.target.value)
-                      // Convert $ → qty using live price so the bot's existing
-                      // size-based logic keeps working.
-                      const qty = assetPrice && assetPrice > 0 ? usd / assetPrice : usd
-                      patch({ size: parseFloat(qty.toFixed(6)) })
-                    }}
-                    className={inputCls}
-                  />
+                  <UsdSizeInput qty={cfg.size} price={assetPrice} disabled={running}
+                    onQty={(q) => patch({ size: q })} />
                 </Field>
               ) : (
                 <Field label="Risk USD">
-                  <input
-                    type="number" disabled={running} step="any" min="0" placeholder="e.g. 50"
-                    value={cfg.riskUsd ?? ''}
-                    onChange={(e) => patch({ riskUsd: e.target.value === '' ? undefined : Number(e.target.value) })}
-                    className={inputCls}
-                  />
+                  <NumInput value={cfg.riskUsd} disabled={running} placeholder="e.g. 50" min="0"
+                    onChange={(v) => patch({ riskUsd: v })} />
                 </Field>
               )}
               <p className="text-[10px] text-dim leading-snug">
@@ -1463,12 +1504,12 @@ export default function SignalBotsPage() {
 
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Slippage %">
-                  <input type="number" disabled={running} step="0.1" min="0"
-                    value={cfg.slippagePct} onChange={(e) => patch({ slippagePct: Number(e.target.value) })} className={inputCls} />
+                  <NumInput value={cfg.slippagePct} disabled={running} min="0" step="0.1"
+                    onChange={(v) => patch({ slippagePct: v ?? 0 })} />
                 </Field>
                 <Field label="Cooldown (s)">
-                  <input type="number" disabled={running} step="1" min="0"
-                    value={cfg.cooldownSec} onChange={(e) => patch({ cooldownSec: Number(e.target.value) })} className={inputCls} />
+                  <NumInput value={cfg.cooldownSec} disabled={running} min="0" step="1"
+                    onChange={(v) => patch({ cooldownSec: v ?? 0 })} />
                 </Field>
                 <Field label="Direction">
                   <select disabled={running} value={cfg.tradeSide} onChange={(e) => patch({ tradeSide: e.target.value as TradeSide })} className={inputCls}>
