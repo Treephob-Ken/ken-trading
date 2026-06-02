@@ -17,6 +17,7 @@ import {
   timeAgo,
 } from '@/lib/scanner/verdict'
 import MarketPulse from '@/components/scanner/MarketPulse'
+import Pager from '@/components/ui/Pager'
 import { useMaxLeverage } from '@/lib/hlAssets'
 
 interface Props {
@@ -37,6 +38,10 @@ type SortKey =
 const ALL_TFS = ['15m', '30m', '1h', '4h', '1d', '1w'] as const
 const LOOKBACK_OPTIONS = [30, 60, 90, 180, 365] as const
 type LookbackDays = typeof LOOKBACK_OPTIONS[number]
+
+// Results table pagination — the combo of coins × timeframes × strategies can
+// produce hundreds of rows, so we page instead of one long scroll.
+const ROWS_PER_PAGE = 25
 
 // Format YYYY-MM-DD from a Date (UTC).
 const fmtDate = (d: Date) => d.toISOString().slice(0, 10)
@@ -118,6 +123,13 @@ export default function IndicatorScanTab({
   })
   const [sortKey, setSortKey] = useState<SortKey>('qualityScore')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // Results table: current page + whether the secondary columns (Calmar /
+  // Funding / Sharpe) are shown. Hidden by default to keep the table readable.
+  const [tablePage, setTablePage] = useState(0)
+  const [showMoreCols, setShowMoreCols] = useState(
+    () => localStorage.getItem('scn_ind_moreCols') === '1',
+  )
+  useEffect(() => { localStorage.setItem('scn_ind_moreCols', showMoreCols ? '1' : '0') }, [showMoreCols])
   // Free-text search across base coin symbol. Persisted so the user doesn't
   // re-type "BTC" every time they navigate away and back.
   const [search, setSearch] = useState<string>(
@@ -231,6 +243,14 @@ export default function IndicatorScanTab({
   const top3 = visible.slice(0, 3)
   const bestPick = visible[0]
   const selectedStratCount = ALL_STRATS.filter((s) => stratFilter[s]).length
+
+  // Pagination of the full results table. Clamp the page if the set shrank, and
+  // reset to page 1 whenever the filtered/sorted set changes.
+  const totalTablePages = Math.max(1, Math.ceil(visible.length / ROWS_PER_PAGE))
+  const tablePageClamped = Math.min(tablePage, totalTablePages - 1)
+  const tableStart = tablePageClamped * ROWS_PER_PAGE
+  const pageRows = visible.slice(tableStart, tableStart + ROWS_PER_PAGE)
+  useEffect(() => { setTablePage(0) }, [rows, minTrades, tfFilter, stratFilter, sortKey, sortDir, search])
 
   // Coin choices for the picker. Prefer the bases that already showed up in
   // the scan results (so the filter only offers things that actually match),
@@ -588,6 +608,18 @@ export default function IndicatorScanTab({
       {/* ── Full results table ──────────────────────────────────────────── */}
       {visible.length > 0 && (
         <div className="card overflow-hidden">
+          {/* Table toolbar: result count + secondary-column toggle */}
+          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+            <span className="text-[10px] text-dim tabular-nums">{visible.length} results</span>
+            <button
+              type="button"
+              onClick={() => setShowMoreCols((v) => !v)}
+              className="rounded-md border border-border bg-panel-2 px-2 py-1 text-[10px] text-dim hover:text-text"
+              title="Show or hide the Calmar, Funding, and Sharpe columns"
+            >
+              {showMoreCols ? 'Fewer columns' : 'More columns'}
+            </button>
+          </div>
           <div className="max-h-[640px] overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-panel-2 text-[10px] uppercase tracking-wider text-muted">
@@ -634,19 +666,23 @@ export default function IndicatorScanTab({
                   >
                     Real-money guess
                   </th>
-                  <th
-                    className="px-3 py-2 text-right"
-                    title="Annualised funding rate on Binance perp. Red if > +50% (crowded longs paying shorts) — strategy will bleed funding even if backtest looks good."
-                  >
-                    Funding
-                  </th>
-                  <th
-                    className="px-3 py-2 text-right cursor-pointer hover:text-text"
-                    onClick={() => headerClick('calmar')}
-                    title="Calmar ratio = annualised return ÷ max drawdown. Higher = more return per unit of pain. >1 is good, >2 is strong."
-                  >
-                    Calmar{sortArrow('calmar')}
-                  </th>
+                  {showMoreCols && (
+                    <th
+                      className="px-3 py-2 text-right"
+                      title="Annualised funding rate on Binance perp. Red if > +50% (crowded longs paying shorts) — strategy will bleed funding even if backtest looks good."
+                    >
+                      Funding
+                    </th>
+                  )}
+                  {showMoreCols && (
+                    <th
+                      className="px-3 py-2 text-right cursor-pointer hover:text-text"
+                      onClick={() => headerClick('calmar')}
+                      title="Calmar ratio = annualised return ÷ max drawdown. Higher = more return per unit of pain. >1 is good, >2 is strong."
+                    >
+                      Calmar{sortArrow('calmar')}
+                    </th>
+                  )}
                   <th
                     className="px-3 py-2 text-right cursor-pointer hover:text-text"
                     onClick={() => headerClick('numTrades')}
@@ -659,23 +695,25 @@ export default function IndicatorScanTab({
                   >
                     Max DD{sortArrow('maxDrawdownPct')}
                   </th>
-                  <th
-                    className="px-3 py-2 text-right cursor-pointer hover:text-text"
-                    onClick={() => headerClick('sharpeRatio')}
-                  >
-                    Sharpe{sortArrow('sharpeRatio')}
-                  </th>
+                  {showMoreCols && (
+                    <th
+                      className="px-3 py-2 text-right cursor-pointer hover:text-text"
+                      onClick={() => headerClick('sharpeRatio')}
+                    >
+                      Sharpe{sortArrow('sharpeRatio')}
+                    </th>
+                  )}
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
-                {visible.map(({ row: r, verdict: v }, i) => (
+                {pageRows.map(({ row: r, verdict: v }, i) => (
                   <tr
                     key={`${r.symbol}-${r.timeframe}-${r.strategyId}`}
                     className="border-t border-border hover:bg-panel-2/60"
                     title={v.reason}
                   >
-                    <td className="px-3 py-2 text-dim font-mono tabular-nums">{i + 1}</td>
+                    <td className="px-3 py-2 text-dim font-mono tabular-nums">{tableStart + i + 1}</td>
                     <td className="px-3 py-2">
                       <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${gradeBg(v.grade)}`}>
                         {v.label}
@@ -791,35 +829,41 @@ export default function IndicatorScanTab({
                         ? '—'
                         : `${realisticEstimatePct(r.totalReturnPct) >= 0 ? '+' : ''}${realisticEstimatePct(r.totalReturnPct).toFixed(1)}%`}
                     </td>
-                    <td
-                      className={`px-3 py-2 text-right font-mono tabular-nums ${
-                        typeof r.fundingApr !== 'number' || Number.isNaN(r.fundingApr) ? 'text-dim'
-                          : Math.abs(r.fundingApr) >= 50 ? 'text-loss'
-                          : Math.abs(r.fundingApr) >= 15 ? 'text-warn'
-                          : 'text-text'
-                      }`}
-                      title={typeof r.fundingApr === 'number' && Number.isFinite(r.fundingApr)
-                        ? `Annualised Binance perp funding rate. |APR| > 50% means perps are crowded and the bot will pay funding every 8h.`
-                        : 'Funding rate unavailable for this symbol.'}
-                    >
-                      {typeof r.fundingApr === 'number' && Number.isFinite(r.fundingApr)
-                        ? `${r.fundingApr >= 0 ? '+' : ''}${r.fundingApr.toFixed(0)}%`
-                        : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-text tabular-nums">
-                      {typeof r.calmar === 'number' && Number.isFinite(r.calmar)
-                        ? r.calmar.toFixed(2)
-                        : '—'}
-                    </td>
+                    {showMoreCols && (
+                      <td
+                        className={`px-3 py-2 text-right font-mono tabular-nums ${
+                          typeof r.fundingApr !== 'number' || Number.isNaN(r.fundingApr) ? 'text-dim'
+                            : Math.abs(r.fundingApr) >= 50 ? 'text-loss'
+                            : Math.abs(r.fundingApr) >= 15 ? 'text-warn'
+                            : 'text-text'
+                        }`}
+                        title={typeof r.fundingApr === 'number' && Number.isFinite(r.fundingApr)
+                          ? `Annualised Binance perp funding rate. |APR| > 50% means perps are crowded and the bot will pay funding every 8h.`
+                          : 'Funding rate unavailable for this symbol.'}
+                      >
+                        {typeof r.fundingApr === 'number' && Number.isFinite(r.fundingApr)
+                          ? `${r.fundingApr >= 0 ? '+' : ''}${r.fundingApr.toFixed(0)}%`
+                          : '—'}
+                      </td>
+                    )}
+                    {showMoreCols && (
+                      <td className="px-3 py-2 text-right font-mono text-text tabular-nums">
+                        {typeof r.calmar === 'number' && Number.isFinite(r.calmar)
+                          ? r.calmar.toFixed(2)
+                          : '—'}
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-right font-mono text-dim tabular-nums">
                       {r.numTrades}
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-loss tabular-nums">
                       -{r.maxDrawdownPct.toFixed(1)}%
                     </td>
-                    <td className="px-3 py-2 text-right font-mono text-text tabular-nums">
-                      {r.sharpeRatio.toFixed(2)}
-                    </td>
+                    {showMoreCols && (
+                      <td className="px-3 py-2 text-right font-mono text-text tabular-nums">
+                        {r.sharpeRatio.toFixed(2)}
+                      </td>
+                    )}
                     <td className="px-3 py-2">
                       <button
                         type="button"
@@ -835,6 +879,15 @@ export default function IndicatorScanTab({
               </tbody>
             </table>
           </div>
+          {/* Pager */}
+          {totalTablePages > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2">
+              <span className="text-[10px] text-dim tabular-nums">
+                Showing {tableStart + 1}–{tableStart + pageRows.length} of {visible.length}
+              </span>
+              <Pager page={tablePageClamped} totalPages={totalTablePages} onPage={setTablePage} />
+            </div>
+          )}
         </div>
       )}
 
