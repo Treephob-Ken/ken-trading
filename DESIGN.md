@@ -1,132 +1,135 @@
 ---
 version: alpha
-name: Binance-design-analysis
-description: A confident financial-platform interface anchored on a deep near-black canvas, where Binance's iconic yellow (#FCD535) carries every primary CTA, brand accent, and value-claim moment. Type runs Binance's custom BinanceNova / BinancePlex stack at modest weights — the system trusts size and yellow voltage over bold weight. Marketing and product surfaces default to the dark theme; transactional surfaces (buy crypto, deposit, exchange) flip to a light theme that shares the same yellow CTAs and gray-blue hairlines. Trading green (up) and red (down) accents thread through both modes for price-direction signals.
+name: Apple-design-analysis
+description: A photography-first interface that turns marketing into a museum gallery. Edge-to-edge product tiles alternate light and dark canvases, framed by SF Pro Display headlines with negative letter-spacing and a single Action Blue (#0066cc) interactive color. UI chrome recedes so the product can speak — no decorative gradients, no shadows on chrome, only the one signature drop-shadow under product imagery resting on a surface.
 
 colors:
-  primary: "#fcd535"
-  primary-active: "#f0b90b"
-  primary-disabled: "#3a3a1f"
-  ink: "#181a20"
-  body: "#eaecef"
-  body-on-light: "#181a20"
-  muted: "#707a8a"
-  muted-strong: "#929aa5"
-  hairline-on-light: "#eaecef"
-  hairline-on-dark: "#2b3139"
-  border-strong: "#cdd1d6"
-  canvas-light: "#ffffff"
-  canvas-dark: "#0b0e11"
-  surface-card-dark: "#1e2329"
-  surface-elevated-dark: "#2b3139"
-  surface-soft-light: "#fafafa"
-  surface-strong-light: "#f5f5f5"
-  on-primary: "#181a20"
+  primary: "#0066cc"
+  primary-focus: "#0071e3"
+  primary-on-dark: "#2997ff"
+  ink: "#1d1d1f"
+  body: "#1d1d1f"
+  body-on-dark: "#ffffff"
+  body-muted: "#cccccc"
+  ink-muted-80: "#333333"
+  ink-muted-48: "#7a7a7a"
+  divider-soft: "#f0f0f0"
+  hairline: "#e0e0e0"
+  canvas: "#ffffff"
+  canvas-parchment: "#f5f5f7"
+  surface-pearl: "#fafafc"
+  surface-tile-1: "#272729"
+  surface-tile-2: "#2a2a2c"
+  surface-tile-3: "#252527"
+  surface-black: "#000000"
+  surface-chip-translucent: "#d2d2d7"
+  on-primary: "#ffffff"
   on-dark: "#ffffff"
-  trading-up: "#0ecb81"
-  trading-down: "#f6465d"
-  accent-turquoise: "#2dbdb6"
-  info: "#3b82f6"
-  info-ring: "#3b82f6"
 
 typography:
   hero-display:
-    fontFamily: "BinanceNova, -apple-system, BlinkMacSystemFont, sans-serif"
-    fontSize: 64px
-    fontWeight: 700
-    lineHeight: 1.1
-    letterSpacing: -1px
+    fontFamily: "SF Pro Display, system-ui, -apple-system, sans-serif"
+    fontSize: 56px
+    fontWeight: 600
+    lineHeight: 1.07
+    letterSpacing: -0.28px
   display-lg:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 48px
-    fontWeight: 700
+    fontFamily: "SF Pro Display, system-ui, -apple-system, sans-serif"
+    fontSize: 40px
+    fontWeight: 600
     lineHeight: 1.1
-    letterSpacing: -0.5px
+    letterSpacing: 0
   display-md:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 40px
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 34px
     fontWeight: 600
-    lineHeight: 1.15
-    letterSpacing: -0.3px
-  display-sm:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 32px
-    fontWeight: 600
-    lineHeight: 1.2
-    letterSpacing: 0
-  title-lg:
-    fontFamily: "BinanceNova, sans-serif"
+    lineHeight: 1.47
+    letterSpacing: -0.374px
+  lead:
+    fontFamily: "SF Pro Display, system-ui, -apple-system, sans-serif"
+    fontSize: 28px
+    fontWeight: 400
+    lineHeight: 1.14
+    letterSpacing: 0.196px
+  lead-airy:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
     fontSize: 24px
-    fontWeight: 600
-    lineHeight: 1.3
-    letterSpacing: 0
-  title-md:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 20px
-    fontWeight: 600
-    lineHeight: 1.35
-    letterSpacing: 0
-  title-sm:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 16px
-    fontWeight: 600
-    lineHeight: 1.4
-    letterSpacing: 0
-  number-display:
-    fontFamily: "BinancePlex, BinanceNova, sans-serif"
-    fontSize: 40px
-    fontWeight: 700
-    lineHeight: 1.1
-    letterSpacing: -0.3px
-  number-md:
-    fontFamily: "BinancePlex, BinanceNova, sans-serif"
-    fontSize: 16px
-    fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: 0
-  number-sm:
-    fontFamily: "BinancePlex, BinanceNova, sans-serif"
-    fontSize: 14px
-    fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: 0
-  body-md:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 14px
-    fontWeight: 400
+    fontWeight: 300
     lineHeight: 1.5
     letterSpacing: 0
-  body-sm:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 13px
+  tagline:
+    fontFamily: "SF Pro Display, system-ui, -apple-system, sans-serif"
+    fontSize: 21px
+    fontWeight: 600
+    lineHeight: 1.19
+    letterSpacing: 0.231px
+  body-strong:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 17px
+    fontWeight: 600
+    lineHeight: 1.24
+    letterSpacing: -0.374px
+  body:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 17px
     fontWeight: 400
-    lineHeight: 1.5
+    lineHeight: 1.47
+    letterSpacing: -0.374px
+  dense-link:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 17px
+    fontWeight: 400
+    lineHeight: 2.41
     letterSpacing: 0
   caption:
-    fontFamily: "BinanceNova, sans-serif"
-    fontSize: 12px
-    fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: 0
-  button:
-    fontFamily: "BinanceNova, sans-serif"
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.43
+    letterSpacing: -0.224px
+  caption-strong:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
     fontSize: 14px
     fontWeight: 600
-    lineHeight: 1
+    lineHeight: 1.29
+    letterSpacing: -0.224px
+  button-large:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 18px
+    fontWeight: 300
+    lineHeight: 1.0
     letterSpacing: 0
-  nav-link:
-    fontFamily: "BinanceNova, sans-serif"
+  button-utility:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
     fontSize: 14px
-    fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: 0
+    fontWeight: 400
+    lineHeight: 1.29
+    letterSpacing: -0.224px
+  fine-print:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 12px
+    fontWeight: 400
+    lineHeight: 1.0
+    letterSpacing: -0.12px
+  micro-legal:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 10px
+    fontWeight: 400
+    lineHeight: 1.3
+    letterSpacing: -0.08px
+  nav-link:
+    fontFamily: "SF Pro Text, system-ui, -apple-system, sans-serif"
+    fontSize: 12px
+    fontWeight: 400
+    lineHeight: 1.0
+    letterSpacing: -0.12px
 
 rounded:
-  xs: 2px
-  sm: 4px
-  md: 6px
-  lg: 8px
-  xl: 12px
+  none: 0px
+  xs: 5px
+  sm: 8px
+  md: 11px
+  lg: 18px
   pill: 9999px
   full: 9999px
 
@@ -134,7 +137,7 @@ spacing:
   xxs: 4px
   xs: 8px
   sm: 12px
-  md: 16px
+  md: 17px
   lg: 24px
   xl: 32px
   xxl: 48px
@@ -144,363 +147,286 @@ components:
   button-primary:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.on-primary}"
-    typography: "{typography.button}"
-    rounded: "{rounded.md}"
-    padding: 12px 24px
-    height: 40px
-  button-primary-active:
-    backgroundColor: "{colors.primary-active}"
-    textColor: "{colors.on-primary}"
-    rounded: "{rounded.md}"
-  button-primary-disabled:
-    backgroundColor: "{colors.primary-disabled}"
-    textColor: "{colors.border-strong}"
-    rounded: "{rounded.md}"
-  button-primary-pill:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.on-primary}"
-    typography: "{typography.button}"
+    typography: "{typography.body}"
     rounded: "{rounded.pill}"
-    padding: 14px 32px
-  button-secondary-on-dark:
-    backgroundColor: "{colors.surface-card-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.button}"
-    rounded: "{rounded.md}"
-    padding: 12px 24px
-  button-secondary-on-light:
-    backgroundColor: "{colors.canvas-light}"
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-    rounded: "{rounded.md}"
-    padding: 12px 24px
-  button-tertiary-text:
-    backgroundColor: transparent
-    textColor: "{colors.body}"
-    typography: "{typography.button}"
-  button-trading-up:
-    backgroundColor: "{colors.trading-up}"
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-    rounded: "{rounded.sm}"
-    padding: 8px 20px
-  button-trading-down:
-    backgroundColor: "{colors.trading-down}"
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-    rounded: "{rounded.sm}"
-    padding: 8px 20px
-  button-subscribe:
+    padding: 11px 22px
+  button-primary-focus:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.on-primary}"
-    typography: "{typography.button}"
+    rounded: "{rounded.pill}"
+  button-primary-active:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.on-primary}"
+    rounded: "{rounded.pill}"
+  button-secondary-pill:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.primary}"
+    typography: "{typography.body}"
+    rounded: "{rounded.pill}"
+    padding: 11px 22px
+  button-dark-utility:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.on-dark}"
+    typography: "{typography.button-utility}"
     rounded: "{rounded.sm}"
-    padding: 6px 16px
-    height: 28px
+    padding: 8px 15px
+  button-pearl-capsule:
+    backgroundColor: "{colors.surface-pearl}"
+    textColor: "{colors.ink-muted-80}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.md}"
+    padding: 8px 14px
+  button-store-hero:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.button-large}"
+    rounded: "{rounded.pill}"
+    padding: 14px 28px
+  button-icon-circular:
+    backgroundColor: "{colors.surface-chip-translucent}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.full}"
+    size: 44px
   text-link:
-    backgroundColor: transparent
+    backgroundColor: "{colors.canvas}"
     textColor: "{colors.primary}"
-    typography: "{typography.body-md}"
-  top-nav-dark:
-    backgroundColor: "{colors.canvas-dark}"
+    typography: "{typography.body}"
+  text-link-on-dark:
+    backgroundColor: transparent
+    textColor: "{colors.primary-on-dark}"
+    typography: "{typography.body}"
+  global-nav:
+    backgroundColor: "{colors.surface-black}"
     textColor: "{colors.on-dark}"
     typography: "{typography.nav-link}"
-    height: 64px
-  top-nav-light:
-    backgroundColor: "{colors.canvas-light}"
+    height: 44px
+  sub-nav-frosted:
+    backgroundColor: "{colors.canvas-parchment}"
     textColor: "{colors.ink}"
-    typography: "{typography.nav-link}"
-    height: 64px
-  hero-band-dark:
-    backgroundColor: "{colors.canvas-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.hero-display}"
-    padding: 80px
-  stat-callout-card:
-    backgroundColor: transparent
-    textColor: "{colors.primary}"
-    typography: "{typography.number-display}"
-  trust-badge:
-    backgroundColor: "{colors.surface-card-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.title-sm}"
-    rounded: "{rounded.lg}"
-    padding: 16px 20px
-  markets-table-card:
-    backgroundColor: "{colors.surface-card-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.xl}"
-    padding: 24px
-  markets-row:
-    backgroundColor: transparent
-    textColor: "{colors.on-dark}"
-    typography: "{typography.number-md}"
-    padding: 12px 0
-  price-up-cell:
-    backgroundColor: transparent
-    textColor: "{colors.trading-up}"
-    typography: "{typography.number-md}"
-  price-down-cell:
-    backgroundColor: transparent
-    textColor: "{colors.trading-down}"
-    typography: "{typography.number-md}"
-  search-input-on-dark:
-    backgroundColor: "{colors.surface-card-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.lg}"
-    padding: 10px 16px
-    height: 40px
-  text-input-on-light:
-    backgroundColor: "{colors.canvas-light}"
+    typography: "{typography.tagline}"
+    height: 52px
+  product-tile-light:
+    backgroundColor: "{colors.canvas}"
     textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.md}"
-    padding: 10px 16px
-    height: 40px
-  funds-safu-band:
-    backgroundColor: "{colors.canvas-dark}"
-    textColor: "{colors.primary}"
     typography: "{typography.display-lg}"
+    rounded: "{rounded.none}"
     padding: 80px
-  feature-photo-card:
-    backgroundColor: "{colors.surface-card-dark}"
-    textColor: "{colors.on-dark}"
-    rounded: "{rounded.xl}"
-  qr-promo-card:
-    backgroundColor: "{colors.surface-card-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.title-md}"
-    rounded: "{rounded.xl}"
-    padding: 32px
-  faq-row:
-    backgroundColor: transparent
-    textColor: "{colors.on-dark}"
-    typography: "{typography.title-sm}"
-    rounded: "{rounded.md}"
-    padding: 20px 0
-  cta-band-dark:
-    backgroundColor: "{colors.surface-card-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.display-sm}"
-    rounded: "{rounded.xl}"
-    padding: 48px
-  arena-hero-gradient:
-    backgroundColor: "{colors.canvas-dark}"
-    textColor: "{colors.primary}"
+  product-tile-parchment:
+    backgroundColor: "{colors.canvas-parchment}"
+    textColor: "{colors.ink}"
     typography: "{typography.display-lg}"
+    rounded: "{rounded.none}"
     padding: 80px
-  cookie-consent-card:
-    backgroundColor: "{colors.canvas-light}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body-sm}"
-    rounded: "{rounded.lg}"
-    padding: 16px
-  buy-crypto-amount-card:
-    backgroundColor: "{colors.canvas-light}"
-    textColor: "{colors.ink}"
-    typography: "{typography.number-display}"
-    rounded: "{rounded.lg}"
-    padding: 24px
-  steps-card:
-    backgroundColor: "{colors.canvas-light}"
-    textColor: "{colors.ink}"
-    typography: "{typography.title-sm}"
-    rounded: "{rounded.lg}"
-    padding: 24px
-  price-chart-card:
-    backgroundColor: "{colors.canvas-light}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.lg}"
-    padding: 24px
-  conversion-cell:
-    backgroundColor: "{colors.canvas-light}"
-    textColor: "{colors.body-on-light}"
-    typography: "{typography.body-md}"
-  trader-row:
-    backgroundColor: transparent
+  product-tile-dark:
+    backgroundColor: "{colors.surface-tile-1}"
     textColor: "{colors.on-dark}"
-    typography: "{typography.body-md}"
-    padding: 12px 0
-  footer-light:
-    backgroundColor: "{colors.surface-soft-light}"
-    textColor: "{colors.body-on-light}"
-    typography: "{typography.body-md}"
+    typography: "{typography.display-lg}"
+    rounded: "{rounded.none}"
+    padding: 80px
+  product-tile-dark-2:
+    backgroundColor: "{colors.surface-tile-2}"
+    textColor: "{colors.on-dark}"
+    rounded: "{rounded.none}"
+  product-tile-dark-3:
+    backgroundColor: "{colors.surface-tile-3}"
+    textColor: "{colors.on-dark}"
+    rounded: "{rounded.none}"
+  store-utility-card:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-strong}"
+    rounded: "{rounded.lg}"
+    padding: 24px
+  configurator-option-chip:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.pill}"
+    padding: 12px 16px
+  configurator-option-chip-selected:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.pill}"
+  search-input:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    rounded: "{rounded.pill}"
+    padding: 12px 20px
+    height: 44px
+  floating-sticky-bar:
+    backgroundColor: "{colors.canvas-parchment}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    height: 64px
+    padding: 12px 32px
+  environment-quote-card:
+    backgroundColor: "{colors.surface-tile-1}"
+    textColor: "{colors.on-dark}"
+    typography: "{typography.display-lg}"
+    rounded: "{rounded.none}"
+    padding: 80px
+  footer:
+    backgroundColor: "{colors.canvas-parchment}"
+    textColor: "{colors.ink-muted-80}"
+    typography: "{typography.fine-print}"
     padding: 64px
-  nav-dropdown-dark:
-    backgroundColor: "{colors.surface-elevated-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.nav-link}"
-    rounded: "{rounded.lg}"
-    padding: 8px 16px
-  input-muted-light:
-    backgroundColor: "{colors.surface-strong-light}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.md}"
-    padding: 10px 16px
-  markets-column-header:
-    backgroundColor: transparent
-    textColor: "{colors.muted-strong}"
+  button-primary-hover:
+    backgroundColor: "{colors.primary-focus}"
+    textColor: "{colors.on-primary}"
+    rounded: "{rounded.pill}"
+  paragraph:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.body}"
+    typography: "{typography.body}"
+  paragraph-on-dark:
+    backgroundColor: "{colors.surface-tile-1}"
+    textColor: "{colors.body-on-dark}"
+    typography: "{typography.body}"
+  caption-on-dark:
+    backgroundColor: "{colors.surface-tile-1}"
+    textColor: "{colors.body-muted}"
     typography: "{typography.caption}"
-  button-check-now:
-    backgroundColor: "{colors.accent-turquoise}"
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-    rounded: "{rounded.md}"
-    padding: 8px 20px
-  badge-info:
-    backgroundColor: "{colors.canvas-dark}"
-    textColor: "{colors.info}"
-    typography: "{typography.caption}"
-    rounded: "{rounded.sm}"
-    padding: 2px 8px
-  skeleton-block:
-    backgroundColor: "{colors.muted}"
-    rounded: "{rounded.sm}"
-  focus-ring:
-    backgroundColor: "{colors.info-ring}"
-  divider-on-dark:
-    backgroundColor: "{colors.hairline-on-dark}"
-  divider-on-light:
-    backgroundColor: "{colors.hairline-on-light}"
+  meta-on-black:
+    backgroundColor: "{colors.surface-black}"
+    textColor: "{colors.ink-muted-48}"
+    typography: "{typography.fine-print}"
+  divider-light:
+    backgroundColor: "{colors.divider-soft}"
+  hairline-rule:
+    backgroundColor: "{colors.hairline}"
 ---
 
 ## Overview
 
-Binance reads like a financial trading platform that wants to feel both authoritative and energetic. The base atmosphere is **deep near-black canvas** (`{colors.canvas-dark}` — #0b0e11) holding white type and a single, ubiquitous accent: **Binance Yellow** (`{colors.primary}` — #FCD535). That yellow does almost all of the brand's heavy lifting — it carries every primary CTA, every value-claim headline ("FUNDS ARE SAFU"), every "Sign Up" pill, every featured tier indicator, and the wordmark itself. There is no secondary brand color. The system trusts the yellow voltage to do the brand work, and it carries it.
+Apple's web presence is a masterclass in **reverent product photography framed by near-invisible UI**. Every page is a stack of edge-to-edge product "tiles" — alternating light and dark canvases, each centered on a hero headline, a one-line tagline, two tiny blue pill CTAs, and an impossibly crisp product render. Nothing competes with the product. Typography is confident but quiet; color is either pure white, an off-white parchment, or a near-black tile; interactive elements are a single, quiet blue.
 
-Type runs Binance's custom **BinanceNova** (display + body) and **BinancePlex** (numerical / financial display) stack. BinanceNova carries display headlines, section titles, and body copy. BinancePlex appears on price tickers, large stat numbers (transaction volumes, user counts, prize pools) — anywhere a number wants to feel "tabular and reliable." Both run at modest weights — display sizes use weight 600-700 (bolder than typical marketing because trading platforms need numbers to read at a glance), body stays at 400.
+Density is unusually low even by contemporary SaaS standards. Each tile occupies roughly one viewport, and there is no decorative chrome — no borders, no gradients, no decorative frames, no shadows on headlines. Elevation appears only when a product image rests on a surface (a single soft `rgba(0, 0, 0, 0.22) 3px 5px 30px` drop for visual weight). The result is a catalog that feels more like a museum gallery: the wall disappears and the artifact takes over.
 
-The product is **multi-theme**: marketing surfaces (homepage, smart-money, futures arena) default to dark, while transactional surfaces (buy crypto, deposit, withdraw) flip to a light theme. The same yellow CTAs and gray-blue hairlines (`{colors.hairline-on-light}` — #eaecef) thread through both — only canvas, surface, and text tones flip. Trading **green** (`{colors.trading-up}` — #0ecb81) and **red** (`{colors.trading-down}` — #f6465d) signal price direction in tables, charts, and price tickers across both modes.
+Store and shop surfaces retain the same chassis but switch modes. The product configurator (iPhone 17 Pro, accessories grid) introduces a tight grid of white utility cards at `{rounded.lg}` (18px) radius with a thin border, paired with a persistent thin sub-nav strip. The environment page leans darker and more editorial. Across all five surfaces the typographic system, spacing rhythm, and the single blue accent are consistent — this is one design language expressed at different volumes.
 
 **Key Characteristics:**
-- Single accent color: `{colors.primary}` (#FCD535) does all brand voltage — primary CTAs, hero headlines, brand mark, badges. Used scarcely on dark for emphasis, ubiquitously on transactional dialogs.
-- Custom type stack: `BinanceNova` (display + body) and `BinancePlex` (numbers, prices, financial data). Big stat numbers always render in BinancePlex for tabular consistency.
-- Multi-theme: marketing pages default dark (`{colors.canvas-dark}`); transactional pages flip light (`{colors.canvas-light}`). Yellow CTAs and trading green/red are shared across both.
-- Light footer on dark body: the homepage uses `{colors.surface-soft-light}` (#fafafa) for the footer even when the body above it is dark — a deliberate inversion that visually closes the page.
-- Trading semantics: green up / red down (`{colors.trading-up}` / `{colors.trading-down}`) for price changes, applied as text color rather than badge background.
-- Card surfaces: `{colors.surface-card-dark}` (#1e2329) for elevated cards on dark; `{colors.canvas-light}` for cards on light. No gradient surfaces, no atmospheric backdrops — flat color blocks throughout.
-- Border radius is small to medium: `{rounded.md}` (6px) for primary buttons, `{rounded.lg}` (8px) for inputs and content cards, `{rounded.xl}` (12px) for elevated card containers, `{rounded.pill}` for prominent feature CTAs.
-- Spacing follows a 4-multiple scale; major editorial bands sit at `{spacing.section}` (80px) — slightly tighter than typical marketing-only sites because product pages need denser layouts.
+- Photography-first presentation; UI recedes so the product can speak.
+- Alternating full-bleed tile sections: white/parchment ↔ near-black, with the color change itself acting as the section divider.
+- Single blue accent (`{colors.primary}` — #0066cc) carries every interactive element. No second brand color exists.
+- Two button grammars: tiny blue pill CTAs (`{rounded.pill}`) and compact utility rects (`{rounded.sm}`).
+- SF Pro Display + SF Pro Text — negative letter-spacing at display sizes for the signature "Apple tight" headline feel.
+- Whisper-soft elevation used only when a product image needs to breathe — exactly one drop-shadow in the entire system.
+- Tight two-row nav: slim `{component.global-nav}` + product-specific `{component.sub-nav-frosted}` with persistent right-aligned primary CTA.
+- Section rhythm across multiple pages: light hero → dark product tile → light utility tile → dark tile → parchment footer — a predictable pulse.
 
 ## Colors
 
+> **Source pages analyzed:** homepage, environment, store, iPhone 17 Pro buy page, accessories index. The color system is identical across all five surfaces; only the surface-mode mix differs.
+
 ### Brand & Accent
-- **Binance Yellow** (`{colors.primary}` — #FCD535): The single brand color. Used for primary CTA backgrounds, the wordmark, brand-claim headlines ("FUNDS ARE SAFU"), trust badges ("No.1 Trading Volume"), large stat numbers in `{component.stat-callout-card}`, and inline links.
-- **Binance Yellow Active** (`{colors.primary-active}` — #f0b90b): The press / hover-darker variant. Slightly more saturated yellow.
-- **Binance Yellow Disabled** (`{colors.primary-disabled}` — #3a3a1f): A desaturated dark-yellow used on disabled CTAs over dark canvas.
-- **Accent Turquoise** (`{colors.accent-turquoise}` — #2dbdb6): A small secondary accent used very sparingly on Smart Money's "Check Now" CTA over dark surfaces. Treat as a single-product accent, not a system color.
+- **Action Blue** (`{colors.primary}` — #0066cc): The single brand-level interactive color. All text links, all blue pill CTAs ("Learn more", "Buy"), and the focus ring root. This is Apple's quiet but universal "click me" signal. Press state shifts to a slightly darker variant via the active scale transform rather than a hex change.
+- **Focus Blue** (`{colors.primary-focus}` — #0071e3): A marginally brighter sibling of Action Blue, reserved for the keyboard focus ring on buttons (`outline: 2px solid`).
+- **Sky Link Blue** (`{colors.primary-on-dark}` — #2997ff): A brighter blue used on dark surfaces for in-copy links and inline callouts, where Action Blue would disappear against the tile background.
 
 ### Surface
-
-The system has two canvas modes that map to product context:
-
-**Dark mode (marketing default):**
-- **Canvas Dark** (`{colors.canvas-dark}` — #0b0e11): The primary page floor. Near-black with a slight warm tint — never pure black.
-- **Surface Card Dark** (`{colors.surface-card-dark}` — #1e2329): Cards, navigation dropdowns, secondary buttons over dark canvas, markets table.
-- **Surface Elevated Dark** (`{colors.surface-elevated-dark}` — #2b3139): One step lighter, used for nested cards, hovered nav items, and chart background panels.
-
-**Light mode (transactional):**
-- **Canvas Light** (`{colors.canvas-light}` — #ffffff): The page floor on transactional pages (buy crypto, deposit forms, account dialogs).
-- **Surface Soft Light** (`{colors.surface-soft-light}` — #fafafa): Footer surface and disabled states.
-- **Surface Strong Light** (`{colors.surface-strong-light}` — #f5f5f5): Form input backgrounds in muted contexts.
-
-### Hairlines & Borders
-- **Hairline on Light** (`{colors.hairline-on-light}` — #eaecef): The 1px border tone on light surfaces. Dembrandt's frequency analysis confirms this as the highest-count token (1022 occurrences) — Binance uses hairlines liberally.
-- **Hairline on Dark** (`{colors.hairline-on-dark}` — #2b3139): The 1px border tone on dark surfaces. Same hex as `{colors.surface-elevated-dark}` — borders feel like surface steps, not ink lines.
-- **Border Strong** (`{colors.border-strong}` — #cdd1d6): A heavier border tone used on disabled secondary buttons.
+- **Pure White** (`{colors.canvas}` — #ffffff): The dominant canvas. Content, utility cards, store tiles, configurator grids.
+- **Parchment** (`{colors.canvas-parchment}` — #f5f5f7): The signature Apple off-white. Used for alternating light tiles, footer region, and the default page canvas in store utility sections. Just different enough from white to create rhythm.
+- **Pearl Button** (`{colors.surface-pearl}` — #fafafc): A near-white used as the fill for secondary "ghost" buttons — lighter than the parchment canvas so the button still reads as a button against `{colors.canvas-parchment}`.
+- **Near-Black Tile 1** (`{colors.surface-tile-1}` — #272729): The primary dark-tile surface on the homepage product grid.
+- **Near-Black Tile 2** (`{colors.surface-tile-2}` — #2a2a2c): A micro-step lighter — used where a dark tile sits directly above or below Tile 1 to create the faintest separation.
+- **Near-Black Tile 3** (`{colors.surface-tile-3}` — #252527): A micro-step darker — used at the bottom of the stack and in embedded video/player frames.
+- **Pure Black** (`{colors.surface-black}` — #000000): Reserved for true void — video player backgrounds, edge-to-edge photographic overlays, the global nav bar background.
+- **Translucent Chip Gray** (`{colors.surface-chip-translucent}` — #d2d2d7): The base hex of the translucent gray chip used over photography for circular control buttons. In production, applied at ~64% alpha as `rgba(210, 210, 215, 0.64)`.
 
 ### Text
-- **Ink** (`{colors.ink}` — #181a20): The strongest text on light surfaces. Display headlines on transactional pages.
-- **Body on Dark** (`{colors.body}` — #eaecef): Default running-text on dark canvas — deliberately not pure white, slightly cooler.
-- **Body on Light** (`{colors.body-on-light}` — #181a20): Same as ink — light-mode body text reuses the ink token.
-- **Muted** (`{colors.muted}` — #707a8a): Footer links, breadcrumbs, captions, table column headers. Works on both light and dark canvas.
-- **Muted Strong** (`{colors.muted-strong}` — #929aa5): A second-tier muted for emphasized labels.
-- **On Primary** (`{colors.on-primary}` — #181a20): Black text on yellow primary CTAs.
-- **On Dark** (`{colors.on-dark}` — #ffffff): Pure white for high-contrast headlines on dark canvas.
+- **Near-Black Ink** (`{colors.ink}` — #1d1d1f): The voice of every headline, every body paragraph, and the dark utility button's fill. Chosen instead of pure black to keep the page feeling photographic rather than printed.
+- **Body** (`{colors.body}` — #1d1d1f): Same hex as ink — Apple uses one near-black tone for all text on light surfaces.
+- **Body On Dark** (`{colors.body-on-dark}` — #ffffff): All text on dark tiles and on the global nav bar.
+- **Body Muted** (`{colors.body-muted}` — #cccccc): Secondary copy on dark tiles where pure white would be too loud.
+- **Ink Muted 80** (`{colors.ink-muted-80}` — #333333): Body text on the white Pearl Button surface — slightly softer than pure black.
+- **Ink Muted 48** (`{colors.ink-muted-48}` — #7a7a7a): Disabled button text and legal fine-print.
 
-### Trading Semantics
-- **Trading Up** (`{colors.trading-up}` — #0ecb81): Price-up green, used as text color in tables, charts, and inline ticker arrows. Never as a button background.
-- **Trading Down** (`{colors.trading-down}` — #f6465d): Price-down red. Same usage rules as trading-up.
+### Hairlines & Borders
+- **Divider Soft** (`{colors.divider-soft}` — #f0f0f0): The "border" tone on secondary buttons — functions as a ring shadow rather than a hard line. In production, often applied as `rgba(0, 0, 0, 0.04)`.
+- **Hairline** (`{colors.hairline}` — #e0e0e0): The 1px hairline border on store utility cards and configurator chips.
 
-### Info / Focus
-- **Info** (`{colors.info}` — #3b82f6): Inline info badges and the focus-ring base. The Tailwind `--tw-ring-color` token surfaced by dembrandt — used on input focus.
+### Brand Gradient
+**No decorative gradients.** Atmospheric depth on product photography (the iPhone 17 Pro camera plate, the Apple Watch bands, AirPods reflections) is inherent to the imagery, not a CSS gradient overlay. The environment page's hero uses photographic atmosphere (mountain vista at dawn) but no gradient tokens are defined. Apple is the rare luxury-brand site with zero gradient-based design tokens.
 
 ## Typography
 
 ### Font Family
-The system runs **BinanceNova** for display and body, and **BinancePlex** for numerical / financial data. Both are licensed Binance custom typefaces. The fallback stack walks `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`.
-
-The split is functional, not decorative:
-- BinanceNova → editorial type (headlines, paragraphs, button labels, nav)
-- BinancePlex → tabular numerical type (prices, volumes, percentages, stat counters, prize pools)
-
-Mixing them is not optional — BinanceNova on a price ticker would lose the trading-platform character; BinancePlex on a paragraph would feel monospace-cold.
+- **Display**: `SF Pro Display, system-ui, -apple-system, sans-serif` — Apple's proprietary display face, optimized for sizes ≥ 19px. Defines the voice of every headline.
+- **Body / UI**: `SF Pro Text, system-ui, -apple-system, sans-serif` — the text-optimized variant used for body copy, captions, buttons, and links below 20px.
+- **OpenType features**: `font-variant-numeric: numerator` is enabled on numeric links (pricing tables, spec sheets). Display sizes rely on tight tracking rather than contextual ligatures.
 
 ### Hierarchy
 
 | Token | Size | Weight | Line Height | Letter Spacing | Use |
 |---|---|---|---|---|---|
-| `{typography.hero-display}` | 64px | 700 | 1.1 | -1px | Homepage h1 ("316,258,026 USERS TRUST US") |
-| `{typography.display-lg}` | 48px | 700 | 1.1 | -0.5px | Brand-claim headlines ("FUNDS ARE SAFU"), prize-pool hero ("Futures Masters Arena") |
-| `{typography.display-md}` | 40px | 600 | 1.15 | -0.3px | Section heads on long-scroll pages |
-| `{typography.display-sm}` | 32px | 600 | 1.2 | 0 | CTA band headlines ("Secure, Low-Fee Trading on Binance") |
-| `{typography.title-lg}` | 24px | 600 | 1.3 | 0 | Sub-section titles |
-| `{typography.title-md}` | 20px | 600 | 1.35 | 0 | QR-promo cards, feature card titles |
-| `{typography.title-sm}` | 16px | 600 | 1.4 | 0 | Trust badges, FAQ rows, step labels |
-| `{typography.number-display}` | 40px | 700 | 1.1 | -0.3px | Big stat numbers (15,000 BTC, $429,423,449) — BinancePlex |
-| `{typography.number-md}` | 16px | 500 | 1.4 | 0 | Markets table prices, table cells — BinancePlex |
-| `{typography.number-sm}` | 14px | 500 | 1.4 | 0 | Inline prices, %  changes — BinancePlex |
-| `{typography.body-md}` | 14px | 400 | 1.5 | 0 | Default running-text — BinanceNova |
-| `{typography.body-sm}` | 13px | 400 | 1.5 | 0 | Cookie consent text, footer body |
-| `{typography.caption}` | 12px | 500 | 1.4 | 0 | Small meta labels |
-| `{typography.button}` | 14px | 600 | 1 | 0 | Standard CTA button labels |
-| `{typography.nav-link}` | 14px | 500 | 1.4 | 0 | Top nav menu items |
+| `{typography.hero-display}` | 56px | 600 | 1.07 | -0.28px | Hero headline; the signature "Apple tight" tracking |
+| `{typography.display-lg}` | 40px | 600 | 1.10 | 0 | Tile headlines atop every product tile |
+| `{typography.display-md}` | 34px | 600 | 1.47 | -0.374px | Section heads (SF Pro Text at display proportions) |
+| `{typography.lead}` | 28px | 400 | 1.14 | 0.196px | Product tile subcopy |
+| `{typography.lead-airy}` | 24px | 300 | 1.5 | 0 | Environment-page lead paragraphs (the rare weight 300) |
+| `{typography.tagline}` | 21px | 600 | 1.19 | 0.231px | Sub-tile tagline; sub-nav category name |
+| `{typography.body-strong}` | 17px | 600 | 1.24 | -0.374px | Inline strong emphasis |
+| `{typography.body}` | 17px | 400 | 1.47 | -0.374px | Default paragraph |
+| `{typography.dense-link}` | 17px | 400 | 2.41 | 0 | Footer / store utility link lists (relaxed leading) |
+| `{typography.caption}` | 14px | 400 | 1.43 | -0.224px | Secondary captions, button text |
+| `{typography.caption-strong}` | 14px | 600 | 1.29 | -0.224px | Emphasized captions |
+| `{typography.button-large}` | 18px | 300 | 1.0 | 0 | Store hero CTAs (the rare weight 300) |
+| `{typography.button-utility}` | 14px | 400 | 1.29 | -0.224px | Utility/nav button labels |
+| `{typography.fine-print}` | 12px | 400 | 1.0 | -0.12px | Fine-print, footer body |
+| `{typography.micro-legal}` | 10px | 400 | 1.3 | -0.08px | Micro legal disclaimers |
+| `{typography.nav-link}` | 12px | 400 | 1.0 | -0.12px | Global nav menu items |
 
 ### Principles
-Display sizes use weight 700 — heavier than most marketing systems. This makes sense for a trading platform: numbers need to read at a glance, headlines need to compete with chart visualizations and dense data tables. The system will not soften display weight to 400 the way Airtable or Stripe does.
 
-`{typography.number-display}` and the smaller number variants always use **BinancePlex**, even when surrounding body type uses BinanceNova. Prices, volumes, and stat counters render in BinancePlex regardless of context — it is the system's "trustworthy number" voice.
+- **Negative letter-spacing at display sizes.** Every headline at 17px and up carries a slight tracking tighten (`-0.12 → -0.374px`). This produces the iconic "Apple tight" headline cadence. Never used at 12px or below.
+- **Body copy at 17px, not 16px.** Apple breaks the SaaS convention and runs paragraph text at 17px. The extra pixel gives the page an unmistakable "reading, not scanning" pace.
+- **Weight 300 is real and rare.** Used deliberately on a handful of large-size reads (`{typography.button-large}` at 18px/300 and `{typography.lead-airy}` at 24px/300). It's not an accident — it's a light-atmosphere cue reserved for moments where the content should feel airy.
+- **Weight 600, not 700, for headlines.** Apple's headlines sit at weight 600. Weight 700 is used sparingly for `{typography.tagline}` (21px) when a touch more assertion is needed.
+- **Line-height is context-specific.** Display sizes use 1.07–1.19 (tight). Body uses 1.47. Utility link stacks in the footer/store use an unusually relaxed 2.41 (`{typography.dense-link}`). The 2.41 is not a bug — it's how the footer's dense link columns breathe.
+- **Weight 500 is deliberately absent.** The ladder is 300 / 400 / 600 / 700. Mid-weight readings always use 600.
 
 ### Note on Font Substitutes
-If BinanceNova and BinancePlex are unavailable, **Inter** is the closest open-source substitute for BinanceNova and **JetBrains Mono** or **IBM Plex Sans** is the closest substitute for BinancePlex (depending on whether tabular monospace fidelity matters more than humanist proportions). Adjust display headlines down by ~3% in line-height to match BinanceNova's tighter cap height.
+SF Pro is Apple's proprietary system font. When building off-system:
+
+- Use `system-ui, -apple-system, BlinkMacSystemFont` as the first stack entry — on macOS/iOS/Safari this resolves to the real SF Pro.
+- For non-Apple platforms, **Inter** (Google Fonts, variable) is the closest open-source equivalent. Inter at weight 600 with `font-feature-settings: "ss03"` approximates SF Pro's rounded "a" character.
+- Nudge `letter-spacing` down by `-0.01em` on display sizes to re-create the Apple tight feel; Inter's default tracking runs slightly wider than SF Pro.
+- For body text, tighten line-height by `0.03` (from 1.47 → 1.44) when substituting Inter — Inter's taller x-height needs less leading.
 
 ## Layout
 
 ### Spacing System
-- **Base unit:** 4px.
-- **Tokens:** `{spacing.xxs}` 4px · `{spacing.xs}` 8px · `{spacing.sm}` 12px · `{spacing.md}` 16px · `{spacing.lg}` 24px · `{spacing.xl}` 32px · `{spacing.xxl}` 48px · `{spacing.section}` 80px.
-- **Section padding (vertical):** `{spacing.section}` (80px) — slightly tighter than airy marketing sites (96px) because Binance pages mix marketing bands with dense product surfaces (markets tables, FAQ accordions).
-- **Card internal padding:** `{spacing.lg}` (24px) for content cards and markets tables; `{spacing.xl}` (32px) for QR-promo cards and CTA bands; `{spacing.md}` (16px) for trust badges and table rows.
-- **Gutters:** `{spacing.lg}` (24px) between cards in 3-up grids; `{spacing.md}` (16px) inside footer column gutters and dense FAQ lists.
+- **Base unit:** 8px. Sub-base values (2, 4, 5, 6, 7) are used for tight typographic adjustments; structural layout snaps to 8/12/16/20/24.
+- **Tokens:** `{spacing.xxs}` 4px · `{spacing.xs}` 8px · `{spacing.sm}` 12px · `{spacing.md}` 17px · `{spacing.lg}` 24px · `{spacing.xl}` 32px · `{spacing.xxl}` 48px · `{spacing.section}` 80px.
+- **Section vertical padding:** `{spacing.section}` (80px) inside a product tile; tiles stack edge-to-edge with 0 gap (the color change provides the break).
+- **Card padding:** `{spacing.lg}` (24px) inside utility grid cards.
+- **Button padding:** 8–11px vertical, 15–22px horizontal.
+- **Universal rhythm constants:** the 17px body line-height multiplier (~25px line) and 21px tagline size show up on every analyzed page.
 
 ### Grid & Container
-- **Max content width:** ~1280px centered on marketing pages; ~1440px on product surfaces (markets, smart-money tables) where horizontal density matters.
-- **Editorial body:** Single 12-column grid; product pages often use 8/4 split (main panel + side rail).
-- **Markets table:** 5-column header (Pair / Last Price / 24h Change / 24h Volume / Action), with the first column carrying coin icon + symbol pair.
-- **Footer:** 6-column link list at desktop, wrapping to 2-up at tablet and 1-up on mobile.
+- **Max content width:** ~980px on text-heavy sections (environment), ~1440px on product grids (store, accessories), full-bleed for product tiles (homepage).
+- **Column patterns:** 3 to 5 column utility card grid on store/accessories; 2-column side-by-side tiles on homepage occasional sections; single-column centered stack on product tile heroes.
+- **Gutters:** 20–24px between cards in a utility grid.
 
 ### Whitespace Philosophy
-Binance is denser than typical marketing sites — long-scroll pages mix hero bands with markets tables, FAQ accordions, and feature grids without much breathing room between them. The system trusts contrast (yellow vs. dark canvas, green vs. red price cells) to do the visual separation work, not whitespace. Where whitespace appears, it's always uniform — `{spacing.section}` between every major band.
+Apple's whitespace is the product's pedestal. Every tile begins with at least 64px of air above its headline and 48–64px below. Product renders are never crowded; the nearest content to a product image is at least 40px away. The footer is the only area that breaks this — there, Apple goes deliberately dense to make the full information architecture visible at a glance.
 
 ## Elevation & Depth
 
 | Level | Treatment | Use |
 |---|---|---|
-| Flat | No shadow, no border | Body sections, top nav, hero bands, footer |
-| Soft hairline | 1px `{colors.hairline-on-dark}` or `{colors.hairline-on-light}` | Inputs, table dividers, FAQ row separators, secondary buttons |
-| Card surface | `{colors.surface-card-dark}` background on dark canvas, `{colors.canvas-light}` on light context — no shadow | All elevated cards (markets-table-card, QR-promo-card, feature-photo-card, trust-badges) |
-| Subtle drop shadow | Faint shadow visible only when a card sits over imagery | Used sparingly on the buy-crypto-amount-card on transactional pages |
-| Focus ring | `0 0 0 2px {colors.info-ring}` at 50% alpha | Input + button keyboard focus state |
+| Flat | No shadow, no border | Full-bleed tiles, global nav, footer, body sections |
+| Soft hairline | 1px `rgba(0, 0, 0, 0.08)` border | Utility cards, sub-nav frosted-glass separator |
+| Backdrop blur | `backdrop-filter: blur(N)` on Parchment 80% | Sub-nav and the iPhone buy floating sticky bar |
+| Product shadow | `rgba(0, 0, 0, 0.22) 3px 5px 30px 0` | Product renders resting on a surface (the only true "shadow" in the system) |
 
-The elevation philosophy is **flat surfaces with color-block separation**. Binance does not use heavy drop shadows or glassmorphism — depth comes from the contrast between `{colors.canvas-dark}` and `{colors.surface-card-dark}` (a 12-step lightness jump that reads as a clear elevation boundary).
+**Shadow philosophy.** Apple uses **exactly one** drop-shadow, and it is applied to photographic product imagery — never to cards, never to buttons, never to text. Elevation in the UI comes from (a) surface-color change (light tile ↔ dark tile) and (b) backdrop-blur on sticky bars. The single shadow is about giving the product weight, not about UI hierarchy.
 
 ### Decorative Depth
-- **Yellow → dark vertical gradient backdrop** on the Futures Arena hero: `{colors.primary}` fading down to `{colors.canvas-dark}`. This is a single-page treatment used for product-launch / event hero surfaces, not a system-wide signature.
-- **Coin-stack illustrations** flanking large stat blocks (3D rendered crypto coins, trophy icons). These are illustrations, not tokens — treat as content rather than design system surface.
+- **Atmospheric imagery** on the environment page (photographic vista) supplies mood; no CSS gradient involved.
+- **Edge-to-edge tile alternation** creates rhythm without borders or shadows — the color change itself is the divider.
+- **Backdrop-filter blur** on `{component.sub-nav-frosted}` and `{component.floating-sticky-bar}` creates a "floating over content" effect that's functional, not decorative.
 
 ## Shapes
 
@@ -508,120 +434,102 @@ The elevation philosophy is **flat surfaces with color-block separation**. Binan
 
 | Token | Value | Use |
 |---|---|---|
-| `{rounded.xs}` | 2px | Almost no use — reserved for very small badges |
-| `{rounded.sm}` | 4px | Small inline buttons (subscribe, trading-up / trading-down inline) |
-| `{rounded.md}` | 6px | Standard CTA buttons, primary buttons, primary input fields |
-| `{rounded.lg}` | 8px | Search input, content cards, trust badges, sub-cards |
-| `{rounded.xl}` | 12px | Elevated card containers (markets-table-card, QR-promo-card, CTA bands) |
-| `{rounded.pill}` | 9999px | Prominent feature CTAs ("Sign Up" pill on dark, futures-arena "Join Now") |
-| `{rounded.full}` | 9999px / 50% | Coin icons, avatars |
+| `{rounded.none}` | 0px | Full-bleed product tiles (no corner rounding) |
+| `{rounded.xs}` | 5px | Inline links when styled as subtle chips (rare) |
+| `{rounded.sm}` | 8px | Dark utility buttons (Sign In, Bag), inline card imagery |
+| `{rounded.md}` | 11px | White Pearl Button capsules |
+| `{rounded.lg}` | 18px | Store utility cards, accessories grid cards |
+| `{rounded.pill}` | 9999px | Primary blue pill CTAs, sub-nav buy button, configurator option chips, search input — the signature Apple pill |
+| `{rounded.full}` | 9999px / 50% | Circular control chips floating over photography |
 
-Binance's radius hierarchy is tighter than typical marketing systems — most surfaces sit at 6-12px. The pill radius is a deliberate exception used to signal "this is a top-of-page action."
-
-### Photography & Iconography
-- Coin icons render as 24×24 or 32×32 rounded glyphs (often 50% radius on circular outline + the coin's brand color inside).
-- 3D rendered coin stacks and trophy illustrations are full-color illustrations with a slight floor shadow — not flat icons.
-- Photographic content (people-using-the-app section) crops to `{rounded.xl}` (12px) corners, full-bleed on mobile.
+### Photography Geometry
+- **Hero imagery**: full-bleed, 21:9 or taller on the homepage; 16:9 on environment and shop pages. Product renders are photographic-realistic, often shot on a tinted surface that becomes the tile background.
+- **Product renders**: PNG/WebP with transparency; rest on a surface tile and pick up the system shadow.
+- **Accessory grid**: square 1:1 crops at `{rounded.lg}` (18px) radius, light neutral backgrounds, product centered with 20–40px internal padding.
+- **No rounded imagery in hero tiles** — images are full-bleed rectangular. Rounding (`{rounded.sm}`, `{rounded.lg}`) appears only on inline card imagery.
+- Lazy-loading via responsive `srcset` and `sizes` across all breakpoints; CDN-optimized WebP.
 
 ## Components
 
 ### Top Navigation
 
-**`top-nav-dark`** — The marketing top nav on dark canvas. 64px tall, `{colors.canvas-dark}` background. Carries the yellow Binance wordmark at left, primary horizontal menu (Buy Crypto, Markets, Trade, Futures, Earn, Square, Smart Money, Campaigns), right-side cluster with language selector, light/dark toggle, "Log In" text link, "Sign Up" `{component.button-primary}`. The wordmark uses `{colors.primary}` for "BINANCE" type.
+**`global-nav`** — Persistent, ultra-thin black nav bar pinned to the top of every page. Background `{colors.surface-black}`, height 44px, text `{colors.on-dark}` in `{typography.nav-link}` (12px / 400 / -0.12px tracking). Links are quiet, spaced ~20px apart, running edge-to-edge across the top. Right-aligned cluster: Search, Bag icons — always visible. On mobile, collapses to hamburger at ~834px and the Apple logo centers.
 
-**`top-nav-light`** — The transactional top nav on light canvas (buy crypto, deposit pages). Same layout but `{colors.canvas-light}` background and `{colors.ink}` menu items.
+**`sub-nav-frosted`** — Surface-specific nav that sticks below the global nav. Background `{colors.canvas-parchment}` at 80% opacity with backdrop-filter blur, creating a frosted-glass effect. Height 52px. Content on left: product category name ("iPhone", "Store", "Accessories") in `{typography.tagline}` (21px / 600). Content right: inline nav links in `{typography.button-utility}` (14px), ending in a persistent `{component.button-primary}` ("Buy") or a utility link.
 
 ### Buttons
 
-**`button-primary`** — The signature primary CTA. Background `{colors.primary}`, text `{colors.on-primary}` (black on yellow — the system's iconic combination), type `{typography.button}`, padding 12px × 24px, height 40px, rounded `{rounded.md}` (6px). Press state: `button-primary-active` darkens to `{colors.primary-active}` (#f0b90b). Disabled state: `button-primary-disabled` desaturates to `{colors.primary-disabled}`.
+**`button-primary`** — The signature Apple action. Background `{colors.primary}` (Action Blue #0066cc), text `{colors.on-primary}` in `{typography.body}` (SF Pro Text 17px / 400), rounded `{rounded.pill}` (full pill — capsule-shaped), padding 11px × 22px. The full-pill radius IS the brand action signal.
+- Active state: `{component.button-primary-active}` — `transform: scale(0.95)` (the system-wide micro-interaction).
+- Focus state: `{component.button-primary-focus}` — 2px solid `{colors.primary-focus}` outline.
 
-**`button-primary-pill`** — A larger pill variant of the primary CTA used for top-of-page sign-up moments and product-launch heroes (Futures Arena "Join Now"). Same yellow + black combination, padding 14px × 32px, rounded `{rounded.pill}` (9999px). Use sparingly — the pill is a "this is THE action" signal.
+**`button-secondary-pill`** — Used as the second CTA when two blue pills appear together ("Learn more" / "Buy"). Background transparent, text `{colors.primary}`, 1px solid `{colors.primary}` border, rounded `{rounded.pill}`, padding 11px × 22px. Reads as a "ghost pill."
 
-**`button-secondary-on-dark`** — Used over `{colors.canvas-dark}` for less-emphasized actions. Background `{colors.surface-card-dark}`, text `{colors.on-dark}`, rounded `{rounded.md}`.
+**`button-dark-utility`** — Global nav actions (Sign In, Bag, language selector). Background `{colors.ink}` (#1d1d1f), text `{colors.on-dark}` in `{typography.button-utility}` (14px / 400 / -0.224px tracking), rounded `{rounded.sm}` (8px), padding 8px × 15px. Active state shrinks via `transform: scale(0.95)`.
 
-**`button-secondary-on-light`** — Light-canvas equivalent. Background `{colors.canvas-light}` with `{colors.hairline-on-light}` 1px border, text `{colors.ink}`.
+**`button-pearl-capsule`** — Product-card secondary button. Background `{colors.surface-pearl}` (#fafafc), text `{colors.ink-muted-80}` in `{typography.caption}` (14px), 3px solid `{colors.divider-soft}` border (functions as a soft ring rather than a visible line), rounded `{rounded.md}` (11px), padding 8px × 14px.
 
-**`button-tertiary-text`** — Inline text button with no background. Used for "Log In" in the top nav and inline "Read More" links.
+**`button-store-hero`** — A larger primary CTA used on store hero surfaces. Same Action Blue + Paper White as `{component.button-primary}`, but with `{typography.button-large}` (18px / 300 — note the rare weight 300) and slightly more padding (14px × 28px). Used sparingly on the store landing.
 
-**`button-trading-up`** — A solid green button used on price-up signals (Buy / Long actions). Background `{colors.trading-up}`, text `{colors.on-dark}`, rounded `{rounded.sm}` (4px), padding 8px × 20px. Smaller and tighter than `{component.button-primary}` because it appears in dense trading interfaces.
+**`button-icon-circular`** — Floats over photography. 44 × 44px, background `{colors.surface-chip-translucent}` at ~64% alpha, icon in `{colors.ink}`, rounded `{rounded.full}`. Used for carousel controls, close buttons, and in-image controls (product image thumbnails on the iPhone buy page).
 
-**`button-trading-down`** — Symmetric red variant for Sell / Short actions. Same shape, background `{colors.trading-down}`.
+**`text-link`** — Inline body links in `{colors.primary}` (Action Blue). Underlined or non-underlined per context.
 
-**`button-subscribe`** — Compact yellow CTA used in the Smart Money traders table to subscribe to a top trader. Smaller height (28px) and tighter padding than the primary CTA — fits inside dense table rows. Same yellow + black combination.
-
-**`text-link`** — Inline body links in `{colors.primary}` (yellow on dark, also yellow on light). No underline by default. Type inherits `{typography.body-md}`.
+**`text-link-on-dark`** — Inline body links on dark tiles in `{colors.primary-on-dark}` (Sky Link Blue #2997ff) — Action Blue would disappear against `{colors.surface-tile-1}`.
 
 ### Cards & Containers
 
-**`hero-band-dark`** — Full-width dark band carrying the homepage h1 + sub-headline + dual CTA pair. Background `{colors.canvas-dark}`, padding `{spacing.section}` (80px). The h1 ("316,258,026 USERS TRUST US") uses `{typography.hero-display}` at 64px / 700 — the system's largest type role.
+**`product-tile-light`** — Full-bleed light tile. Background `{colors.canvas}` (white), text `{colors.ink}`, rounded `{rounded.none}` (0 — tiles touch edges), vertical padding `{spacing.section}` (80px). Centered stack: product name in `{typography.display-lg}` (40px / 600) → one-line tagline in `{typography.lead}` (28px / 400) → two `{component.button-primary}` CTAs ("Learn more" / "Buy") → product render resting on the surface with the system shadow.
 
-**`stat-callout-card`** — Inline yellow stat numbers (15,000 BTC, 7,488,223, $429,423,449). Transparent background, text `{colors.primary}`, type `{typography.number-display}` in BinancePlex. Used as a flat layout block, not a card with surface — the yellow text alone carries the visual weight.
+**`product-tile-parchment`** — Same as `{component.product-tile-light}` but on `{colors.canvas-parchment}` (#f5f5f7). Used to break two consecutive white tiles.
 
-**`trust-badge`** — Small dark cards holding "No.1 Customer Service" / "No.1 Trading Volume" claims. Background `{colors.surface-card-dark}`, rounded `{rounded.lg}` (8px), padding 16px × 20px. Yellow numeric or word badge ("No.1") sits next to a short label.
+**`product-tile-dark`** — Full-bleed dark tile. Background `{colors.surface-tile-1}` (#272729), text `{colors.on-dark}`, rounded `{rounded.none}`, vertical padding `{spacing.section}` (80px). Same content stack as the light tile but with `{component.text-link-on-dark}` for inline copy and `{component.button-primary}` (Action Blue still works on the dark surface). Used on the homepage product grid as the alternating dark band.
 
-**`markets-table-card`** — The right-side markets table on the homepage. Background `{colors.surface-card-dark}`, rounded `{rounded.xl}` (12px), padding `{spacing.lg}` (24px). Carries a tab row (Popular / New listing / Top gainers), then a 5-column row of coin pairs with last price, 24h change %, action button. Each row uses `{component.markets-row}`.
+**`product-tile-dark-2`** — Variant on `{colors.surface-tile-2}` (#2a2a2c). Used where a dark tile sits directly above or below `{component.product-tile-dark}` to create the faintest separation through micro-step lightness change.
 
-**`markets-row`** — A single row inside the markets table. Transparent background, 12px vertical padding, hairline divider between rows. Coin icon (32×32) + symbol on left; last price in `{typography.number-md}` (BinancePlex); 24h change cell colored by direction (`{component.price-up-cell}` or `{component.price-down-cell}`); right-aligned chevron icon for "view detail."
+**`product-tile-dark-3`** — Variant on `{colors.surface-tile-3}` (#252527). Used at the bottom of the stack and in embedded video/player frames.
 
-**`price-up-cell`** / **`price-down-cell`** — Colored text cells for price changes. Transparent background, text `{colors.trading-up}` or `{colors.trading-down}`, type `{typography.number-md}` in BinancePlex. Always paired with a small triangle arrow indicating direction.
+**`store-utility-card`** — Used in store grid and accessories grid. Background `{colors.canvas}` (white), 1px solid `{colors.hairline}` border, rounded `{rounded.lg}` (18px), padding `{spacing.lg}` (24px). Top: product image (1:1 crop with `{rounded.sm}` (8px) inner image radius). Below: product name in `{typography.body-strong}` (17px / 600), price in `{typography.body}` (17px / 400), and a `{component.text-link}` ("Buy" or "Learn more"). No shadow by default; product render itself carries the system product-shadow.
 
-**`feature-photo-card`** — The "Trade on the go" section's photo strip — 3 lifestyle photos showing people using the Binance app. Background `{colors.surface-card-dark}`, rounded `{rounded.xl}`. Photos crop edge-to-edge, no internal padding around the image.
+**`configurator-option-chip`** — Pill-shaped tappable cell used in the iPhone 17 Pro buy page. Background `{colors.canvas}`, text `{colors.ink}` in `{typography.caption}`, rounded `{rounded.pill}`, padding 12px × 16px. Contains a small product thumbnail + label + price delta. Arranged in a grid of 4–5 options per row.
 
-**`qr-promo-card`** — The "Trade on the go. Anywhere, anytime." card with QR code. Background `{colors.surface-card-dark}`, rounded `{rounded.xl}`, padding `{spacing.xl}` (32px). Contains an h2 in `{typography.title-md}`, a body paragraph, app store badges (iOS / Android), and a centered QR code.
+**`configurator-option-chip-selected`** — Selected state. Border upgrades to 2px solid `{colors.primary-focus}`. Same shape, same content.
 
-**`funds-safu-band`** — The yellow-headlined "FUNDS ARE SAFU" band. Background stays `{colors.canvas-dark}`, but the headline uses `{colors.primary}` at `{typography.display-lg}`. Below the headline, three large `{component.stat-callout-card}` numbers anchor the band: total BTC reserves, users helped, funds recovered.
+**`environment-quote-card`** — A photographic-canvas hero specific to the environment page. Dark photographic backdrop (mountain vista at dawn) with `{colors.surface-tile-1}` as the fallback color, centered white-text headline in `{typography.display-lg}` (40px), small green "Apple 2030" pictographic logo above the headline, single `{component.button-primary}` below. Padding `{spacing.section}` (80px).
 
-**`faq-row`** — A single FAQ accordion row. Transparent background, padding 20px vertical, hairline divider between rows. Closed state: question in `{typography.title-sm}` + chevron icon at right. Open state: question + answer body in `{typography.body-md}`.
-
-**`cta-band-dark`** — The "Secure, Low-Fee Trading on Binance" pre-footer CTA band. Background `{colors.surface-card-dark}` (one step elevated from canvas), rounded `{rounded.xl}`, padding `{spacing.xxl}` (48px). Carries an h2 in `{typography.display-sm}` and a `{component.button-primary}` aligned right.
-
-### Light-Mode Transactional Components
-
-**`buy-crypto-amount-card`** — The right-rail card on the Buy BTC page. Background `{colors.canvas-light}`, rounded `{rounded.lg}` (8px), padding `{spacing.lg}` (24px). Carries an editable amount input in `{typography.number-display}` (BinancePlex), a currency selector, and a yellow `{component.button-primary}` for "Continue" / "Confirm Order."
-
-**`steps-card`** — The "How to Buy Crypto" 3-up cards (Enter Amount → Confirm Order → Receive Crypto). Background `{colors.canvas-light}`, rounded `{rounded.lg}`, padding `{spacing.lg}`. Each card has a small numbered icon, a `{typography.title-sm}` step name, and a body description.
-
-**`price-chart-card`** — The "Bitcoin Markets" card carrying the BTC price chart. Background `{colors.canvas-light}`, rounded `{rounded.lg}`. Top row carries pair selector ($79,065.04, +0.45%); main area is a candlestick / line chart in `{colors.trading-up}` and `{colors.trading-down}`; bottom row carries timeframe selector (24H / 1W / 1M / 3M / 1Y / ALL).
-
-**`conversion-cell`** — A single row in the BTC ↔ USD conversion table. Transparent background, text `{colors.body-on-light}`, type `{typography.body-md}`. Pair label on left (BTC, USDT, etc.); USD equivalent on right.
+**`floating-sticky-bar`** — Floats at the bottom of the viewport on the iPhone 17 Pro buy page during scroll. Background `{colors.canvas-parchment}` at 80% opacity with `backdrop-filter: blur(N)`, height 64px, padding 12px × 32px. Left: running price total in `{typography.body}`. Right: `{component.button-primary}` ("Add to Bag").
 
 ### Inputs & Forms
 
-**`search-input-on-dark`** — The "Search currencies" input on the homepage hero. Background `{colors.surface-card-dark}`, text `{colors.on-dark}`, rounded `{rounded.lg}` (8px), padding 10px × 16px, height 40px. Carries a yellow `{component.button-primary-pill}` on the right side ("Sign Up").
+**`search-input`** — The accessories search input. Background `{colors.canvas}`, text `{colors.ink}` in `{typography.body}` (17px), 1px solid `rgba(0, 0, 0, 0.08)` border, rounded `{rounded.pill}` (full pill — search is also pill-shaped, matching the CTA grammar), padding 12px × 20px, height 44px. Leading icon: search glyph at 14px, muted tint.
 
-**`text-input-on-light`** — Standard input on transactional pages. Background `{colors.canvas-light}`, 1px `{colors.hairline-on-light}` border, rounded `{rounded.md}` (6px), padding 10px × 16px, height 40px. Focus state inherits the focus-ring shadow.
-
-**`cookie-consent-card`** — The cookie banner card visible on the homepage. Background `{colors.canvas-light}`, rounded `{rounded.lg}`, padding `{spacing.md}` (16px). Body text in `{typography.body-sm}` (13px / 400) with three stacked button options (Accept Cookies & Continue / Reject Additional Cookies / Manage Cookies).
-
-### Smart Money Sub-System
-
-**`trader-row`** — A single row in the top-traders table on /smart-money. Transparent background, padding 12px vertical, hairline divider between rows. Avatar + trader name + private/public badge on left; ROI %, AUM, mint date columns; yellow `{component.button-subscribe}` on right.
-
-### Signature Components
-
-**`arena-hero-gradient`** — The Futures Arena product-launch hero. A vertical gradient from `{colors.primary}` at top to `{colors.canvas-dark}` at bottom, with the prize-pool headline (4,000,000 USDT) in `{typography.display-lg}` centered. A `{component.button-primary-pill}` ("Join Now") sits below the headline. Used only on product-launch event surfaces — do not generalize to other heroes.
+Error and validation states were not surfaced in the analyzed pages.
 
 ### Footer
 
-**`footer-light`** — The light-gray footer that closes every page (including dark-canvas pages). Background `{colors.surface-soft-light}` (#fafafa), text `{colors.body-on-light}`. 6-column link list at desktop covering Community / About Us / Products / Business / Service / Learn columns. Vertical padding 64px. The deliberate light footer on a dark page is one of Binance's most distinctive layout choices — it visually closes the page with a "marketing reset" surface.
+**`footer`** — Background `{colors.canvas-parchment}` (#f5f5f7), text `{colors.ink-muted-80}`. Link columns in `{typography.dense-link}` (17px / 400 / 2.41 line-height — the relaxed leading is what makes the dense columns scannable). Column headings in `{typography.caption-strong}` (14px / 600). Legal row at the very bottom in `{typography.fine-print}` (12px / 400) with `{colors.ink-muted-48}` text. Vertical padding 64px.
 
 ## Do's and Don'ts
 
 ### Do
-- Reserve `{colors.primary}` (Binance Yellow) for primary actions, brand-claim headlines, and the wordmark. Never use it for secondary or decorative purposes — yellow's scarcity is what makes it powerful.
-- Keep `{component.button-primary}` (yellow with black text) as the universal primary CTA across both dark and light modes. The same button appears identically on `{colors.canvas-dark}` and `{colors.canvas-light}`.
-- Use `{component.button-trading-up}` (green) and `{component.button-trading-down}` (red) only for explicit Buy/Sell or Long/Short actions. Never use them for general "confirm" or "cancel" because they carry semantic price-direction meaning.
-- Use BinancePlex for every number. Prices, volumes, percentages, stat counters — all BinancePlex. Mixing BinanceNova into a number ticker breaks the trading-platform character.
-- Choose canvas mode by surface intent: dark for marketing / product showcase / trading dashboards; light for transactional dialogs (buy / deposit / withdraw / form submission).
-- Anchor every editorial band with `{spacing.section}` (80px). Binance is denser than airy marketing sites — 80px is the right rhythm.
+- Use `{colors.primary}` (Action Blue #0066cc) for every interactive element — links, pill CTAs, focus signals — and nothing else. The single accent is non-negotiable.
+- Set headlines in `{typography.hero-display}` or `{typography.display-lg}` with negative letter-spacing (`-0.28 → -0.374px`) to get the signature "Apple tight" cadence.
+- Run body copy at `{typography.body}` (17px / 400 / 1.47 / -0.374px) — not 16px. The extra pixel defines the brand's reading pace.
+- Alternate `{component.product-tile-light}` (or parchment) and `{component.product-tile-dark}` for full-bleed section rhythm. The color change IS the divider.
+- Reserve `{rounded.pill}` for the primary blue CTA and any other element that should read as an "action" (configurator chips, search input, sticky bar CTA).
+- Apply the single product-shadow (`rgba(0, 0, 0, 0.22) 3px 5px 30px`) only to product renders resting on a surface — never on cards, buttons, or text.
+- Use `transform: scale(0.95)` as the active/press state on every button — it's the system-wide micro-interaction.
+- Keep the global nav `{colors.surface-black}` (true black) — it's the only place pure black appears on most pages.
 
 ### Don't
-- Don't introduce a second brand color. The system has exactly one accent (`{colors.primary}`) and any expansion dilutes the brand identity. The turquoise on Smart Money is a single-product experiment, not a system token.
-- Don't use yellow for body text or large surface fills. It is for focal-point CTAs and headlines only.
-- Don't use `{colors.trading-up}` / `{colors.trading-down}` as background fills on cards. They are price-direction signals, expressed as text color or small badge fill — never as a card surface.
-- Don't soften display weight. `{typography.hero-display}` and `{typography.display-lg}` are intentionally weight 700 — going to 400 reads as design-portfolio, not trading platform.
-- Don't add atmospheric gradients to the canvas (mesh, aurora, glow effects). Binance trusts color-block contrast — adding atmospheric depth muddies the trading-platform feel.
-- Don't invert `{component.button-primary}`'s text color. Black on yellow is the system's signature — white text on yellow loses contrast and brand recognition.
+- Don't introduce a second accent color; every "click me" signal is `{colors.primary}` (Action Blue).
+- Don't add shadows to cards, buttons, or text — shadow is reserved for product imagery.
+- Don't use gradients as decorative backgrounds; atmosphere comes from photography.
+- Don't set body copy at weight 500 — Apple's ladder is 300 / 400 / 600 / 700, with 500 deliberately absent. Body is always 400; strong inline is 600; display is 600.
+- Don't round full-bleed tiles — tiles are rectangular and edge-to-edge; the color change is the divider.
+- Don't tighten line-height below 1.47 for body copy — the editorial leading is part of the brand.
+- Don't mix radii grammars — use `{rounded.sm}` for compact utility, `{rounded.lg}` for utility cards, `{rounded.pill}` for pills, and nothing in between (except the rare `{rounded.md}` Pearl Button).
+- Don't use `{colors.primary-on-dark}` (Sky Link Blue) on light surfaces — it's the dark-tile-only variant. Action Blue is for light surfaces.
 
 ## Responsive Behavior
 
@@ -629,43 +537,50 @@ Binance's radius hierarchy is tighter than typical marketing systems — most su
 
 | Name | Width | Key Changes |
 |---|---|---|
-| Mobile | < 768px | Top nav collapses to hamburger; hero h1 drops from 64px to ~36px; markets table converts to a horizontally-scrollable card list; demo grids drop to 1-up; footer 6 columns wrap to 2 |
-| Tablet | 768–1024px | Top nav stays horizontal but tightens, secondary menu items hide behind a "More" dropdown; markets table 2-up; pricing/feature grids 2-up |
-| Desktop | 1024–1440px | Full top-nav with all primary menu items; 5-column markets table; trading dashboards in 8/4 split (chart + side rail) |
-| Wide | > 1440px | Same as desktop with more outer breathing room; max content width caps at 1280-1440px depending on surface |
+| Small phone | ≤ 419px | Single-column tiles; sub-nav collapses to category name + primary CTA only; hero typography drops to 28px |
+| Phone | 420–640px | Single-column stack; product renders scale to 80% of tile width; hero h1 drops to 34px |
+| Large phone | 641–735px | Tiles transition to tighter padding (48px vertical vs 80px); fine-print wraps |
+| Tablet portrait | 736–833px | Global nav collapses to hamburger; sub-nav hides category chips, keeps primary CTA |
+| Tablet landscape | 834–1023px | Global nav returns fully expanded; 3-column utility grids become 2-column |
+| Small desktop | 1024–1068px | Product tiles use 2/3 width with margin gutters; hero h1 stays at 40px |
+| Desktop | 1069–1440px | Full layout; 4–5 column store grids; 1440px content max |
+| Wide desktop | ≥ 1441px | Content locks at 1440px, margins absorb extra width |
+
+The structural breakpoints that matter for agents: 1440px (content lock), 1068px (small-desktop), 833px (tablet landscape switch), 734px (tablet portrait), 640px (phone), 480px (small phone).
 
 ### Touch Targets
-- Primary CTAs render at minimum 40 × 40px (`{component.button-primary}` height + padding) — meets WCAG AAA's 44 × 44 with surrounding spacing.
-- Subscribe / inline action buttons are 28 × 28 — denser than ideal but matches industry trading platform norms.
-- Coin icons in markets tables are 32 × 32px, with the entire row tappable for 44px+ effective target.
+- Minimum 44 × 44px. `{component.button-primary}` lands at ~44 × 100px (with the full-pill radius making the visible hit area more generous than the label suggests).
+- `{component.button-icon-circular}` is exactly 44 × 44px.
+- Global nav utility links are smaller (~32 × 80px) — they deliberately sit at a tighter target because they're precision desktop actions, and the mobile hamburger replaces them at ≤ 833px.
 
 ### Collapsing Strategy
-- Top nav collapses to hamburger at < 768px; the menu opens as a full-screen sheet with the same yellow accent CTAs anchored to the bottom of the sheet.
-- Markets table reflows to a horizontally-scrollable single card per coin pair on mobile.
-- The hero stat numbers ("316M USERS") shrink proportionally rather than wrapping — Binance's biggest claim must always read as a single block.
-- Trading dashboards switch from chart + side-rail to chart-only with a separate "Trade" tab on mobile.
-- The light footer stays full-bleed at every breakpoint — it does not collapse to a separate dark variant.
+- **Global nav**: full horizontal link row on desktop → collapses to Apple logo + hamburger + bag icon at 834px and below.
+- **Sub-nav**: category name + inline links + primary CTA → category name + primary CTA only at mobile; inline links move into a hamburger tray.
+- **Product tiles**: stack from 2-column to 1-column at 834px; vertical padding tightens from 80px → 48px at small-phone.
+- **Utility grids** (store, accessories): 5-col → 4-col (1440px) → 3-col (1068px) → 2-col (834px) → 1-col (640px).
+- **Hero typography**: `{typography.hero-display}` (56px) → `{typography.display-lg}` (40px) at 1068px → 34px at 640px → 28px at 419px.
 
 ### Image Behavior
-- Coin icons stay at fixed 24/32px sizes regardless of breakpoint.
-- Lifestyle photos in the "Trade on the go" section crop responsively — wider at desktop, taller (vertical) at mobile.
-- 3D coin-stack illustrations are fixed-aspect-ratio assets that scale uniformly without cropping.
+- All product imagery uses responsive `srcset` with breakpoint-matched crops.
+- Hero photography may switch art direction at mobile (e.g., the environment page's vista crops to a taller aspect ratio on mobile, framing the subject differently).
+- Product renders maintain their 1:1 or 4:3 aspect ratios across breakpoints; only scale changes.
+- Lazy-loading is default; the above-fold hero loads eagerly.
 
 ## Iteration Guide
 
-1. Focus on ONE component at a time. Reference its YAML key directly (`{component.button-primary}`, `{component.markets-row}`).
-2. When adding a new component, decide first whether it lives in dark mode (marketing / product) or light mode (transactional). The same component appears in both with surface tone flipped.
-3. Variants of an existing component (`-active`, `-disabled`) live as separate entries in `components:` — never as nested state objects.
-4. Use `{token.refs}` everywhere prose mentions a color, a radius, a typography role, or a spacing value.
-5. Never document hover. The system documents Default and Active/Pressed states only.
-6. Numbers always use BinancePlex; copy always uses BinanceNova. Mixing them is a system violation.
-7. Trading green / red are semantic price tokens — never repurpose them for "success" or "error" generic states.
+1. Focus on ONE component at a time. Reference its YAML key directly (`{component.product-tile-dark}`, `{component.search-input}`).
+2. Variants of an existing component (`-active`, `-focus`, `-2`, `-3`) live as separate entries in `components:`.
+3. Use `{token.refs}` everywhere — never inline hex.
+4. Never document hover. Default and Active/Pressed states only.
+5. Display headlines stay SF Pro Display 600 with negative letter-spacing. Body stays SF Pro Text 400 at 17px. The boundary is unbreakable.
+6. The single drop-shadow (`rgba(0, 0, 0, 0.22) 3px 5px 30px`) is reserved for product photography only.
+7. When in doubt about emphasis: alternate surface (light → dark tile) before adding chrome.
 
 ## Known Gaps
 
-- The dembrandt frequency analyzer captured `#eaecef` (light hairline, count 1022) as the highest-frequency token. The brand-defining `{colors.primary}` (#FCD535) appears far less frequently because it's used scarcely as accent — its system role had to be confirmed from screenshots.
-- BinanceNova and BinancePlex weight-axis values are not formalized as variable-font tokens — only the static weights observed in screenshots are documented.
-- Animation and transition timings (chart redraws, price-change flashes) are not in scope.
-- Form validation states beyond `{component.text-input-on-light}` defaults are not extracted — error / success input variants would need a sign-up or order-confirmation flow to confirm.
-- The trading dashboard surfaces (Spot / Futures / Margin) were not in the analyzed URL set; their order book, candlestick chart configuration, and position-management cards are not documented here.
-- The light/dark theme toggle behavior (whether transactional pages can be forced dark by user preference) is product behavior, not extracted from the marketing surfaces.
+- Form validation and error states were not surfaced on the analyzed pages; only the neutral search input is documented.
+- The homepage's embedded video/player frame uses `{colors.surface-black}`; interior player controls are not documented (they're a platform widget, not a web-design token).
+- Some component imagery is dynamic (rotating product hero) and its specific copy varies per surface — component specs name the structure, not the rotating content.
+- Dark-mode counterparts for store and accessories utility cards were not surfaced on the analyzed pages; the system documented is the daytime/light-dominant variant Apple ships by default.
+- Atmospheric photography (environment page mountain vista) is a content asset, not a design token; the documented `{component.environment-quote-card}` describes the structural surface only.
+- The exact backdrop-filter blur radius on `{component.sub-nav-frosted}` and `{component.floating-sticky-bar}` is platform-dependent; production CSS uses `saturate(180%) blur(20px)` as a typical baseline but the value isn't formalized as a token.

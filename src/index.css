@@ -5,24 +5,25 @@
 @tailwind utilities;
 
 @layer base {
-  /* Palette mapped from DESIGN.md (Binance design system). Brand = Binance
-     Yellow #FCD535 (black text on yellow), near-black canvas #0b0e11, trading
-     green/red for P&L, turquoise/info as secondary accents. */
+  /* Palette mapped from DESIGN.md (Apple design system), dark interpretation —
+     Apple's near-black surfaces + Action Blue accent + SF Pro type, kept dark
+     so the trading charts + data panels stay legible. Trading green/red for
+     P&L are retained (Apple defines no trading semantics). */
   :root {
-    --bg: 210 21% 5%;        /* canvas-dark   #0b0e11 */
-    --panel: 213 16% 14%;    /* surface-card  #1e2329 */
-    --panel-2: 214 14% 20%;  /* surface-elev  #2b3139 */
-    --border: 214 14% 20%;   /* hairline-dark #2b3139 */
-    --border-strong: 215 13% 28%;
-    --text: 216 16% 93%;     /* body          #eaecef */
-    --muted: 217 11% 60%;    /* muted-strong  #929aa5 */
-    --dim: 216 11% 49%;      /* muted         #707a8a */
-    --brand: 48 97% 60%;     /* Binance yellow #FCD535 */
-    --gain: 157 84% 43%;     /* trading-up    #0ecb81 */
-    --loss: 352 90% 62%;     /* trading-down  #f6465d */
+    --bg: 0 0% 0%;           /* surface-black  #000000 */
+    --panel: 240 3% 12%;     /* surface-tile-1 #1d1d1f */
+    --panel-2: 240 3% 17%;   /* surface-tile-2 #2a2a2c */
+    --border: 240 3% 26%;    /* dark hairline  #424245 */
+    --border-strong: 240 3% 34%;
+    --text: 240 20% 96%;     /* near-white     #f5f5f7 */
+    --muted: 240 3% 61%;     /* secondary      #98989d */
+    --dim: 240 3% 45%;       /* tertiary       #6e6e73 */
+    --brand: 209 100% 58%;   /* Action Blue (on dark) #2997ff */
+    --gain: 157 84% 43%;     /* P&L up */
+    --loss: 352 90% 62%;     /* P&L down */
     --warn: 40 96% 53%;
-    --accent: 177 62% 46%;   /* turquoise     #2dbdb6 */
-    --accent-2: 217 91% 60%; /* info          #3b82f6 */
+    --accent: 209 100% 58%;  /* Action Blue */
+    --accent-2: 211 100% 45%;/* deep blue #0071e3 */
   }
 
   html,
@@ -33,16 +34,16 @@
 
   body {
     @apply bg-bg text-text;
-    font-family: 'Inter', system-ui, sans-serif;
+    /* SF Pro on Apple devices (iPad/Mac), Inter elsewhere. */
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     font-feature-settings: 'cv11';
+    /* Apple aesthetic: flat surface, no decorative colour glows — keep only a
+       barely-there grid for depth. */
     background-image:
-      radial-gradient(at 0% 0%, hsla(var(--brand) / 0.07) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, hsla(var(--warn) / 0.03) 0px, transparent 40%),
-      radial-gradient(at 100% 100%, hsla(var(--gain) / 0.04) 0px, transparent 50%),
       linear-gradient(to right, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
       linear-gradient(to bottom, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+    background-size: 40px 40px, 40px 40px;
     background-attachment: fixed;
   }
 
