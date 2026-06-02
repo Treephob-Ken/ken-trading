@@ -233,6 +233,47 @@ function armDailyGuardForUser(uid: string): void {
   })
 }
 
+// Resume signal bots that were paused by a network switch (testnet→mainnet).
+// Starting clears the pause marker. Returns how many were resumed.
+function resumePausedSignalBots(uid: string | undefined): number {
+  let resumed = 0
+  for (const sum of listSignalBots(uid)) {
+    try {
+      const bot = getSignalBot(sum.id, uid)
+      if (bot.isPausedForNetworkSwitch()) { bot.start(); resumed++ }
+    } catch { /* best effort */ }
+  }
+  return resumed
+}
+
+// Resume grid bots paused by a network switch — recreate + start with reconcile
+// so existing HL orders are adopted rather than cancelled. Mirrors the testnet
+// auto-resume path. Returns how many were resumed.
+function resumePausedGridBots(uid: string | undefined, creds: EnvConfig): number {
+  let resumed = 0
+  for (const id of listPausedGridBotIds(uid)) {
+    try {
+      const cfg = loadConfig(id, uid)
+      const clients = createClients(creds)
+      const logger = createLogger(id)
+      const bot = new GridBot(clients, cfg, logger)
+      const map = gridBotsForUser(uid)
+      map.set(id, { id, bot, running: true })
+      writeGridRuntime(uid, id, true, false)
+      bot.start({ reconcile: true }).catch((e: unknown) => {
+        logger.err(`Grid resume crash: ${(e as Error).message}`)
+        const entry = map.get(id)
+        if (entry) entry.running = false
+        writeGridRuntime(uid, id, false, false)
+      })
+      resumed++
+    } catch (e) {
+      log.err(`Resume grid ${id} failed: ${(e as Error).message}`)
+    }
+  }
+  return resumed
+}
+
 // ─── Telegram read-only command handler ───────────────────────────────────────
 // The Telegram chat belongs to the owner: multi-user → the admin user; single →
 // the .env account. Returns the reply text, or '' for an unknown command.
@@ -944,6 +985,21 @@ app.post('/api/bots/:id/stop', requireAuth, async (req: Request, res: Response) 
   res.json({ ok: true })
 })
 
+// Resume all grid bots paused by a network switch. Kill-switch gated.
+app.post('/api/bots/resume-paused', requireAuth, (req: Request, res: Response) => {
+  const uid = userId(req)
+  if (MULTI_USER && uid && isTripped(uid)) {
+    res.status(423).json({ error: 'Kill switch tripped — unlock in Settings first' }); return
+  }
+  const creds = MULTI_USER ? userCreds(req) : loadEnv()
+  if (!creds) { res.status(400).json({ error: 'Hyperliquid credentials are not set.' }); return }
+  try {
+    res.json({ resumed: resumePausedGridBots(uid, creds) })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
 app.get('/api/bots/:id/stats', requireAuth, (req: Request, res: Response) => {
   const id = req.params.id
   const entry = gridBotsForUser(userId(req)).get(id)
@@ -1439,6 +1495,20 @@ app.post('/api/signal/bots/:id/stop', requireAuth, (req: Request, res: Response)
     res.json(bot.getStatus())
   } catch (e) {
     res.status(404).json({ error: (e as Error).message })
+  }
+})
+
+// Resume all signal bots that were paused by a network switch (one-click "go
+// live" after switching to mainnet). Kill-switch gated like a normal start.
+app.post('/api/signal/bots/resume-paused', requireAuth, (req: Request, res: Response) => {
+  const uid = userId(req)
+  if (MULTI_USER && uid && isTripped(uid)) {
+    res.status(423).json({ error: 'Kill switch tripped — unlock in Settings first' }); return
+  }
+  try {
+    res.json({ resumed: resumePausedSignalBots(uid) })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
   }
 })
 

@@ -1232,6 +1232,26 @@ export default function SignalBotsPage() {
 
   const riskMode = sizingResult !== null
 
+  const pausedCount = bots.filter((b) => b.pausedForNetworkSwitch).length
+
+  // One-click resume of bots paused by a network switch (e.g. after going to
+  // mainnet). Confirm first — on mainnet this starts REAL-money trading.
+  const resumePausedBots = async () => {
+    if (pausedCount === 0) return
+    if (!confirm(`Resume ${pausedCount} paused bot${pausedCount > 1 ? 's' : ''}?\n\nIf you are on MAINNET, this starts trading with REAL money.`)) return
+    setBusy(true); setNotice(null)
+    try {
+      const res = await apiFetch('/api/signal/bots/resume-paused', { method: 'POST' })
+      const j = (await res.json()) as { resumed?: number; error?: string }
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      const list = await apiFetch('/api/signal/bots').then((r) => (r.ok ? r.json() : bots))
+      setBots(list)
+      setNotice({ text: `Resumed ${j.resumed ?? 0} bot${(j.resumed ?? 0) === 1 ? '' : 's'}`, ok: true })
+    } catch (e) {
+      setNotice({ text: `Resume failed: ${(e as Error).message}`, ok: false })
+    } finally { setBusy(false) }
+  }
+
 
   // When switching to a bot, clear new-bot state
   const selectBot = (id: string) => {
@@ -1277,6 +1297,23 @@ export default function SignalBotsPage() {
             <Plus className="h-3.5 w-3.5" /> New
           </button>
         </div>
+
+        {/* Resume-all banner — appears when bots were paused by a network switch. */}
+        {pausedCount > 0 && (
+          <div className="border-b border-warn/30 bg-warn/5 px-4 py-2.5">
+            <p className="mb-1.5 text-[11px] text-warn">
+              {pausedCount} bot{pausedCount > 1 ? 's' : ''} paused by a network switch.
+            </p>
+            <button
+              type="button"
+              onClick={resumePausedBots}
+              disabled={busy}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-warn/40 bg-warn/10 px-3 py-1.5 text-xs font-semibold text-warn hover:bg-warn/20 disabled:opacity-50"
+            >
+              <Play className="h-3.5 w-3.5" /> Resume all paused
+            </button>
+          </div>
+        )}
 
         {/* Bot list — capped on mobile so the config form below stays reachable. */}
         <div className="flex max-h-[40vh] flex-col overflow-y-auto border-b border-border lg:max-h-none">

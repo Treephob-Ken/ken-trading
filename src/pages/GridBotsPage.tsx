@@ -258,6 +258,26 @@ export default function GridBotsPage() {
 
   const running = bots.find(b => b.id === selectedId)?.running ?? false
 
+  const pausedCount = bots.filter(b => b.pausedForNetworkSwitch).length
+
+  // One-click resume of grid bots paused by a network switch. Confirm first —
+  // on mainnet this re-arms real-money grids.
+  const resumePausedBots = async () => {
+    if (pausedCount === 0) return
+    if (!confirm(`Resume ${pausedCount} paused grid bot${pausedCount > 1 ? 's' : ''}?\n\nIf you are on MAINNET, this re-arms grids with REAL money.`)) return
+    setBusy(true); setNotice(null)
+    try {
+      const res = await apiFetch('/api/bots/resume-paused', { method: 'POST' })
+      const j = (await res.json()) as { resumed?: number; error?: string }
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      const list = await apiFetch('/api/bots').then((r) => (r.ok ? r.json() : bots))
+      setBots(list)
+      setNotice({ text: `Resumed ${j.resumed ?? 0} grid bot${(j.resumed ?? 0) === 1 ? '' : 's'}`, ok: true })
+    } catch (e) {
+      setNotice({ text: `Resume failed: ${(e as Error).message}`, ok: false })
+    } finally { setBusy(false) }
+  }
+
   // ── Asset info fetch ─────────────────────────────────────────────────────────
 
   const fetchAssetInfo = useCallback(async (asset: string) => {
@@ -519,6 +539,23 @@ export default function GridBotsPage() {
             <Plus className="h-3.5 w-3.5" /> New
           </button>
         </div>
+
+        {/* Resume-all banner — appears when grids were paused by a network switch. */}
+        {pausedCount > 0 && (
+          <div className="border-b border-warn/30 bg-warn/5 px-4 py-2.5">
+            <p className="mb-1.5 text-[11px] text-warn">
+              {pausedCount} grid bot{pausedCount > 1 ? 's' : ''} paused by a network switch.
+            </p>
+            <button
+              type="button"
+              onClick={resumePausedBots}
+              disabled={busy}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-warn/40 bg-warn/10 px-3 py-1.5 text-xs font-semibold text-warn hover:bg-warn/20 disabled:opacity-50"
+            >
+              <Play className="h-3.5 w-3.5" /> Resume all paused
+            </button>
+          </div>
+        )}
 
         {/* Bot list */}
         <div className="flex max-h-[40vh] flex-col overflow-y-auto border-b border-border lg:max-h-none">
