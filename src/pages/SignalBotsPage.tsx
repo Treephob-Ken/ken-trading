@@ -1168,13 +1168,13 @@ export default function SignalBotsPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden md:flex-row">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
 
       {/* ── Left sidebar: bot list + config form ──
-          On mobile (<md) it stacks above the chart at full width, capped at
-          50vh so the chart pane stays reachable without endless scrolling.
-          On md+ it reverts to the desktop 300px fixed-width column. */}
-      <aside className="flex w-full shrink-0 flex-col overflow-hidden border-b border-border bg-panel/60 max-h-[50vh] md:h-full md:w-[300px] md:max-h-none md:border-b-0 md:border-r">
+          On phones + iPad portrait (<lg) it stacks full-width above the chart
+          and the whole PAGE scrolls, so the config form is fully readable. On
+          lg+ (iPad landscape / desktop) it becomes a fixed-width side column. */}
+      <aside className="flex w-full shrink-0 flex-col border-b border-border bg-panel/60 lg:h-full lg:w-[320px] lg:overflow-hidden lg:border-b-0 lg:border-r">
 
         {/* Bot list header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -1188,8 +1188,8 @@ export default function SignalBotsPage() {
           </button>
         </div>
 
-        {/* Bot list */}
-        <div className="flex flex-col overflow-y-auto border-b border-border">
+        {/* Bot list — capped on mobile so the config form below stays reachable. */}
+        <div className="flex max-h-[40vh] flex-col overflow-y-auto border-b border-border lg:max-h-none">
           {bots.length === 0 && !isNew && (
             <p className="px-4 py-3 text-xs text-dim">No bots yet. Click New to create one.</p>
           )}
@@ -1249,7 +1249,7 @@ export default function SignalBotsPage() {
 
         {/* Config form */}
         {cfg && (
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="p-4 lg:flex-1 lg:overflow-y-auto">
             <div className="flex flex-col gap-3">
               {/* Stranded position banner — selected bot is stopped but its
                   asset still has an open position on the exchange. */}
@@ -1806,7 +1806,7 @@ export default function SignalBotsPage() {
       </aside>
 
       {/* ── Right main area ── */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+      <div className="flex min-w-0 flex-col gap-4 p-4 lg:flex-1 lg:overflow-y-auto lg:p-5">
 
         {/* Live status header — verdict-style pulse pill + chips + inline error */}
         {selectedId && !isNew && status && (

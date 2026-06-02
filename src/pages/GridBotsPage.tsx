@@ -500,13 +500,13 @@ export default function GridBotsPage() {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden md:flex-row">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
 
       {/* ── Left sidebar: bot list + config form ──
           On mobile (<md) it stacks above the detail pane at full width, capped
           at 50vh so the detail pane stays reachable. On md+ it reverts to the
           desktop 300px fixed-width column. */}
-      <aside className="flex w-full shrink-0 flex-col overflow-hidden border-b border-border bg-panel/60 max-h-[50vh] md:h-full md:w-[300px] md:max-h-none md:border-b-0 md:border-r">
+      <aside className="flex w-full shrink-0 flex-col border-b border-border bg-panel/60 lg:h-full lg:w-[320px] lg:overflow-hidden lg:border-b-0 lg:border-r">
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -521,7 +521,7 @@ export default function GridBotsPage() {
         </div>
 
         {/* Bot list */}
-        <div className="flex flex-col overflow-y-auto border-b border-border">
+        <div className="flex max-h-[40vh] flex-col overflow-y-auto border-b border-border lg:max-h-none">
           {bots.length === 0 && !isNew && (
             <p className="px-4 py-3 text-xs text-dim">No bots yet. Click New to create one.</p>
           )}
@@ -582,7 +582,7 @@ export default function GridBotsPage() {
 
         {/* Config form */}
         {cfg !== null && (
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="p-4 lg:flex-1 lg:overflow-y-auto">
             <div className="flex flex-col gap-3">
               {/* Stranded position banner */}
               {selectedId && !isNew && cfg.asset && (() => {
@@ -864,7 +864,7 @@ export default function GridBotsPage() {
       </aside>
 
       {/* ── Right main area ── */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+      <div className="flex min-w-0 flex-col gap-4 p-4 lg:flex-1 lg:overflow-y-auto lg:p-5">
 
         {/* Live status header */}
         {selectedId && !isNew && (
