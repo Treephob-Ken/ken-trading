@@ -414,6 +414,21 @@ export default function BuilderPage() {
               </div>
             )}
           </div>
+
+          {/* Per-trade risk/reward — what you lose on a stop vs gain on target. */}
+          {(() => {
+            const risk = spec.riskPct ?? 1
+            const R = spec.stopMode === 'atr'
+              ? (spec.rr ?? 2)
+              : (spec.slPct && spec.tpPct ? spec.tpPct / spec.slPct : null)
+            return (
+              <p className="mt-2 text-[11px] leading-relaxed text-dim">
+                Per trade: lose <span className="font-semibold text-loss">−{risk}%</span> of account on a stop
+                {R != null && <> · win <span className="font-semibold text-gain">+{(risk * R).toFixed(2)}%</span> on target (R:R {R.toFixed(2)})</>}.
+                <span className="text-dim/70"> e.g. on a $150 account ≈ <span className="text-loss">−${(150 * risk / 100).toFixed(2)}</span>{R != null && <> / <span className="text-gain">+${(150 * risk * R / 100).toFixed(2)}</span></>} per trade.</span>
+              </p>
+            )
+          })()}
         </div>
 
         {/* Preset library */}

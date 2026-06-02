@@ -1153,6 +1153,15 @@ function PositionDetailCard({
       })()
     : null
 
+  // Realized P&L if the SL / TP fills, in $ — (exit−entry)×size for a long,
+  // flipped for a short. SL is a loss (negative), TP a gain (positive).
+  const pnlAt = (exit: number | null | undefined): number | null =>
+    exit != null && entry > 0
+      ? (position.side === 'long' ? exit - entry : entry - exit) * position.size
+      : null
+  const pnlAtSl = pnlAt(brackets?.slPx)
+  const pnlAtTp = pnlAt(brackets?.tpPx)
+
   const timeHeldMs = openedAt ? Date.now() - openedAt : null
 
   const pnlTone: Tone = position.unrealizedPnl > 0 ? 'gain' : position.unrealizedPnl < 0 ? 'loss' : 'neutral'
@@ -1213,7 +1222,9 @@ function PositionDetailCard({
           info="Distance from current mark to the open reduce-only stop order. If empty, no SL is on the exchange — your position has no automated downside cap."
           value={brackets?.slPx != null ? `$${brackets.slPx.toFixed(4)}` : '—'}
           tone={brackets?.slPx == null ? 'warn' : 'neutral'}
-          sub={distToSlPct != null ? `${Math.abs(distToSlPct).toFixed(2)}% away` : 'No SL on exchange'}
+          sub={brackets?.slPx != null
+            ? `${Math.abs(distToSlPct ?? 0).toFixed(2)}% away${pnlAtSl != null ? ` · ${fmtMoney(pnlAtSl, true)} if hit` : ''}`
+            : 'No SL on exchange'}
         />
         <StatTile
           compact
@@ -1221,7 +1232,9 @@ function PositionDetailCard({
           info="Distance from current mark to the open reduce-only TP order."
           value={brackets?.tpPx != null ? `$${brackets.tpPx.toFixed(4)}` : '—'}
           tone={brackets?.tpPx == null ? 'neutral' : 'gain'}
-          sub={distToTpPct != null ? `${Math.abs(distToTpPct).toFixed(2)}% away` : 'No TP on exchange'}
+          sub={brackets?.tpPx != null
+            ? `${Math.abs(distToTpPct ?? 0).toFixed(2)}% away${pnlAtTp != null ? ` · ${fmtMoney(pnlAtTp, true)} if hit` : ''}`
+            : 'No TP on exchange'}
         />
         <StatTile
           compact
@@ -1268,7 +1281,8 @@ function PositionDetailCard({
 // asset/timeframe in place by re-running the build effect on key change.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const POS_CHART_TF = '1h'  // sensible default; could be user-selectable later
+const POS_CHART_TF = '1h'  // default; user can switch via the TF buttons
+const POS_CHART_TFS = ['5m', '15m', '1h', '4h', '1d'] as const
 
 function PositionChart({
   asset,
@@ -1289,8 +1303,10 @@ function PositionChart({
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [chartTf, setChartTf] = useState<string>(() => localStorage.getItem('pos_chart_tf') || POS_CHART_TF)
+  useEffect(() => { localStorage.setItem('pos_chart_tf', chartTf) }, [chartTf])
 
-  // Fetch candles whenever asset changes.
+  // Fetch candles whenever the asset or timeframe changes.
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
@@ -1298,13 +1314,13 @@ function PositionChart({
     // name through unchanged so fetchKlines routes it to HL's candle endpoint.
     // Plain coins get the Binance "{BASE}USDT" shape.
     const chartSymbol = asset.includes(':') ? asset : `${asset.toUpperCase()}USDT`
-    fetchKlines({ symbol: chartSymbol, interval: POS_CHART_TF })
+    fetchKlines({ symbol: chartSymbol, interval: chartTf })
       .then((data) => { if (!cancelled) { setCandles(data); setLoading(false) } })
       .catch((e: unknown) => {
         if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false) }
       })
     return () => { cancelled = true }
-  }, [asset])
+  }, [asset, chartTf])
 
   // Build the chart whenever candles or any of the overlay prices change.
   useEffect(() => {
@@ -1396,7 +1412,7 @@ function PositionChart({
 
   if (error) {
     return (
-      <div className="flex h-[280px] flex-col items-center justify-center gap-2 rounded-lg border border-border bg-panel-2 text-center">
+      <div className="flex h-[300px] sm:h-[460px] flex-col items-center justify-center gap-2 rounded-lg border border-border bg-panel-2 text-center">
         <p className="text-sm text-loss">Could not load chart</p>
         <p className="max-w-sm text-xs text-dim">{error}</p>
       </div>
@@ -1404,7 +1420,7 @@ function PositionChart({
   }
   if (loading && candles.length === 0) {
     return (
-      <div className="flex h-[280px] items-center justify-center rounded-lg border border-border bg-panel-2 text-sm text-dim">
+      <div className="flex h-[300px] sm:h-[460px] items-center justify-center rounded-lg border border-border bg-panel-2 text-sm text-dim">
         Loading {asset}/USDC chart…
       </div>
     )
@@ -1412,7 +1428,15 @@ function PositionChart({
   return (
     <div className="rounded-lg border border-border bg-panel-2 p-2">
       <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[10px] text-dim">
-        <span>{asset}/USDC · {POS_CHART_TF}</span>
+        <span>{asset}/USDC</span>
+        <div className="flex overflow-hidden rounded-md border border-border">
+          {POS_CHART_TFS.map((tf) => (
+            <button key={tf} type="button" onClick={() => setChartTf(tf)}
+              className={`px-2 py-0.5 font-mono text-[10px] transition-colors ${chartTf === tf ? 'bg-brand text-bg' : 'bg-panel-2 text-dim hover:text-text'}`}>
+              {tf}
+            </button>
+          ))}
+        </div>
         <span className="ml-auto flex flex-wrap gap-2">
           <span className="flex items-center gap-1">
             <span className={`h-0.5 w-3 ${side === 'long' ? 'bg-gain' : 'bg-loss'}`} /> entry
@@ -1422,7 +1446,7 @@ function PositionChart({
           <span className="flex items-center gap-1"><span className="h-0.5 w-3 border-t border-dotted border-warn" /> Liq</span>
         </span>
       </div>
-      <div ref={ref} className="h-[280px] w-full" />
+      <div ref={ref} className="h-[300px] sm:h-[460px] w-full" />
     </div>
   )
 }

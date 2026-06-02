@@ -800,6 +800,7 @@ export default function SignalBotsPage() {
     direction?: 'long' | 'short' | 'both'
     stopMode?: 'pct' | 'atr'
     atrMult?: number; rr?: number; atrLength?: number
+    riskPct?: number; slPct?: number; tpPct?: number
     entryLong?: { conditions: unknown[] }; entryShort?: { conditions: unknown[] }
   }
   const [customSpec, setCustomSpec] = useState<CustomSpecInfo | null>(null)
@@ -1412,6 +1413,18 @@ export default function SignalBotsPage() {
                     Entry conditions: {customSpec?.entryLong?.conditions.length ?? 0} long
                     {customSpec?.entryShort?.conditions.length ? ` · ${customSpec.entryShort.conditions.length} short` : ''}
                   </div>
+                  {(() => {
+                    const risk = customSpec?.riskPct ?? 1
+                    const R = customSpec?.stopMode === 'atr'
+                      ? (customSpec?.rr ?? 2)
+                      : (customSpec?.slPct && customSpec?.tpPct ? customSpec.tpPct / customSpec.slPct : null)
+                    return (
+                      <div className="text-dim">
+                        Per trade: <span className="font-semibold text-loss">−{risk}%</span> of account on a stop
+                        {R != null && <> · <span className="font-semibold text-gain">+{(risk * R).toFixed(2)}%</span> on target</>}
+                      </div>
+                    )
+                  })()}
                   <div className="text-dim/70 text-[10px]">
                     Position size = <span className="text-text">Risk % of your account</span> ÷ stop distance, per trade (set in the Builder).
                     {customSpec?.stopMode === 'atr' ? ' SL/TP come from ATR — the TP/SL % and sizing fields below don’t apply.' : ' The sizing fields below don’t apply.'}
