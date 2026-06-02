@@ -10,7 +10,7 @@ import RoundTripsTable from '@/components/journal/RoundTripsTable'
 import FillsTable from '@/components/journal/FillsTable'
 import AuditTable from '@/components/journal/AuditTable'
 import TradeDetailModal from '@/components/journal/TradeDetailModal'
-import ActivityHeatmap from '@/components/journal/ActivityHeatmap'
+import LedgerSummary from '@/components/journal/LedgerSummary'
 import BotLeaderboard from '@/components/journal/BotLeaderboard'
 
 export type TabId = 'roundtrips' | 'fills' | 'rejected'
@@ -241,9 +241,9 @@ export default function LogsPage({ embedded = false, tab: tabProp, onTabChange }
           Overview tab already shows account KPIs + the bot leaderboard. */}
       {!embedded && <KpiHero summary={summary} loading={loadingSummary} />}
 
-      {/* Activity heatmap — kept in both modes (Portfolio has no day heatmap). */}
+      {/* Range summary — net PnL headline + cumulative-PnL sparkline. */}
       <div className={`grid gap-3 ${embedded ? '' : 'lg:grid-cols-[2fr_1fr]'}`}>
-        <ActivityHeatmap series={summary?.dailySeries ?? []} loading={loadingSummary} />
+        <LedgerSummary summary={summary} loading={loadingSummary} />
         {!embedded && <BotLeaderboard rows={summary?.byBot ?? []} loading={loadingSummary} />}
       </div>
 
