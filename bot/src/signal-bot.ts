@@ -120,6 +120,21 @@ export interface SignalBotConfig {
   // Stored as the id so a user can edit the spec in the Builder and have all
   // bots that reference it pick up the new logic on next signal poll.
   customStrategyId?: string
+  // Backtest reference captured at deploy time. UI-ONLY — the bot never trades
+  // on it. Lets the Signal Bots page compare what the backtest predicted against
+  // what the bot actually traded live (the forward-test scorecard).
+  backtestSnapshot?: BacktestSnapshot
+}
+
+export interface BacktestSnapshot {
+  winRate: number          // %
+  profitFactor: number
+  expectancy: number       // % per trade
+  maxDrawdownPct: number
+  totalReturnPct: number
+  numTrades: number        // backtest sample size
+  feePct: number           // fee assumption the backtest used
+  capturedAt: number       // ms epoch when deployed
 }
 
 export interface SignalBotStatus {
@@ -295,6 +310,27 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
   const slRaw = typeof b.slPct === 'string' ? Number(b.slPct) : b.slPct
   const slPct = typeof slRaw === 'number' && slRaw > 0 ? slRaw : undefined
 
+  // Backtest snapshot — pass through only if it's a well-formed object of finite
+  // numbers (it's UI metadata, never used for trading, but we keep it clean).
+  let backtestSnapshot: BacktestSnapshot | undefined
+  if (typeof b.backtestSnapshot === 'object' && b.backtestSnapshot !== null) {
+    const s = b.backtestSnapshot as Record<string, unknown>
+    const num = (v: unknown): number => {
+      const n = typeof v === 'string' ? Number(v) : v
+      return typeof n === 'number' && Number.isFinite(n) ? n : 0
+    }
+    backtestSnapshot = {
+      winRate: num(s.winRate),
+      profitFactor: num(s.profitFactor),
+      expectancy: num(s.expectancy),
+      maxDrawdownPct: num(s.maxDrawdownPct),
+      totalReturnPct: num(s.totalReturnPct),
+      numTrades: num(s.numTrades),
+      feePct: num(s.feePct),
+      capturedAt: num(s.capturedAt) || Date.now(),
+    }
+  }
+
   return {
     symbol, timeframe, strategyId, params, asset,
     ...(riskUsd !== undefined ? { riskUsd } : {}),
@@ -310,6 +346,7 @@ export function parseSignalConfig(body: unknown): SignalBotConfig {
     ...(isCustom && typeof b.customStrategyId === 'string'
       ? { customStrategyId: b.customStrategyId }
       : {}),
+    ...(backtestSnapshot ? { backtestSnapshot } : {}),
   }
 }
 

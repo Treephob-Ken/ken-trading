@@ -39,6 +39,7 @@ import LiveStatusCard from '@/components/signalbot/LiveStatusCard'
 import LivePositionCard from '@/components/signalbot/LivePositionCard'
 import TradeSetupCard from '@/components/signalbot/TradeSetupCard'
 import SignalFunnelCard from '@/components/signalbot/SignalFunnelCard'
+import ForecastVsActualCard from '@/components/signalbot/ForecastVsActualCard'
 import EnsembleVotesCard from '@/components/signalbot/EnsembleVotesCard'
 import PositionSizeCard from '@/components/PositionSizeCard'
 import ChartHoverPanel, {
@@ -85,6 +86,19 @@ interface SignalBotConfig {
   catchUpOnStart?: boolean
   // Suggested-TP mode — when true, bot uses MFE-median as TP instead of tpPct
   useSuggestedTp?: boolean
+  // Backtest reference captured at deploy time (UI-only — never traded on).
+  // Powers the "Backtest vs Live" forward-test card.
+  backtestSnapshot?: BacktestSnapshot
+}
+interface BacktestSnapshot {
+  winRate: number
+  profitFactor: number
+  expectancy: number
+  maxDrawdownPct: number
+  totalReturnPct: number
+  numTrades: number
+  feePct: number
+  capturedAt: number
 }
 interface BotSummary {
   id: string; name: string; running: boolean; strategyId: string
@@ -1091,6 +1105,8 @@ export default function SignalBotsPage() {
             useSuggestedTp?: boolean
             // MTF filter
             mtfEnabled?: boolean; mtfTimeframe?: string
+            // Backtest reference for the forward-test card
+            backtestSnapshot?: BacktestSnapshot
           }
           const stratId = pre.strategy ?? strats[0]?.id ?? 'macd'
           const stratMeta = strats.find(s => s.id === stratId)
@@ -1120,6 +1136,7 @@ export default function SignalBotsPage() {
             riskUsd: pre.riskUsd,
             mtfEnabled: pre.mtfEnabled,
             mtfTimeframe: pre.mtfTimeframe,
+            backtestSnapshot: pre.backtestSnapshot,
           }
           setIsNew(true)
           setSelectedId(null)
@@ -1978,6 +1995,9 @@ export default function SignalBotsPage() {
               <LiveStatusCard status={status} lastPrice={livePrice} />
               <SignalFunnelCard status={status} />
             </div>
+            {cfg?.backtestSnapshot && (
+              <ForecastVsActualCard snapshot={cfg.backtestSnapshot} live={botStats} />
+            )}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <LivePositionCard
                 asset={status.config.asset}

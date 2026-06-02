@@ -388,6 +388,21 @@ export default function BacktesterPage({
 
   // Deploy payload — translates sizing mode into what the Signal Bot expects.
   const deployPayload = useMemo(() => {
+    // Snapshot the backtest's headline numbers so the live bot can later show
+    // "predicted vs actually-traded". Captured from the run being deployed.
+    const m = result?.metrics
+    const backtestSnapshot = m
+      ? {
+          winRate: m.winRate,
+          profitFactor: Number.isFinite(m.profitFactor) ? m.profitFactor : 0,
+          expectancy: m.expectancy,
+          maxDrawdownPct: m.maxDrawdownPct,
+          totalReturnPct: m.totalReturnPct,
+          numTrades: m.numTrades,
+          feePct,
+          capturedAt: Date.now(),
+        }
+      : undefined
     const base = {
       asset: symbol.replace(/USDT$/, ''),
       strategy: strategyId,
@@ -395,6 +410,7 @@ export default function BacktesterPage({
       params,
       direction,
       slPct: stopLossPct > 0 ? stopLossPct : undefined,
+      ...(backtestSnapshot ? { backtestSnapshot } : {}),
       // MTF filter — bot will reject trades that conflict with the HTF signal.
       ...(mtfFilter ? { mtfEnabled: true, mtfTimeframe } : {}),
     }
@@ -418,7 +434,7 @@ export default function BacktesterPage({
   }, [
     symbol, strategyId, timeframe, params, direction,
     stopLossPct, sizingMode, initialCapital, targetRiskPct, deployUsd,
-    lastPrice, assetMidPx, mtfFilter, mtfTimeframe,
+    lastPrice, assetMidPx, mtfFilter, mtfTimeframe, result, feePct,
   ])
 
   const canDeploy = sizingMode === 'fixed' ? deployUsd > 0 : stopLossPct > 0
