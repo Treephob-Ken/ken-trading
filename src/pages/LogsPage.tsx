@@ -13,7 +13,7 @@ import TradeDetailModal from '@/components/journal/TradeDetailModal'
 import ActivityHeatmap from '@/components/journal/ActivityHeatmap'
 import BotLeaderboard from '@/components/journal/BotLeaderboard'
 
-type TabId = 'roundtrips' | 'fills' | 'rejected'
+export type TabId = 'roundtrips' | 'fills' | 'rejected'
 
 const TABS: { id: TabId; label: string; hint: string }[] = [
   { id: 'roundtrips', label: 'Round-Trips', hint: 'Completed trades, entry → exit' },
@@ -28,8 +28,19 @@ function transition(setter: () => void) {
   else setter()
 }
 
-export default function LogsPage() {
-  const [tab, setTab] = useState<TabId>('roundtrips')
+interface LogsPageProps {
+  // When embedded inside the Performance hub, the hub owns the tab bar + page
+  // title, and Portfolio already shows the KPI hero + bot leaderboard — so we
+  // hide those here to avoid duplication and keep the ledger purely forensic.
+  embedded?: boolean
+  tab?: TabId
+  onTabChange?: (t: TabId) => void
+}
+
+export default function LogsPage({ embedded = false, tab: tabProp, onTabChange }: LogsPageProps = {}) {
+  const [internalTab, setInternalTab] = useState<TabId>('roundtrips')
+  const tab = tabProp ?? internalTab
+  const setTab = (t: TabId) => { if (onTabChange) onTabChange(t); else setInternalTab(t) }
   const [filter, setFilter] = useState<FilterState>({
     range: '24h',
     bot: 'all',
@@ -214,21 +225,24 @@ export default function LogsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-3 sm:p-5">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-base font-semibold text-text">Trade Log</h1>
-          <p className="text-[11px] text-dim">Every fill, every attempt, every event — your trading journal.</p>
+      {/* Header — hidden when embedded (the Performance hub provides the title) */}
+      {!embedded && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-base font-semibold text-text">Trade Log</h1>
+            <p className="text-[11px] text-dim">Every fill, every attempt, every event — your trading journal.</p>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* KPI Hero */}
-      <KpiHero summary={summary} loading={loadingSummary} />
+      {/* KPI hero + bot leaderboard — standalone only; the Performance hub's
+          Overview tab already shows account KPIs + the bot leaderboard. */}
+      {!embedded && <KpiHero summary={summary} loading={loadingSummary} />}
 
-      {/* Activity heatmap + leaderboard */}
-      <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
+      {/* Activity heatmap — kept in both modes (Portfolio has no day heatmap). */}
+      <div className={`grid gap-3 ${embedded ? '' : 'lg:grid-cols-[2fr_1fr]'}`}>
         <ActivityHeatmap series={summary?.dailySeries ?? []} loading={loadingSummary} />
-        <BotLeaderboard rows={summary?.byBot ?? []} loading={loadingSummary} />
+        {!embedded && <BotLeaderboard rows={summary?.byBot ?? []} loading={loadingSummary} />}
       </div>
 
       {/* Error banner */}
@@ -238,23 +252,26 @@ export default function LogsPage() {
         </div>
       )}
 
-      {/* Tabs + export */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center rounded-xl border border-border bg-panel-2 p-0.5 w-fit">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              title={t.hint}
-              onClick={() => transition(() => setTab(t.id))}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                tab === t.id ? 'bg-brand text-bg' : 'text-dim hover:text-text'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+      {/* Tabs + export. The tab bar is hidden when embedded (the hub owns it),
+          leaving just the right-aligned export button. */}
+      <div className={`flex flex-wrap items-center gap-3 ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && (
+          <div className="flex items-center rounded-xl border border-border bg-panel-2 p-0.5 w-fit">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                title={t.hint}
+                onClick={() => transition(() => setTab(t.id))}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  tab === t.id ? 'bg-brand text-bg' : 'text-dim hover:text-text'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
         {canExport && (
           <button
             type="button"

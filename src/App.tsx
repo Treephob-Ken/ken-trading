@@ -8,8 +8,7 @@ import LoginPage from '@/pages/LoginPage'
 import SignalBotsPage from '@/pages/SignalBotsPage'
 import GridBotsPage from '@/pages/GridBotsPage'
 import TradePage from '@/pages/TradePage'
-import LogsPage from '@/pages/LogsPage'
-import PortfolioPage from '@/pages/PortfolioPage'
+import PerformancePage from '@/pages/PerformancePage'
 import BuilderPage from '@/pages/BuilderPage'
 import SettingsPage from '@/pages/SettingsPage'
 import FundamentalsPage from '@/pages/FundamentalsPage'
@@ -103,11 +102,11 @@ export default function App() {
           {/* Phase 5 — Trade */}
           <Route path="trade" element={<TradePage />} />
 
-          {/* Phase 5 — Logs */}
-          <Route path="logs" element={<LogsPage />} />
-
-          {/* Portfolio — multi-range PnL dashboard, equity curve, by-asset/bot rollups */}
-          <Route path="portfolio" element={<PortfolioPage />} />
+          {/* Performance — merged hub: Overview (portfolio) + Round-Trips/Fills/Rejected (logs) */}
+          <Route path="performance" element={<PerformancePage />} />
+          {/* Back-compat: old bookmarks land on the right tab of the hub */}
+          <Route path="logs" element={<Navigate to="/performance?tab=roundtrips" replace />} />
+          <Route path="portfolio" element={<Navigate to="/performance?tab=overview" replace />} />
 
           {/* Strategy Builder — combine indicator conditions with AND/OR */}
           <Route path="builder" element={<BuilderPage />} />
