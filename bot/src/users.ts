@@ -53,9 +53,19 @@ export function getDb(): ReturnType<typeof Database> {
   for (const col of [
     `ALTER TABLE users ADD COLUMN kill_switch_enabled INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN kill_switch_pct REAL NOT NULL DEFAULT 15`,
+    // Per-network agent keys — a Hyperliquid agent is network-specific, so each
+    // network keeps its own key and switching networks no longer wipes it.
+    `ALTER TABLE users ADD COLUMN hl_key_testnet TEXT`,
+    `ALTER TABLE users ADD COLUMN hl_key_mainnet TEXT`,
   ]) {
     try { _db.exec(col) } catch { /* column already exists */ }
   }
+  // One-time backfill: move the legacy single key into the slot for whichever
+  // network it was saved on, so existing users don't have to re-paste.
+  try {
+    _db.exec(`UPDATE users SET hl_key_testnet = hl_key_enc WHERE hl_network = 'testnet' AND hl_key_testnet IS NULL AND hl_key_enc IS NOT NULL`)
+    _db.exec(`UPDATE users SET hl_key_mainnet = hl_key_enc WHERE hl_network = 'mainnet' AND hl_key_mainnet IS NULL AND hl_key_enc IS NOT NULL`)
+  } catch { /* best effort */ }
   return _db
 }
 
@@ -292,17 +302,31 @@ export function saveHLCredentials(
   }
   const normalizedUser = validateHLUserFormat(hlUser)
   const db = getDb()
+  // Per-network key column for the network being saved. `hl_key_enc` is kept as
+  // a mirror of the ACTIVE network's key so any legacy reader stays correct.
+  const col = network === 'testnet' ? 'hl_key_testnet' : 'hl_key_mainnet'
   if (agentKey) {
     const encrypted = encryptSecret(agentKey.trim())
     db.prepare(
-      `UPDATE users SET hl_key_enc = ?, hl_user = ?, hl_network = ? WHERE id = ?`,
-    ).run(encrypted, normalizedUser, network, userId)
+      `UPDATE users SET ${col} = ?, hl_key_enc = ?, hl_user = ?, hl_network = ? WHERE id = ?`,
+    ).run(encrypted, encrypted, normalizedUser, network, userId)
   } else {
-    // Keep the existing encrypted key — only refresh address and network.
+    // Network/address-only update: keep each network's stored key, switch the
+    // active network, and point hl_key_enc at the target network's key (which
+    // may be null if that network hasn't been keyed yet — handled on load).
     db.prepare(
-      `UPDATE users SET hl_user = ?, hl_network = ? WHERE id = ?`,
+      `UPDATE users SET hl_user = ?, hl_network = ?, hl_key_enc = ${col} WHERE id = ?`,
     ).run(normalizedUser, network, userId)
   }
+}
+
+// Which networks currently have an agent key saved — drives the Settings UI so
+// the user can see "testnet ✓ / mainnet —" and only re-paste when needed.
+export function getHLConfiguredNetworks(userId: string): { testnet: boolean; mainnet: boolean } {
+  const row = getDb()
+    .prepare('SELECT hl_key_testnet, hl_key_mainnet FROM users WHERE id = ?')
+    .get(userId) as { hl_key_testnet: string | null; hl_key_mainnet: string | null } | undefined
+  return { testnet: !!row?.hl_key_testnet, mainnet: !!row?.hl_key_mainnet }
 }
 
 // ─── Kill-switch config ────────────────────────────────────────────────────────
@@ -333,19 +357,22 @@ export function setKillSwitchConfig(userId: string, enabled: boolean, pct: numbe
 // Throws if the user hasn't saved credentials yet.
 export function loadUserCreds(userId: string): EnvConfig {
   const db = getDb()
-  const row = db.prepare('SELECT hl_key_enc, hl_user, hl_network FROM users WHERE id = ?').get(userId) as
-    | Pick<UserRow, 'hl_key_enc' | 'hl_user' | 'hl_network'>
+  const row = db.prepare('SELECT hl_key_enc, hl_key_testnet, hl_key_mainnet, hl_user, hl_network FROM users WHERE id = ?').get(userId) as
+    | { hl_key_enc: string | null; hl_key_testnet: string | null; hl_key_mainnet: string | null; hl_user: string | null; hl_network: string }
     | undefined
   if (!row) throw new Error(`User ${userId} not found`)
-  if (!row.hl_key_enc || !row.hl_user) {
+  const isTestnet = row.hl_network === 'testnet'
+  // Use the active network's own key; fall back to the legacy single key.
+  const enc = (isTestnet ? row.hl_key_testnet : row.hl_key_mainnet) ?? row.hl_key_enc
+  if (!enc || !row.hl_user) {
     throw new Error(
-      'Hyperliquid credentials not configured. Go to Settings → HL Credentials to set your agent key.',
+      `Hyperliquid credentials not configured for ${row.hl_network}. Go to Settings and paste your ${row.hl_network} agent key.`,
     )
   }
-  const agentKey = decryptSecret(row.hl_key_enc)
+  const agentKey = decryptSecret(enc)
   return {
     agentKey: agentKey as `0x${string}`,
     user: row.hl_user as `0x${string}`,
-    isTestnet: row.hl_network === 'testnet',
+    isTestnet,
   }
 }

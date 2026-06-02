@@ -53,6 +53,7 @@ import {
   deleteUser,
   findUserById,
   findUserByEmail,
+  getHLConfiguredNetworks,
   getKillSwitchConfig,
   listUsers,
   loadUserCreds,
@@ -791,7 +792,14 @@ app.get('/settings/credentials', requireAuth, (req: Request, res: Response) => {
   if (!MULTI_USER) { res.status(404).json({ error: 'Multi-user mode is not enabled' }); return }
   const user = findUserById(req.user!.sub)
   if (!user) { res.status(404).json({ error: 'User not found' }); return }
-  res.json({ hlUser: user.hlUser, hlNetwork: user.hlNetwork, hlConfigured: user.hlConfigured })
+  const nets = getHLConfiguredNetworks(req.user!.sub)
+  res.json({
+    hlUser: user.hlUser,
+    hlNetwork: user.hlNetwork,
+    hlConfigured: user.hlConfigured,
+    testnetConfigured: nets.testnet,
+    mainnetConfigured: nets.mainnet,
+  })
 })
 
 // ─── Admin routes ─────────────────────────────────────────────────────────────

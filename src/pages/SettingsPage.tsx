@@ -8,6 +8,8 @@ interface Credentials {
   hlUser: string
   hlNetwork: 'mainnet' | 'testnet'
   hlConfigured: boolean
+  testnetConfigured?: boolean
+  mainnetConfigured?: boolean
 }
 
 const inputCls = 'w-full rounded-xl border border-border bg-panel-2 px-3 py-2.5 font-mono text-sm text-text outline-none focus:border-brand/60 focus:ring-1 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50'
@@ -167,24 +169,34 @@ export default function SettingsPage() {
               Network
             </span>
             <div className="flex gap-2">
-              {(['mainnet', 'testnet'] as const).map(n => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setNetwork(n)}
-                  className={`flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors capitalize ${
-                    network === n
-                      ? n === 'mainnet'
-                        ? 'border-gain/40 bg-gain/10 text-gain'
-                        : 'border-warn/40 bg-warn/10 text-warn'
-                      : 'border-border text-dim hover:text-text hover:border-border/80'
-                  }`}
-                >
-                  {n}
-                  {n === 'testnet' && <span className="ml-1 opacity-60">⚠</span>}
-                </button>
-              ))}
+              {(['mainnet', 'testnet'] as const).map(n => {
+                const keyed = n === 'testnet' ? creds?.testnetConfigured : creds?.mainnetConfigured
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setNetwork(n)}
+                    className={`flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors capitalize ${
+                      network === n
+                        ? n === 'mainnet'
+                          ? 'border-gain/40 bg-gain/10 text-gain'
+                          : 'border-warn/40 bg-warn/10 text-warn'
+                        : 'border-border text-dim hover:text-text hover:border-border/80'
+                    }`}
+                  >
+                    {n}
+                    {n === 'testnet' && <span className="ml-1 opacity-60">⚠</span>}
+                    <span className="ml-1 text-[9px] font-normal opacity-80">{keyed ? '· key ✓' : '· no key'}</span>
+                  </button>
+                )
+              })}
             </div>
+            <span className="text-[10px] text-dim">
+              Each network keeps its own agent key. Switching networks no longer wipes the other —
+              {(network === 'testnet' ? creds?.testnetConfigured : creds?.mainnetConfigured)
+                ? ` your ${network} key is saved, just switch and Save.`
+                : ` paste a ${network} agent key once and it's remembered.`}
+            </span>
           </label>
 
           {notice && (
