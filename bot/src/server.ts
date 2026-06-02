@@ -93,6 +93,7 @@ import {
 } from './journal.js'
 import { listPausedGridBotIds, listRunningGridBotIds, readGridRuntime, writeGridRuntime } from './grid-runtime.js'
 import { isNotifyEnabled, notifyDailyGuard, notifyServerStart, startFillNotifier } from './notify.js'
+import { startTelegramCommands } from './telegram-commands.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -230,6 +231,71 @@ function armDailyGuardForUser(uid: string): void {
     stopAllBots: stopAllBotsNoClose,
     onTrip: (_userId, reason) => { void notifyDailyGuard(reason) },
   })
+}
+
+// ─── Telegram read-only command handler ───────────────────────────────────────
+// The Telegram chat belongs to the owner: multi-user → the admin user; single →
+// the .env account. Returns the reply text, or '' for an unknown command.
+async function handleTelegramCommand(cmd: string): Promise<string> {
+  let uid: string | undefined
+  let creds: EnvConfig | null
+  if (MULTI_USER) {
+    const users = listUsers()
+    const admin = users.find((u) => u.isAdmin) ?? users[0]
+    if (!admin) return 'No account registered yet.'
+    uid = admin.id
+    try { creds = loadUserCreds(uid) } catch { creds = null }
+  } else {
+    uid = undefined
+    creds = loadEnv()
+  }
+  if (!creds) return 'Hyperliquid credentials are not set — add them in Settings.'
+
+  const money = (n: number) => `${n < 0 ? '-' : n > 0 ? '+' : ''}$${Math.abs(n).toFixed(2)}`
+  const midnight = Date.parse(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z')
+
+  if (cmd === '/today' || cmd === '/pnl') {
+    const realized = await realizedPnlSince(uid as string, creds, midnight)
+    const lines = [`📊 Today (realized): ${money(realized)}`]
+    if (MULTI_USER && uid) {
+      const g = getDailyGuardStatus(uid)
+      lines.push(`Goal: +$${g.config.profitUsd} / -$${g.config.lossUsd}`)
+      lines.push(g.tripped ? '🛑 Daily guard tripped — bots stopped' : g.config.enabled ? '✅ Daily guard armed' : 'Daily guard off')
+    }
+    return lines.join('\n')
+  }
+
+  if (cmd === '/guard') {
+    if (!MULTI_USER || !uid) return 'The daily guard runs in multi-user mode only.'
+    const g = getDailyGuardStatus(uid)
+    return [
+      `🛡️ Daily guard: ${g.config.enabled ? 'ON' : 'OFF'}`,
+      `Limits: +$${g.config.profitUsd} / -$${g.config.lossUsd}`,
+      `Realized today: ${money(g.realizedUsd ?? 0)}`,
+      g.tripped ? `Status: 🛑 tripped — ${g.reason ?? ''}` : 'Status: watching',
+    ].join('\n')
+  }
+
+  if (cmd === '/status') {
+    const sig = listSignalBots(uid)
+    let grid = 0, gridRunning = 0
+    for (const e of gridBotsForUser(uid).values()) { grid++; if (e.running) gridRunning++ }
+    const sigRunning = sig.filter((b) => b.running).length
+    const lines = [`🤖 Signal ${sigRunning}/${sig.length} running · Grid ${gridRunning}/${grid} running`]
+    try {
+      const acct = await getAccountState(undefined, creds)
+      lines.push(`💼 Account: $${acct.accountValue.toFixed(2)}`)
+      if (acct.allPositions.length === 0) lines.push('No open positions.')
+      else for (const p of acct.allPositions) {
+        lines.push(`• ${p.asset} ${p.side} ${p.size} · uPnL ${money(p.unrealizedPnl)}`)
+      }
+    } catch {
+      lines.push('(could not fetch positions)')
+    }
+    return lines.join('\n')
+  }
+
+  return '' // unknown → poller replies with the help list
 }
 
 // ─── Express setup ────────────────────────────────────────────────────────────
@@ -1691,6 +1757,9 @@ createServer(app).listen(PORT, HOST, async () => {
       log.warn(`Single-tenant Telegram notifier skipped: ${(e as Error).message}`)
     }
   }
+
+  // Read-only Telegram command interface (/today, /status, /guard, /help).
+  startTelegramCommands(handleTelegramCommand)
 
   // Restart heartbeat — fires once on boot so you know the server (re)started
   // (a deploy OR a crash) and how many bots resumed. Delayed so autostart settles.
