@@ -12,7 +12,7 @@
 // The two layers won't reconcile (account value includes unrealized/funding;
 // realized is closed-trade only) — labels make the distinction explicit.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AreaSeries,
   ColorType,
@@ -47,6 +47,9 @@ const EQUITY_PERIODS: { id: EquityPeriod; label: string }[] = [
   { id: 'month', label: 'Month' },
   { id: 'all', label: 'All' },
 ]
+
+// Closed-trades table is paginated so it doesn't become an endless scroll.
+const TRADES_PER_PAGE = 12
 
 function toneForPnl(v: number): 'gain' | 'loss' | 'neutral' {
   if (v > 0) return 'gain'
@@ -146,9 +149,13 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
   const [selectedBot, setSelectedBot] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [tradesPage, setTradesPage] = useState(0)
 
   useEffect(() => { localStorage.setItem('portfolio_range', range) }, [range])
   useEffect(() => { localStorage.setItem('portfolio_eq_period', period) }, [period])
+  // Jump back to page 1 whenever the closed-trades set changes (range switch,
+  // bot cross-filter, or a refresh) so we never land on an empty page.
+  useEffect(() => { setTradesPage(0) }, [range, selectedBot, trips])
 
   // ── Fetches ────────────────────────────────────────────────────────────
   const fetchTrips = (r: PortfolioRange) => {
@@ -181,6 +188,12 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
     () => (selectedBot ? trips.filter((t) => botKey(t.source) === selectedBot) : trips),
     [trips, selectedBot],
   )
+
+  // Closed-trades pagination (clamp the page in case the set shrank).
+  const totalTradePages = Math.max(1, Math.ceil(visibleTrips.length / TRADES_PER_PAGE))
+  const tradePage = Math.min(tradesPage, totalTradePages - 1)
+  const tradeStart = tradePage * TRADES_PER_PAGE
+  const pageTrips = visibleTrips.slice(tradeStart, tradeStart + TRADES_PER_PAGE)
 
   // Active equity-chart data: account value (all bots) or the bot's realized
   // curve, deduped to unique ascending second-resolution timestamps (Lightweight
@@ -403,7 +416,7 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
                 </tr>
               </thead>
               <tbody>
-                {visibleTrips.slice(0, 50).map((t) => (
+                {pageTrips.map((t) => (
                   <tr key={t.id} className="border-t border-border">
                     <td className="py-1 pr-3 text-dim font-mono">
                       {new Date(t.exitTime).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
@@ -427,9 +440,36 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
                 ))}
               </tbody>
             </table>
-            {visibleTrips.length > 50 && (
-              <div className="mt-2 text-[10px] text-dim italic">
-                Showing 50 of {visibleTrips.length}. Use the Logs page for full filtering.
+            {/* Pager — only when there's more than one page. */}
+            {totalTradePages > 1 && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5">
+                <span className="text-[10px] text-dim tabular-nums">
+                  Showing {tradeStart + 1}–{tradeStart + pageTrips.length} of {visibleTrips.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <PagerButton
+                    onClick={() => setTradesPage(tradePage - 1)}
+                    disabled={tradePage === 0}
+                    label="Previous page"
+                  >‹</PagerButton>
+                  {buildPageWindow(tradePage, totalTradePages).map((p, i) =>
+                    p === -1 ? (
+                      <span key={`gap-${i}`} className="px-1 text-[11px] text-dim">…</span>
+                    ) : (
+                      <PagerButton
+                        key={p}
+                        onClick={() => setTradesPage(p)}
+                        active={p === tradePage}
+                        label={`Page ${p + 1}`}
+                      >{p + 1}</PagerButton>
+                    ),
+                  )}
+                  <PagerButton
+                    onClick={() => setTradesPage(tradePage + 1)}
+                    disabled={tradePage === totalTradePages - 1}
+                    label="Next page"
+                  >›</PagerButton>
+                </div>
               </div>
             )}
           </div>
@@ -437,6 +477,49 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
       </div>
     </main>
   )
+}
+
+// Compact numeric pager button. `active` marks the current page; `label` is the
+// accessible name (the visible glyph is too terse for a screen reader).
+function PagerButton({ children, onClick, disabled, active, label }: {
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean
+  active?: boolean
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+      className={`min-w-[28px] rounded-md border px-2 py-1 text-[11px] tabular-nums transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-30 ${
+        active
+          ? 'border-brand bg-brand/10 text-brand font-semibold'
+          : 'border-border bg-panel-2 text-dim hover:text-text'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+// Page-number window: shows every page when there are few, otherwise first +
+// last + a window around the current page, with -1 standing in for an ellipsis.
+function buildPageWindow(current: number, total: number): number[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i)
+  const wanted = new Set<number>([0, total - 1, current, current - 1, current + 1])
+  const sorted = [...wanted].filter((p) => p >= 0 && p < total).sort((a, b) => a - b)
+  const out: number[] = []
+  let prev = -2
+  for (const p of sorted) {
+    if (p - prev > 1) out.push(-1)
+    out.push(p)
+    prev = p
+  }
+  return out
 }
 
 // Generic rollup table — used for the by-asset breakdown.
