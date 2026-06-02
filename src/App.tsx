@@ -44,6 +44,21 @@ export default function App() {
   useEffect(() => { localStorage.setItem('lab_symbol', symbol) }, [symbol])
   useEffect(() => { localStorage.setItem('lab_timeframe', timeframe) }, [timeframe])
 
+  // Global fix for number inputs: select the contents on focus so typing
+  // REPLACES the value instead of gluing onto it (the "03" / stuck-leading-zero
+  // glitch). Applies app-wide to every <input type="number"> without touching
+  // each field.
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target
+      if (t instanceof HTMLInputElement && t.type === 'number') {
+        requestAnimationFrame(() => { try { t.select() } catch { /* some inputs disallow select() */ } })
+      }
+    }
+    document.addEventListener('focusin', onFocusIn)
+    return () => document.removeEventListener('focusin', onFocusIn)
+  }, [])
+
   return (
     <BrowserRouter>
       <Routes>

@@ -613,14 +613,28 @@ function Select<T extends string>({ value, onChange, options, labels }: {
   )
 }
 
+// While focused, shows a raw string draft so you can clear/retype freely (no
+// stuck leading zero, no NaN). Commits only valid numbers; reverts to the
+// current value on blur if left blank.
+function useNumDraft(value: number) {
+  const [focused, setFocused] = useState(false)
+  const [draft, setDraft] = useState('')
+  const display = focused ? draft : String(value)
+  const onFocus = () => { setDraft(String(value)); setFocused(true) }
+  const onBlur = () => setFocused(false)
+  return { display, onFocus, onBlur, setDraft }
+}
+
 function NumberInput({ value, onChange, min, max, step, title, small }: {
   value: number; onChange: (v: number) => void
   min?: number; max?: number; step?: number; title?: string; small?: boolean
 }) {
+  const d = useNumDraft(value)
   return (
-    <input type="number" value={value} title={title}
+    <input type="number" inputMode="decimal" value={d.display} title={title}
       min={min} max={max} step={step ?? 0.01}
-      onChange={(e) => onChange(Number(e.target.value))}
+      onFocus={d.onFocus} onBlur={d.onBlur}
+      onChange={(e) => { d.setDraft(e.target.value); const n = Number(e.target.value); if (e.target.value.trim() !== '' && Number.isFinite(n)) onChange(n) }}
       className={`rounded border border-border bg-panel py-0.5 text-text outline-none focus:border-brand/60 font-mono ${small ? 'w-14 px-1 text-[10px]' : 'w-20 px-1.5 text-[10px]'}`} />
   )
 }
@@ -629,11 +643,13 @@ function NumberField({ label, value, onChange, min, max, step }: {
   label: string; value: number; onChange: (v: number) => void
   min?: number; max?: number; step?: number
 }) {
+  const d = useNumDraft(value)
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] text-dim uppercase">{label}</span>
-      <input type="number" value={value} min={min} max={max} step={step ?? 1}
-        onChange={(e) => onChange(Number(e.target.value))}
+      <input type="number" inputMode="decimal" value={d.display} min={min} max={max} step={step ?? 1}
+        onFocus={d.onFocus} onBlur={d.onBlur}
+        onChange={(e) => { d.setDraft(e.target.value); const n = Number(e.target.value); if (e.target.value.trim() !== '' && Number.isFinite(n)) onChange(n) }}
         className="rounded-md border border-border bg-panel-2 px-2 py-1 text-xs font-mono text-text outline-none focus:border-brand/60" />
     </label>
   )
