@@ -6,6 +6,7 @@ import {
   EyeOff,
   Play,
   Plus,
+  Rocket,
   Save,
   Square,
   X,
@@ -731,6 +732,9 @@ export default function SignalBotsPage() {
   const [bots, setBots] = useState<BotSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isNew, setIsNew] = useState(false)
+  // True from arriving via Backtester "Deploy" until the bot is started — drives
+  // the Save → Start guide banner so a fresh deploy isn't left wondering.
+  const [cameFromDeploy, setCameFromDeploy] = useState(false)
   const [status, setStatus] = useState<SignalBotStatus | null>(null)
   const [cfg, setCfg] = useState<SignalBotConfig | null>(null)
   const [logs, setLogs] = useState<{ ts: string; level: string; msg: string }[]>([])
@@ -893,6 +897,7 @@ export default function SignalBotsPage() {
       const res = await apiFetch(`/api/signal/bots/${selectedId}/${action}`, { method: 'POST' })
       const data = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      if (action === 'start') setCameFromDeploy(false)  // journey complete
       setNotice({ text: action === 'start' ? 'Bot started' : 'Bot stopped', ok: true })
     } catch (e) {
       setNotice({ text: `${action} failed: ${(e as Error).message}`, ok: false })
@@ -1120,6 +1125,7 @@ export default function SignalBotsPage() {
           setSelectedId(null)
           setCfg(newCfg)
           setDirty(true)
+          setCameFromDeploy(true)
           return
         } catch { /* bad sessionStorage — ignore */ }
       }
@@ -1210,6 +1216,7 @@ export default function SignalBotsPage() {
     setStatus(null)
     setCfg(null)
     setNotice(null)
+    setCameFromDeploy(false)
   }
 
   const startNew = () => {
@@ -1219,6 +1226,7 @@ export default function SignalBotsPage() {
     setCfg(blankCfg())
     setDirty(false)
     setNotice(null)
+    setCameFromDeploy(false)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1861,6 +1869,37 @@ export default function SignalBotsPage() {
 
       {/* ── Right main area ── */}
       <div className="flex min-w-0 flex-col gap-4 p-4 lg:flex-1 lg:overflow-y-auto lg:p-5">
+
+        {/* Deploy guide — only while coming from the Backtester "Deploy" button.
+            Walks the user through the two steps that actually put the bot live:
+            Create Bot (save), then Start. Clears once the bot is started. */}
+        {cameFromDeploy && (
+          <div className="rounded-xl border border-brand/30 bg-brand/5 p-3.5">
+            <div className="mb-2 flex items-center gap-1.5">
+              <Rocket className="h-4 w-4 text-brand" />
+              <span className="text-sm font-semibold text-text">Deployed from Backtester — 2 steps to go live</span>
+            </div>
+            <ol className="flex flex-col gap-1.5 text-[11px] text-dim">
+              <li className="flex items-center gap-2">
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                  isNew ? 'bg-brand text-bg' : 'bg-gain/20 text-gain'
+                }`}>{isNew ? '1' : '✓'}</span>
+                <span className={isNew ? 'text-text' : ''}>
+                  Review the settings on the left, then click <span className="font-semibold text-text">Create Bot</span>.
+                </span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                  !isNew && !running ? 'bg-brand text-bg' : 'bg-panel-2 text-dim'
+                }`}>2</span>
+                <span className={!isNew && !running ? 'text-text' : ''}>
+                  Click <span className="font-semibold text-text">Start</span> to go live — you'll then see the
+                  next-bar countdown, signals, and trades below.
+                </span>
+              </li>
+            </ol>
+          </div>
+        )}
 
         {/* Live status header — verdict-style pulse pill + chips + inline error */}
         {selectedId && !isNew && status && (
