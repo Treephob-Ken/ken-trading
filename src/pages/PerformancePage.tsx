@@ -15,18 +15,20 @@ import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Activity } from 'lucide-react'
 import PortfolioPage from '@/pages/PortfolioPage'
-import LogsPage, { type TabId } from '@/pages/LogsPage'
+import LogsPage from '@/pages/LogsPage'
+import TradeAnalytics from '@/components/performance/TradeAnalytics'
 
-type HubTab = 'overview' | TabId
+type LedgerTab = 'roundtrips' | 'fills'
+type HubTab = 'overview' | 'analytics' | LedgerTab
 
 const HUB_TABS: { id: HubTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
+  { id: 'analytics', label: 'Analytics' },
   { id: 'roundtrips', label: 'Round-Trips' },
   { id: 'fills', label: 'Fills' },
-  { id: 'rejected', label: 'Rejected' },
 ]
 
-const VALID = new Set<HubTab>(['overview', 'roundtrips', 'fills', 'rejected'])
+const VALID = new Set<HubTab>(['overview', 'analytics', 'roundtrips', 'fills'])
 
 function readInitialTab(param: string | null): HubTab {
   if (param && VALID.has(param as HubTab)) return param as HubTab
@@ -82,8 +84,10 @@ export default function PerformancePage() {
       {/* ── Active view — plain flow, scrolls with the page ── */}
       {tab === 'overview' ? (
         <PortfolioPage embedded />
+      ) : tab === 'analytics' ? (
+        <TradeAnalytics />
       ) : (
-        <LogsPage embedded tab={tab} onTabChange={selectTab} />
+        <LogsPage embedded tab={tab} />
       )}
     </div>
   )
