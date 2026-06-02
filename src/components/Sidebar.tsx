@@ -22,18 +22,35 @@ interface NavItem {
   label: string
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { path: '/backtest', icon: LineChart,       label: 'Strategy Backtester' },
-  { path: '/scanner',  icon: Radar,            label: 'Scanner'             },
-  { path: '/structure', icon: Network,         label: 'Market Structure'    },
-  { path: '/grid',    icon: LayoutGrid,       label: 'Grid Optimizer'      },
-  { path: '/builder', icon: Hammer,           label: 'Strategy Builder'    },
-  { path: '/signal',  icon: Radio,            label: 'Signal Bots'         },
-  { path: '/bots',    icon: BotMessageSquare, label: 'Grid Bots'           },
-  { path: '/fundamentals', icon: Brain,       label: 'Fundamentals'        },
-  { path: '/trade',    icon: ArrowUpDown,      label: 'Trade'               },
-  { path: '/performance', icon: Activity,      label: 'Performance'         },
-  { path: '/settings', icon: Settings,         label: 'Settings'            },
+// Grouped so the everyday loop (find → test → run → review) sits up top and the
+// heavier analytics tools are demoted to an "Advanced" cluster below a divider.
+const NAV_GROUPS: NavItem[][] = [
+  // Find & test
+  [
+    { path: '/scanner',  icon: Radar,      label: 'Scanner'             },
+    { path: '/backtest', icon: LineChart,  label: 'Strategy Backtester' },
+    { path: '/builder',  icon: Hammer,     label: 'Strategy Builder'    },
+  ],
+  // Trade & bots
+  [
+    { path: '/signal', icon: Radio,            label: 'Signal Bots' },
+    { path: '/bots',   icon: BotMessageSquare, label: 'Grid Bots'   },
+    { path: '/trade',  icon: ArrowUpDown,      label: 'Trade'       },
+  ],
+  // Review
+  [
+    { path: '/performance', icon: Activity, label: 'Performance' },
+  ],
+  // Advanced analytics
+  [
+    { path: '/structure',    icon: Network,    label: 'Market Structure' },
+    { path: '/grid',         icon: LayoutGrid, label: 'Grid Optimizer'   },
+    { path: '/fundamentals', icon: Brain,      label: 'Fundamentals'     },
+  ],
+  // System
+  [
+    { path: '/settings', icon: Settings, label: 'Settings' },
+  ],
 ]
 
 export default function Sidebar() {
@@ -50,9 +67,12 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* ── Nav items ── */}
+      {/* ── Nav items (grouped, divider between groups) ── */}
       <nav className="flex flex-col items-center gap-1 p-2 pt-3 flex-1">
-        {NAV_ITEMS.map(({ path, icon: Icon, label }) => {
+        {NAV_GROUPS.map((group, gi) => (
+          <div key={gi} className="flex w-full flex-col items-center gap-1">
+            {gi > 0 && <div className="my-1 h-px w-7 bg-border" />}
+            {group.map(({ path, icon: Icon, label }) => {
           const active = location.pathname === path || location.pathname.startsWith(path + '/')
           return (
             <div key={path} className="relative group w-full">
@@ -95,7 +115,9 @@ export default function Sidebar() {
               </div>
             </div>
           )
-        })}
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* ── Network badge ── */}

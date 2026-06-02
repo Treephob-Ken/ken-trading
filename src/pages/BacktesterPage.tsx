@@ -594,6 +594,17 @@ export default function BacktesterPage({
           <ConfidenceStrip result={result} regime={regime} direction={direction} />
         )}
 
+        {result && (
+          // Honesty line — keeps the headline numbers from being read as a promise.
+          <p className="rounded-lg border border-border bg-panel-2/40 px-3 py-2 text-[11px] leading-relaxed text-dim">
+            <span className="font-semibold text-muted">How to read this:</span>{' '}
+            backtest fills at each bar's close on <span className="text-muted">Binance</span> candles and
+            charges <span className="text-muted">{feePct}%</span> fee per side. It does <span className="text-muted">not</span>{' '}
+            model slippage, spread, or perp funding, and the live bot trades on Hyperliquid — so real results
+            run <span className="text-muted">lower</span> than shown. Trust the edge and the ranking, not the exact %.
+          </p>
+        )}
+
         <div className={`flex flex-col gap-4 ${mtfView ? 'xl:flex-row' : ''}`}>
           {/* ── Current TF chart ── */}
           <div className={`card p-4 ${mtfView ? 'xl:flex-1 xl:min-w-0' : ''}`}>
