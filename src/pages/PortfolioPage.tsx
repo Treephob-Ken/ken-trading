@@ -128,7 +128,13 @@ function BotCard({ perf, selected, onSelect }: {
   )
 }
 
-export default function PortfolioPage() {
+interface PortfolioPageProps {
+  // Inside the Performance hub the hub header already shows the page title, so
+  // we hide this page's own title block and keep only the range/period toolbar.
+  embedded?: boolean
+}
+
+export default function PortfolioPage({ embedded = false }: PortfolioPageProps = {}) {
   const [range, setRange] = useState<PortfolioRange>(
     () => (localStorage.getItem('portfolio_range') as PortfolioRange) || '7d',
   )
@@ -218,15 +224,19 @@ export default function PortfolioPage() {
 
   return (
     <main className="flex w-full flex-1 flex-col gap-5 px-3 py-4 sm:px-6 sm:py-5">
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/* ── Header — title hidden when embedded in the Performance hub ──── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Briefcase className="h-5 w-5 text-brand" />
-          <h1 className="text-lg font-semibold text-text font-display">Portfolio</h1>
-          <p className="hidden sm:block text-xs text-dim">
-            Account trend, max drawdown, and per-bot performance.
-          </p>
-        </div>
+        {embedded ? (
+          <span className="text-xs font-semibold text-text">Account overview</span>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Briefcase className="h-5 w-5 text-brand" />
+            <h1 className="text-lg font-semibold text-text font-display">Portfolio</h1>
+            <p className="hidden sm:block text-xs text-dim">
+              Account trend, max drawdown, and per-bot performance.
+            </p>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           {RANGES.map((r) => (
             <button

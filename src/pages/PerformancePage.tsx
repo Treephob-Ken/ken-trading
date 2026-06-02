@@ -50,20 +50,25 @@ export default function PerformancePage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* ── Hub header: title + top tab bar ── */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2.5 sm:px-5">
+    // Plain flow — the app shell owns the single scrollbar. No nested scroll
+    // region here (that's what clipped the Overview tab before). min-h-full
+    // keeps the background filled when a tab's content is short.
+    <div className="flex min-h-full flex-col">
+      {/* ── Sticky hub header: title + top tab bar. Pins to the top of the
+          shell scroller while the content below scrolls under it. ── */}
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-bg/90 px-3 py-2.5 backdrop-blur sm:px-5">
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-brand" />
           <h1 className="text-sm font-semibold text-text font-display">Performance</h1>
         </div>
-        <div className="flex items-center rounded-xl border border-border bg-panel-2 p-0.5">
+        <div role="tablist" aria-label="Performance views" className="flex items-center rounded-xl border border-border bg-panel-2 p-0.5">
           {HUB_TABS.map((t) => (
             <button
               key={t.id}
               type="button"
+              role="tab"
+              aria-selected={tab === t.id}
               onClick={() => selectTab(t.id)}
-              aria-current={tab === t.id ? 'page' : undefined}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                 tab === t.id ? 'bg-brand text-bg' : 'text-dim hover:text-text'
               }`}
@@ -74,14 +79,12 @@ export default function PerformancePage() {
         </div>
       </div>
 
-      {/* ── Active view ── */}
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {tab === 'overview' ? (
-          <PortfolioPage />
-        ) : (
-          <LogsPage embedded tab={tab} onTabChange={selectTab} />
-        )}
-      </div>
+      {/* ── Active view — plain flow, scrolls with the page ── */}
+      {tab === 'overview' ? (
+        <PortfolioPage embedded />
+      ) : (
+        <LogsPage embedded tab={tab} onTabChange={selectTab} />
+      )}
     </div>
   )
 }

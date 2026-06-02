@@ -224,7 +224,9 @@ export default function LogsPage({ embedded = false, tab: tabProp, onTabChange }
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-3 sm:p-5">
+    // Standalone: own scroll container. Embedded: plain flow so it scrolls
+    // with the Performance hub's single page scroller (no nested scroll).
+    <div className={`flex min-h-0 flex-col gap-4 p-3 sm:p-5 ${embedded ? '' : 'h-full overflow-y-auto'}`}>
       {/* Header — hidden when embedded (the Performance hub provides the title) */}
       {!embedded && (
         <div className="flex flex-wrap items-end justify-between gap-3">
