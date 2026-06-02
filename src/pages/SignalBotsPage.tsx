@@ -1684,8 +1684,27 @@ export default function SignalBotsPage() {
                 )}
               </div>
 
-              {/* ── Suggested TP (MFE median) — toggleable live ─────────────── */}
+              {/* ── Advanced settings — folded by default to keep the form light.
+                  Holds the auto-TP suggestion, catch-up, and higher-TF filter. ── */}
               <div className="my-1 h-px bg-border" />
+              <details className="group rounded-lg border border-border bg-panel-2/30">
+                <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2">
+                  <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-dim">
+                    <span className="transition-transform group-open:rotate-90">▶</span>
+                    Advanced settings
+                  </span>
+                  <span className="flex items-center gap-1">
+                    {cfg.useSuggestedTp && <span className="rounded border border-brand/40 bg-brand/10 px-1 py-px text-[8px] font-bold uppercase text-brand">auto-TP</span>}
+                    {cfg.catchUpOnStart && <span className="rounded border border-brand/40 bg-brand/10 px-1 py-px text-[8px] font-bold uppercase text-brand">catch-up</span>}
+                    {cfg.mtfEnabled && <span className="rounded border border-brand/40 bg-brand/10 px-1 py-px text-[8px] font-bold uppercase text-brand">MTF</span>}
+                    {!cfg.useSuggestedTp && !cfg.catchUpOnStart && !cfg.mtfEnabled && (
+                      <span className="text-[9px] text-dim">auto-TP · catch-up · higher-TF</span>
+                    )}
+                  </span>
+                </summary>
+                <div className="flex flex-col gap-2 px-3 pb-3 pt-1">
+
+              {/* ── Suggested TP (MFE median) — toggleable live ─────────────── */}
               <div className="rounded-lg border border-border bg-panel-2 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-semibold text-text">Suggested TP (MFE P75)</span>
@@ -1838,6 +1857,8 @@ export default function SignalBotsPage() {
                   ? `Bot fetches ${cfg.mtfTimeframe} candles on every tick. Trades only fire when the latest ${cfg.mtfTimeframe} signal points the same direction as the ${cfg.timeframe} entry. Blocked trades are logged.`
                   : 'Off — every signal on the entry timeframe is taken without checking higher-TF agreement.'}
               </p>
+                </div>
+              </details>
 
               <div className="my-1 h-px bg-border" />
 
