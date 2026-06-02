@@ -13,6 +13,8 @@ const ENABLED = BOT_TOKEN.length > 0 && CHAT_ID.length > 0
 const HELP = [
   '📋 Commands',
   '/today — today’s realized PnL vs your daily goal',
+  '/week — last 7 days: PnL · trades · win%',
+  '/month — this month: PnL · trades · win%',
   '/status — bots + open positions',
   '/guard — daily PnL guard state',
   '/help — this list',

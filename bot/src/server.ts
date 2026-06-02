@@ -276,6 +276,27 @@ async function handleTelegramCommand(cmd: string): Promise<string> {
     ].join('\n')
   }
 
+  // Realized PnL + trade count + win rate over a window, from paired round-trips.
+  const summarize = async (sinceMs: number): Promise<string> => {
+    const srcMap = buildAssetSourceMap(uid)
+    const fills = await fetchFillsFromHL(creds as EnvConfig, sinceMs, Date.now(), srcMap)
+    const trips = pairRoundTrips(fills)
+    const net = trips.reduce((s, t) => s + t.closedPnl, 0)
+    const wins = trips.filter((t) => t.closedPnl > 0).length
+    const wr = trips.length ? (wins / trips.length) * 100 : 0
+    return `${money(net)} · ${trips.length} trades · ${wr.toFixed(0)}% win`
+  }
+
+  if (cmd === '/week') {
+    return `🗓️ Last 7 days\n${await summarize(Date.now() - 7 * 24 * 3600 * 1000)}`
+  }
+
+  if (cmd === '/month') {
+    const d = new Date()
+    const monthStart = Date.parse(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01T00:00:00.000Z`)
+    return `🗓️ This month\n${await summarize(monthStart)}`
+  }
+
   if (cmd === '/status') {
     const sig = listSignalBots(uid)
     let grid = 0, gridRunning = 0
