@@ -76,6 +76,13 @@ export async function notifyPositionOpen(asset: string, dir: string, sz: string,
   await postToTelegram(msg)
 }
 
+// Public: the daily PnL guard tripped and stopped all bots. `reason` is the
+// human string from daily-guard.ts.
+export async function notifyDailyGuard(reason: string): Promise<void> {
+  if (!ENABLED) return
+  await postToTelegram(`🛑 Daily guard · ${reason} — all bots stopped. Restart manually when ready.`)
+}
+
 // Hyperliquid `userFills` event shape we care about.
 interface UserFillLike {
   coin: string

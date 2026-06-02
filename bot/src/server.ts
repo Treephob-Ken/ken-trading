@@ -71,6 +71,12 @@ import {
   startKillSwitchWatcher,
   unlock as unlockKillSwitch,
 } from './kill-switch.js'
+import {
+  getDailyGuardStatus,
+  rearmDailyGuard,
+  setDailyGuardConfig,
+  startDailyGuardWatcher,
+} from './daily-guard.js'
 import { runMigrationIfNeeded } from './migrate.js'
 import { fundamentalsRouter } from './fundamentals.js'
 import {
@@ -86,7 +92,7 @@ import {
   type EquityPeriod,
 } from './journal.js'
 import { listPausedGridBotIds, listRunningGridBotIds, readGridRuntime, writeGridRuntime } from './grid-runtime.js'
-import { isNotifyEnabled, startFillNotifier } from './notify.js'
+import { isNotifyEnabled, notifyDailyGuard, startFillNotifier } from './notify.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -188,6 +194,41 @@ function armKillSwitchForUser(uid: string): void {
   startKillSwitchWatcher(uid, {
     stopEverythingAndClose,
     credsProvider: () => { try { return loadUserCreds(uid) } catch { return null } },
+  })
+}
+
+// ─── Daily PnL guard wiring ───────────────────────────────────────────────────
+
+// Stop every running bot for `uid` (signal + grid) WITHOUT cancelling orders or
+// closing positions — open trades keep running under their own SL/TP. Used by
+// the daily PnL guard, which is a "no new trades today" reminder, not a flatten.
+async function stopAllBotsNoClose(uid: string): Promise<void> {
+  const gMap = gridBotsForUser(uid)
+  for (const entry of gMap.values()) {
+    if (entry.running) {
+      try { await entry.bot.shutdown() } catch (e) { log.err(`Daily guard: grid shutdown failed for ${entry.id}: ${(e as Error).message}`) }
+      entry.running = false
+      writeGridRuntime(uid, entry.id, false)
+    }
+  }
+  for (const sum of listSignalBots(uid)) {
+    try { getSignalBot(sum.id, uid).stop() } catch { /* best effort */ }
+  }
+}
+
+// Realized PnL (sum of closed-trade closedPnl, USDC) from `sinceMs` to now.
+async function realizedPnlSince(uid: string, creds: EnvConfig, sinceMs: number): Promise<number> {
+  const srcMap = buildAssetSourceMap(uid)
+  const fills = await fetchFillsFromHL(creds, sinceMs, Date.now(), srcMap)
+  return fills.reduce((sum, f) => sum + (Number.isFinite(f.closedPnl) ? f.closedPnl : 0), 0)
+}
+
+function armDailyGuardForUser(uid: string): void {
+  startDailyGuardWatcher(uid, {
+    credsProvider: () => { try { return loadUserCreds(uid) } catch { return null } },
+    realizedPnlToday: (creds, sinceMs) => realizedPnlSince(uid, creds, sinceMs),
+    stopAllBots: stopAllBotsNoClose,
+    onTrip: (_userId, reason) => { void notifyDailyGuard(reason) },
   })
 }
 
@@ -370,6 +411,7 @@ app.post('/auth/register', authLimiter, (req: Request, res: Response) => {
       maybeAutostartGridBots(user.id, credsFn)
     }
     armKillSwitchForUser(user.id)
+    armDailyGuardForUser(user.id)
     const token = signToken(user)
     res.json({ token, user: { id: user.id, email: user.email, isAdmin: user.isAdmin } })
   } catch (e) {
@@ -574,6 +616,44 @@ app.post('/api/killswitch/unlock', requireAuth, async (req: Request, res: Respon
   try {
     const state = await unlockKillSwitch(uid, creds)
     res.json({ config: getKillSwitchConfig(uid), state })
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// ─── Daily PnL guard ──────────────────────────────────────────────────────────
+
+app.get('/api/daily-guard', requireAuth, (req: Request, res: Response) => {
+  if (!MULTI_USER) { res.status(404).json({ error: 'Daily guard requires multi-user mode' }); return }
+  res.json(getDailyGuardStatus(req.user!.sub))
+})
+
+app.put('/api/daily-guard/config', requireAuth, (req: Request, res: Response) => {
+  if (!MULTI_USER) { res.status(404).json({ error: 'Daily guard requires multi-user mode' }); return }
+  const b = (req.body ?? {}) as Record<string, unknown>
+  const enabled = b.enabled === true
+  const toUsd = (v: unknown, d: number): number => {
+    const n = typeof v === 'string' ? Number(v) : v
+    return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : d
+  }
+  try {
+    const state = setDailyGuardConfig(req.user!.sub, {
+      enabled,
+      lossUsd: toUsd(b.lossUsd, 30),
+      profitUsd: toUsd(b.profitUsd, 30),
+    })
+    if (enabled) armDailyGuardForUser(req.user!.sub)
+    res.json(state)
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message })
+  }
+})
+
+// Clear a trip and re-arm immediately (window start moves to now).
+app.post('/api/daily-guard/rearm', requireAuth, (req: Request, res: Response) => {
+  if (!MULTI_USER) { res.status(404).json({ error: 'Daily guard requires multi-user mode' }); return }
+  try {
+    res.json(rearmDailyGuard(req.user!.sub))
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }
@@ -1593,6 +1673,7 @@ createServer(app).listen(PORT, HOST, async () => {
         maybeAutostartSignalBots(u.id, credsFn)
         maybeAutostartGridBots(u.id, credsFn)
         armKillSwitchForUser(u.id)
+        armDailyGuardForUser(u.id)
         // One userFills subscription per user — fires Telegram on every close.
         void startFillNotifier(credsFn())
       }

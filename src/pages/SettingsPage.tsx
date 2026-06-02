@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Save, ShieldCheck } from 'lucide-react'
 import { apiFetch, useAuth } from '@/contexts/AuthContext'
 import RiskControlsCard from '@/components/RiskControlsCard'
+import DailyGuardCard from '@/components/DailyGuardCard'
 
 interface Credentials {
   hlUser: string
@@ -204,6 +205,9 @@ export default function SettingsPage() {
 
       {/* ── Risk controls (kill switch) ── */}
       <RiskControlsCard />
+
+      {/* ── Daily PnL guard (don't-overtrade reminder) ── */}
+      <DailyGuardCard />
 
     </main>
   )

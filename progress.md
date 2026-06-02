@@ -53,7 +53,8 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Signal bots (13 strategies + ensemble) | ✅ position-aware (flip on opposite signal), risk-based sizing |
 | Manual trade page (Buy/Sell + SL/TP brackets) | ✅ uses `positionTpsl` grouping; both legs reported in toast |
 | Close All Positions (single confirm, parallel) | ✅ |
-| Account-wide kill switch | ✅ stops every bot for the user |
+| Account-wide kill switch | ✅ stops every bot + closes positions on equity drawdown % |
+| Daily PnL guard | ✅ `bot/src/daily-guard.ts` — per-user, realized-PnL since UTC midnight; trips at ±$ (loss/profit), STOPS all bots (no close), one-shot/day, manual re-arm. Telegram alert. Settings → DailyGuardCard. Multi-user only. |
 | Slippage gate (rejects orders past N% past mid) | ✅ |
 | Network badge (testnet/mainnet) | ✅ in sidebar |
 | Strategy Backtester (Binance candles, MTF, regime, walk-forward) | ✅ + inline honesty caveat under Confidence Strip (Binance candles, fee%, no slippage/funding → live runs lower) |
