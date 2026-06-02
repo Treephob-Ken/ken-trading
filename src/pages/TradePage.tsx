@@ -4,6 +4,7 @@ import { ArrowDownCircle, ArrowUpCircle, RefreshCw, Bot, Grid3x3, Hand } from 'l
 import {
   CandlestickSeries,
   ColorType,
+  LineSeries,
   LineStyle,
   createChart,
   type IPriceLine,
@@ -13,6 +14,8 @@ import {
 import { apiFetch } from '@/contexts/AuthContext'
 import { useHLAssets } from '@/lib/hlAssets'
 import { fetchKlines } from '@/lib/binance'
+import { generateSignals, defaultParams, STRATEGIES } from '@/lib/strategies'
+import type { StrategyId } from '@/types'
 import type { Candle } from '@/types'
 import StatTile, { type Tone } from '@/components/ui/StatTile'
 import InfoTip from '@/components/InfoTip'
@@ -1110,6 +1113,22 @@ function PositionDetailCard({
     return () => clearInterval(id)
   }, [])
 
+  // If this position came from a signal bot, look up its strategy so the chart
+  // can draw the same indicator overlays the Backtester shows (e.g. Bollinger).
+  const sigSrc = sources.find((s) => s.kind === 'signal' && s.strategyId)
+  const [stratParams, setStratParams] = useState<Record<string, number> | null>(null)
+  useEffect(() => {
+    if (!sigSrc?.botId) { setStratParams(null); return }
+    let cancelled = false
+    apiFetch(`/api/signal/bots/${sigSrc.botId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((st: { config?: { params?: Record<string, number> } } | null) => {
+        if (!cancelled) setStratParams(st?.config?.params ?? null)
+      })
+      .catch(() => { if (!cancelled) setStratParams(null) })
+    return () => { cancelled = true }
+  }, [sigSrc?.botId])
+
   const mark = position.markPx ?? position.entryPx ?? 0
   const entry = position.entryPx ?? 0
   const notional = position.positionValue ?? (position.size * mark)
@@ -1262,7 +1281,7 @@ function PositionDetailCard({
         </div>
       </div>
 
-      {/* Chart with entry/SL/TP/liq overlay lines */}
+      {/* Chart with entry/SL/TP/liq overlay lines + the bot's strategy indicators */}
       <PositionChart
         asset={position.asset}
         side={position.side}
@@ -1270,6 +1289,8 @@ function PositionDetailCard({
         slPx={brackets?.slPx ?? null}
         tpPx={brackets?.tpPx ?? null}
         liqPx={liq ?? null}
+        strategyId={sigSrc?.strategyId}
+        strategyParams={stratParams ?? undefined}
       />
     </div>
   )
@@ -1291,6 +1312,8 @@ function PositionChart({
   slPx,
   tpPx,
   liqPx,
+  strategyId,
+  strategyParams,
 }: {
   asset: string
   side: 'long' | 'short'
@@ -1298,13 +1321,21 @@ function PositionChart({
   slPx: number | null
   tpPx: number | null
   liqPx: number | null
+  strategyId?: string
+  strategyParams?: Record<string, number>
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [candles, setCandles] = useState<Candle[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chartTf, setChartTf] = useState<string>(() => localStorage.getItem('pos_chart_tf') || POS_CHART_TF)
+  const [showInd, setShowInd] = useState(true)
   useEffect(() => { localStorage.setItem('pos_chart_tf', chartTf) }, [chartTf])
+
+  // The bot's strategy, if it's a built-in one with chart overlays (Bollinger,
+  // EMA, Supertrend…). Custom Builder strategies have no overlay → skip.
+  const overlayStrat = strategyId && STRATEGIES.some((s) => s.id === strategyId) ? (strategyId as StrategyId) : null
+  const paramsKey = JSON.stringify(strategyParams ?? {})
 
   // Fetch candles whenever the asset or timeframe changes.
   useEffect(() => {
@@ -1401,11 +1432,29 @@ function PositionChart({
       )
     }
 
+    // Strategy indicator overlays (price-pane lines like the Backtester) —
+    // computed from the same generateSignals() so they match exactly.
+    if (overlayStrat && showInd) {
+      try {
+        const out = generateSignals(overlayStrat, candles, strategyParams && Object.keys(strategyParams).length ? strategyParams : defaultParams(overlayStrat))
+        for (const ln of out.mainLines) {
+          const ls = chart.addSeries(LineSeries, {
+            color: ln.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          })
+          ls.setData(
+            ln.data
+              .filter((p) => p.value != null && Number.isFinite(p.value))
+              .map((p) => ({ time: p.time as UTCTimestamp, value: p.value })),
+          )
+        }
+      } catch { /* unknown strategy / bad params — just skip the overlay */ }
+    }
+
     chart.timeScale().fitContent()
     return () => {
       chart.remove()
     }
-  }, [candles, side, entryPx, slPx, tpPx, liqPx])
+  }, [candles, side, entryPx, slPx, tpPx, liqPx, overlayStrat, paramsKey, showInd, strategyParams])
 
   // Quiet memo to avoid stale-warning ESLint complaint when slPx, tpPx, liqPx change but candles don't.
   useMemo(() => ({ slPx, tpPx, liqPx, entryPx, side }), [slPx, tpPx, liqPx, entryPx, side])
@@ -1437,6 +1486,13 @@ function PositionChart({
             </button>
           ))}
         </div>
+        {overlayStrat && (
+          <button type="button" onClick={() => setShowInd((v) => !v)}
+            className={`rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors ${showInd ? 'border-brand/50 bg-brand/10 text-brand' : 'border-border text-dim hover:text-text'}`}
+            title="Toggle the bot's strategy indicators">
+            {STRATEGIES.find((s) => s.id === overlayStrat)?.name ?? overlayStrat} {showInd ? 'on' : 'off'}
+          </button>
+        )}
         <span className="ml-auto flex flex-wrap gap-2">
           <span className="flex items-center gap-1">
             <span className={`h-0.5 w-3 ${side === 'long' ? 'bg-gain' : 'bg-loss'}`} /> entry
