@@ -5,25 +5,28 @@
 @tailwind utilities;
 
 @layer base {
-  /* Palette mapped from DESIGN.md (Apple design system), dark interpretation —
-     Apple's near-black surfaces + Action Blue accent + SF Pro type, kept dark
-     so the trading charts + data panels stay legible. Trading green/red for
-     P&L are retained (Apple defines no trading semantics). */
+  /* Palette mapped from DESIGN.md (Airtable design system), dark interpretation —
+     Airtable's dark-navy signature surfaces + a bright blue accent + Inter type
+     (the documented Haas Grotesk substitute), kept dark so the trading charts +
+     data panels stay legible. Airtable's signature coral is intentionally NOT
+     used as the accent — it reads as red and would clash with the P&L loss
+     colour. Trading green/red are retained (Airtable defines no trading
+     semantics). */
   :root {
-    --bg: 0 0% 0%;           /* surface-black  #000000 */
-    --panel: 240 3% 12%;     /* surface-tile-1 #1d1d1f */
-    --panel-2: 240 3% 17%;   /* surface-tile-2 #2a2a2c */
-    --border: 240 3% 26%;    /* dark hairline  #424245 */
-    --border-strong: 240 3% 34%;
-    --text: 240 20% 96%;     /* near-white     #f5f5f7 */
-    --muted: 240 3% 61%;     /* secondary      #98989d */
-    --dim: 240 3% 45%;       /* tertiary       #6e6e73 */
-    --brand: 209 100% 58%;   /* Action Blue (on dark) #2997ff */
+    --bg: 218 23% 12%;       /* surface-dark          #181d26 */
+    --panel: 225 12% 13%;    /* surface-dark-elevated #1d1f25 */
+    --panel-2: 222 16% 18%;  /* lifted navy           #262a34 */
+    --border: 222 13% 21%;   /* navy hairline         #2f333d */
+    --border-strong: 224 14% 28%; /* stronger navy    #3d4250 */
+    --text: 213 40% 98%;     /* near-white            #f8fafc */
+    --muted: 219 7% 60%;     /* border-strong         #9297a0 */
+    --dim: 223 9% 46%;       /* dim gray              #6b7180 */
+    --brand: 216 100% 64%;   /* info-border (bright)  #458fff */
     --gain: 157 84% 43%;     /* P&L up */
     --loss: 352 90% 62%;     /* P&L down */
     --warn: 40 96% 53%;
-    --accent: 209 100% 58%;  /* Action Blue */
-    --accent-2: 211 100% 45%;/* deep blue #0071e3 */
+    --accent: 216 100% 64%;  /* bright blue           #458fff */
+    --accent-2: 216 76% 45%; /* link blue             #1b61c9 */
   }
 
   html,
@@ -34,11 +37,11 @@
 
   body {
     @apply bg-bg text-text;
-    /* SF Pro on Apple devices (iPad/Mac), Inter elsewhere. */
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', system-ui, sans-serif;
+    /* Inter stands in for Airtable's Haas Grotesk (closest open substitute);
+       system fonts as the fallback chain. */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
-    font-feature-settings: 'cv11';
-    /* Apple aesthetic: flat surface, no decorative colour glows — keep only a
+    /* Airtable aesthetic: flat surface, no decorative colour glows — keep only a
        barely-there grid for depth. */
     background-image:
       linear-gradient(to right, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
