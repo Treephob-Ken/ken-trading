@@ -230,6 +230,7 @@ export default function IndicatorScanTab({
 
   const top3 = visible.slice(0, 3)
   const bestPick = visible[0]
+  const selectedStratCount = ALL_STRATS.filter((s) => stratFilter[s]).length
 
   // Coin choices for the picker. Prefer the bases that already showed up in
   // the scan results (so the filter only offers things that actually match),
@@ -399,16 +400,20 @@ export default function IndicatorScanTab({
         )}
       </div>
 
-      {/* ── Strategy chips ──────────────────────────────────────────────── */}
-      <div className="card p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-[10px] text-dim uppercase tracking-wider">Strategies</span>
+      {/* ── Strategy chips — collapsible so 14 chips aren't a permanent wall.
+          Summary shows how many are active so it stays discoverable. ── */}
+      <details className="card p-3 group" open={selectedStratCount < ALL_STRATS.length}>
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-dim">
+            <span className="transition-transform group-open:rotate-90">▶</span>
+            Strategies · {selectedStratCount} of {ALL_STRATS.length}
+          </span>
           <div className="flex gap-1">
             <button
               type="button"
-              onClick={() =>
+              onClick={(e) => { e.preventDefault();
                 setStratFilter(Object.fromEntries(ALL_STRATS.map((s) => [s, true])) as Record<StrategyId, boolean>)
-              }
+              }}
               className="text-[10px] text-dim hover:text-text"
             >
               all
@@ -416,16 +421,16 @@ export default function IndicatorScanTab({
             <span className="text-[10px] text-dim">·</span>
             <button
               type="button"
-              onClick={() =>
+              onClick={(e) => { e.preventDefault();
                 setStratFilter(Object.fromEntries(ALL_STRATS.map((s) => [s, false])) as Record<StrategyId, boolean>)
-              }
+              }}
               className="text-[10px] text-dim hover:text-text"
             >
               none
             </button>
           </div>
-        </div>
-        <div className="flex flex-wrap gap-1">
+        </summary>
+        <div className="mt-2 flex flex-wrap gap-1">
           {STRATEGIES.map((s) => (
             <button
               key={s.id}
@@ -441,7 +446,7 @@ export default function IndicatorScanTab({
             </button>
           ))}
         </div>
-      </div>
+      </details>
 
       {/* ── Progress / errors ───────────────────────────────────────────── */}
       {(scanning || (progress.total > 0 && !scannedAt)) && (
