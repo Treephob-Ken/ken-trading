@@ -448,13 +448,22 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
                 </span>
                 <div className="flex items-center gap-1">
                   <PagerButton
+                    onClick={() => setTradesPage(0)}
+                    disabled={tradePage === 0}
+                    label="First page"
+                  >«</PagerButton>
+                  <PagerButton
                     onClick={() => setTradesPage(tradePage - 1)}
                     disabled={tradePage === 0}
                     label="Previous page"
                   >‹</PagerButton>
                   {buildPageWindow(tradePage, totalTradePages).map((p, i) =>
                     p === -1 ? (
-                      <span key={`gap-${i}`} className="px-1 text-[11px] text-dim">…</span>
+                      <span
+                        key={`gap-${i}`}
+                        aria-hidden="true"
+                        className="inline-flex min-w-[28px] items-center justify-center text-[11px] text-dim"
+                      >…</span>
                     ) : (
                       <PagerButton
                         key={p}
@@ -469,6 +478,11 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
                     disabled={tradePage === totalTradePages - 1}
                     label="Next page"
                   >›</PagerButton>
+                  <PagerButton
+                    onClick={() => setTradesPage(totalTradePages - 1)}
+                    disabled={tradePage === totalTradePages - 1}
+                    label="Last page"
+                  >»</PagerButton>
                 </div>
               </div>
             )}
@@ -506,20 +520,32 @@ function PagerButton({ children, onClick, disabled, active, label }: {
   )
 }
 
-// Page-number window: shows every page when there are few, otherwise first +
-// last + a window around the current page, with -1 standing in for an ellipsis.
+// Page-number window (0-based pages; -1 = ellipsis). Always emits a CONSTANT
+// number of slots once there are enough pages, so the control never changes
+// width as you click — that side-to-side jump is the thing to avoid. With one
+// sibling on each side it's 7 numeric slots: first + last + current ±1 + dots.
 function buildPageWindow(current: number, total: number): number[] {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i)
-  const wanted = new Set<number>([0, total - 1, current, current - 1, current + 1])
-  const sorted = [...wanted].filter((p) => p >= 0 && p < total).sort((a, b) => a - b)
-  const out: number[] = []
-  let prev = -2
-  for (const p of sorted) {
-    if (p - prev > 1) out.push(-1)
-    out.push(p)
-    prev = p
+  const SIBLINGS = 1
+  // Few enough to show every page (no ellipsis needed).
+  if (total <= SIBLINGS * 2 + 5) return Array.from({ length: total }, (_, i) => i)
+
+  const last = total - 1
+  const left = Math.max(current - SIBLINGS, 0)
+  const right = Math.min(current + SIBLINGS, last)
+  const showLeftDots = left > 1
+  const showRightDots = right < last - 1
+  const edgeCount = 3 + 2 * SIBLINGS // 5
+
+  if (!showLeftDots && showRightDots) {
+    const head = Array.from({ length: edgeCount }, (_, i) => i)
+    return [...head, -1, last]
   }
-  return out
+  if (showLeftDots && !showRightDots) {
+    const tail = Array.from({ length: edgeCount }, (_, i) => total - edgeCount + i)
+    return [0, -1, ...tail]
+  }
+  const mid = Array.from({ length: right - left + 1 }, (_, i) => left + i)
+  return [0, -1, ...mid, -1, last]
 }
 
 // Generic rollup table — used for the by-asset breakdown.
