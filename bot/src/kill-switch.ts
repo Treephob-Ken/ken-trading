@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import type { EnvConfig } from './config.js'
 import { getAccountState } from './trade.js'
 import { log } from './logger.js'
+import { notifyKillSwitch } from './notify.js'
 import { getKillSwitchConfig } from './users.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -214,6 +215,7 @@ export function startKillSwitchWatcher(userId: string, hooks: KillSwitchHooks): 
       next.reason = `Account drawdown ${dd.toFixed(2)}% exceeded limit ${cfg.pct}% (snapshot $${state.snapshotEquity.toFixed(2)} → current $${equity.toFixed(2)})`
       writeState(userId, next)
       log.err(`🛑 KILL SWITCH TRIPPED for ${userId.slice(0, 8)}: ${next.reason}`)
+      void notifyKillSwitch(next.reason ?? 'drawdown limit exceeded')
       try {
         await hooks.stopEverythingAndClose(userId, creds)
       } catch (e) {

@@ -83,6 +83,27 @@ export async function notifyDailyGuard(reason: string): Promise<void> {
   await postToTelegram(`🛑 Daily guard · ${reason} — all bots stopped. Restart manually when ready.`)
 }
 
+// Public: a signal bot auto-paused itself after repeated failed orders (e.g.
+// insufficient margin). It has stopped trading and needs attention.
+export async function notifyBotPaused(botName: string, reason: string): Promise<void> {
+  if (!ENABLED) return
+  await postToTelegram(`⏸️ Bot "${botName}" auto-paused — ${reason}. It has stopped trading.`)
+}
+
+// Public: the account-wide kill switch tripped (drawdown limit). All bots were
+// stopped and positions closed.
+export async function notifyKillSwitch(reason: string): Promise<void> {
+  if (!ENABLED) return
+  await postToTelegram(`🛑 KILL SWITCH · ${reason} — all bots stopped, orders cancelled, positions closed. Unlock in Settings to resume.`)
+}
+
+// Public: the trading server (re)started. Tells you a restart happened (could be
+// a deploy OR a crash) and how many bots came back up.
+export async function notifyServerStart(runningBots: number): Promise<void> {
+  if (!ENABLED) return
+  await postToTelegram(`♻️ Trading server started — ${runningBots} bot${runningBots === 1 ? '' : 's'} running.`)
+}
+
 // Hyperliquid `userFills` event shape we care about.
 interface UserFillLike {
   coin: string

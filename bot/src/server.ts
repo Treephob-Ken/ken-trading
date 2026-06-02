@@ -92,7 +92,7 @@ import {
   type EquityPeriod,
 } from './journal.js'
 import { listPausedGridBotIds, listRunningGridBotIds, readGridRuntime, writeGridRuntime } from './grid-runtime.js'
-import { isNotifyEnabled, notifyDailyGuard, startFillNotifier } from './notify.js'
+import { isNotifyEnabled, notifyDailyGuard, notifyServerStart, startFillNotifier } from './notify.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -1690,5 +1690,19 @@ createServer(app).listen(PORT, HOST, async () => {
     } catch (e) {
       log.warn(`Single-tenant Telegram notifier skipped: ${(e as Error).message}`)
     }
+  }
+
+  // Restart heartbeat — fires once on boot so you know the server (re)started
+  // (a deploy OR a crash) and how many bots resumed. Delayed so autostart settles.
+  if (isNotifyEnabled()) {
+    setTimeout(() => {
+      let running = 0
+      const uids: (string | undefined)[] = MULTI_USER ? listUsers().map((u) => u.id) : [undefined]
+      for (const uid of uids) {
+        try { running += listSignalBots(uid).filter((b) => b.running).length } catch { /* skip */ }
+        try { for (const e of gridBotsForUser(uid).values()) if (e.running) running++ } catch { /* skip */ }
+      }
+      void notifyServerStart(running)
+    }, 5000)
   }
 })

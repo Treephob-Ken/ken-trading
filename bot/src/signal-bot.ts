@@ -36,6 +36,7 @@ import { computeMfeStats, type MfeResult } from './strategy/mfe.js'
 import { evaluateCustomStrategy } from './strategy/builder-evaluate.js'
 import { loadSpec } from './strategy/builder-store.js'
 import { MULTI_USER } from './auth.js'
+import { notifyBotPaused } from './notify.js'
 import type { EnvConfig } from './config.js'
 
 export interface TradeRecord {
@@ -1109,6 +1110,7 @@ class SignalBot {
             this.autoPausedReason = `Auto-paused after ${this.consecutiveNotFilled} consecutive failed orders: ${result.message ?? 'unknown'}`
             this.log.warn(this.autoPausedReason)
             this.running = false
+            void notifyBotPaused(this.name, this.autoPausedReason)
           }
         }
         if (result.filled && (result.tpPlaced || result.slPlaced)) {
