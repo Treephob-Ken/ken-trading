@@ -194,8 +194,11 @@ export default function GridPage({
   async function handleDeploy() {
     if (activeLines.length < 2) return
     const asset = symbol.replace(/USDT$/, '')
-    const lower = +activeLines[0].price.toFixed(8)
-    const upper = +activeLines[activeLines.length - 1].price.toFixed(8)
+    // Lines can be listed ascending (optimizer) or descending (auto/dynamic),
+    // so derive bounds by min/max — never assume [0] is the low and [last] the high.
+    const prices = activeLines.map((l) => l.price)
+    const lower = +Math.min(...prices).toFixed(8)
+    const upper = +Math.max(...prices).toFixed(8)
     const gridCount = activeLines.length - 1
     const activeMode = pageMode === 'static' ? mode : 'arithmetic'
     setDeploying(true)
