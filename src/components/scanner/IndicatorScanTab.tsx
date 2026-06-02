@@ -220,6 +220,14 @@ export default function IndicatorScanTab({
     return filtered.map((r) => ({ row: r, verdict: gradeIndicatorRow(r) }))
   }, [rows, minTrades, tfFilter, stratFilter, sortKey, sortDir, search])
 
+  // Market Pulse should honour the strategy chips — if you've selected only
+  // Bollinger Bands, its Top Picks must not surface RSI Reversal rows. Regime
+  // stays representative because there's still one row per coin per TF.
+  const pulseRows = useMemo(
+    () => rows.filter((r) => stratFilter[r.strategyId]),
+    [rows, stratFilter],
+  )
+
   const top3 = visible.slice(0, 3)
   const bestPick = visible[0]
 
@@ -467,7 +475,7 @@ export default function IndicatorScanTab({
       )}
 
       {/* ── Market Pulse — current regime + recommended strategy type ───── */}
-      <MarketPulse rows={rows} onPick={goToBacktest} />
+      <MarketPulse rows={pulseRows} onPick={goToBacktest} />
 
       {/* ── Best pick hero ──────────────────────────────────────────────── */}
       {bestPick && (
