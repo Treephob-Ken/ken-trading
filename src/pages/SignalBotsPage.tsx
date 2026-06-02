@@ -1147,6 +1147,15 @@ export default function SignalBotsPage() {
         } catch { /* bad sessionStorage — ignore */ }
       }
 
+      // Open a specific bot when arrived via ?select=<id> (e.g. the Strategy
+      // Builder "Deploy" creates the bot server-side then routes here).
+      const selectId = new URLSearchParams(window.location.search).get('select')
+      if (selectId && botList.some((b) => b.id === selectId)) {
+        setSelectedId(selectId)
+        setCameFromDeploy(true) // surface the "created — press Start" guide
+        return
+      }
+
       // Auto-select first bot
       if (botList.length > 0) setSelectedId(botList[0].id)
     })

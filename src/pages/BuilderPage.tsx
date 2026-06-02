@@ -297,12 +297,15 @@ export default function BuilderPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+      const created = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        throw new Error((j as { error?: string }).error || `HTTP ${res.status}`)
+        throw new Error(created.error || `HTTP ${res.status}`)
       }
-      setNotice(`Created bot "${savedSpec.name}" — review settings on the Signal Bots page before starting.`)
-      setTimeout(() => navigate('/signal'), 1000)
+      setNotice(`Created bot "${savedSpec.name}" — opening it on the Signal Bots page…`)
+      // Route straight to the new bot (?select) so the user lands on it with the
+      // "created — press Start" guide, not on some unrelated first bot.
+      const dest = created.id ? `/signal?select=${created.id}` : '/signal'
+      setTimeout(() => navigate(dest), 1000)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
