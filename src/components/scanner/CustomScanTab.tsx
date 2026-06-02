@@ -47,10 +47,12 @@ export default function CustomScanTab({ universe, onPickSymbol, onPickTimeframe 
       .then(r => r.ok ? r.json() : [])
       .then((list: PresetSummary[]) => {
         setPresets(list)
-        if (!presetId && list.length) setPresetId(list[0].id)
+        // Reconcile the saved selection: if the stored id was deleted (stale
+        // localStorage), fall back to the first preset so we never scan a
+        // ghost id and 404.
+        setPresetId(prev => (list.some(p => p.id === prev) ? prev : (list[0]?.id ?? '')))
       })
       .catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const start = async () => {
