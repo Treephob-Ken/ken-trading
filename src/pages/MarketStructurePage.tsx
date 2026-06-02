@@ -75,6 +75,26 @@ export default function MarketStructurePage({ onSymbol, onTimeframe }: Props = {
     () => compareSmcEntries(candles, result, slPct, swingLength).sort((a, b) => b.quality - a.quality),
     [candles, result, slPct, swingLength],
   )
+
+  // Click a Strategy-Test row → load its Entry + Exit into the Deploy card below.
+  const [appliedRule, setAppliedRule] = useState<string | null>(null)
+  const applyRule = (r: { name: string; entry: string; exit: string }) => {
+    const eMap: Record<string, typeof entryStrategy> = {
+      'CHoCH': 'choch',
+      'CHoCH in zone': 'choch', // deploy card has no in-zone filter — closest match
+      'BOS + CHoCH': 'both',
+      'Retest level': 'retestLevel',
+      'Retest OB': 'retestOB',
+      'Retest FVG': 'retestFVG',
+      'Liquidity sweep': 'sweep',
+    }
+    const e = eMap[r.entry]
+    if (e) setEntryStrategy(e)
+    if (r.exit === '2R') { setExitMode('rr'); setRrTarget(2) }
+    else if (r.exit === 'Flip') setExitMode('flip')
+    else if (r.exit === 'MFE') setExitMode('mfe')
+    setAppliedRule(r.name)
+  }
   const pairLabel = symbol.includes(':') ? symbol.split(':')[1] + '/USDC' : symbol.replace(/USDT$/, '/USDC')
 
   const pickSymbol = (s: string) => { setSymbol(s); localStorage.setItem('lab_symbol', s); onSymbol?.(s) }
@@ -235,8 +255,16 @@ export default function MarketStructurePage({ onSymbol, onTimeframe }: Props = {
             </thead>
             <tbody>
               {strategyResults.map(r => (
-                <tr key={r.name} className="border-t border-border">
+                <tr
+                  key={r.name}
+                  onClick={() => applyRule(r)}
+                  title="Click to load this Entry + Exit into the Deploy card below"
+                  className={`cursor-pointer border-t border-border transition-colors ${
+                    appliedRule === r.name ? 'bg-brand/15' : 'hover:bg-panel-2'
+                  }`}
+                >
                   <td className="py-1 pr-3 font-medium text-text">
+                    {appliedRule === r.name && <span className="mr-1 text-brand">▸</span>}
                     {r.name}
                     {!r.deployable && <span className="ml-1 text-[9px] text-dim">(test-only)</span>}
                   </td>
@@ -257,7 +285,7 @@ export default function MarketStructurePage({ onSymbol, onTimeframe }: Props = {
           </table>
         </div>
         <p className="mt-2 text-[10px] text-dim italic">
-          Includes retrace/retest entries (wait for the pull-back after a break) — now deployable: pick the winning combo's Entry + Exit in the Deploy card. Validate on another window/timeframe before risking real money.
+          <span className="text-brand">Click any row</span> to load its Entry + Exit into the Deploy card below — then set Risk $ / Stop loss and deploy. Validate on another window/timeframe before risking real money.
         </p>
       </section>
 
