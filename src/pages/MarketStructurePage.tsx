@@ -25,7 +25,14 @@ const LAYERS: { key: LayerKey; label: string }[] = [
   { key: 'trend', label: 'Trend candles' },
 ]
 
-export default function MarketStructurePage() {
+interface Props {
+  // Optional lift-up so a symbol/timeframe change here syncs to the shared app
+  // selection (Backtester / Grid / Scanner). Omitted = standalone behaviour.
+  onSymbol?: (v: string) => void
+  onTimeframe?: (v: string) => void
+}
+
+export default function MarketStructurePage({ onSymbol, onTimeframe }: Props = {}) {
   const navigate = useNavigate()
   const { symbols } = useHLAssets()
   const [symbol, setSymbol] = useState(() => localStorage.getItem('lab_symbol') || 'ETHUSDT')
@@ -70,7 +77,7 @@ export default function MarketStructurePage() {
   )
   const pairLabel = symbol.includes(':') ? symbol.split(':')[1] + '/USDC' : symbol.replace(/USDT$/, '/USDC')
 
-  const pickSymbol = (s: string) => { setSymbol(s); localStorage.setItem('lab_symbol', s) }
+  const pickSymbol = (s: string) => { setSymbol(s); localStorage.setItem('lab_symbol', s); onSymbol?.(s) }
   const toggle = (k: LayerKey) => setVisible(v => ({ ...v, [k]: !v[k] }))
 
   const deployToBot = () => {
@@ -118,7 +125,7 @@ export default function MarketStructurePage() {
               <button
                 key={tf}
                 type="button"
-                onClick={() => { setTimeframe(tf); localStorage.setItem('lab_timeframe', tf) }}
+                onClick={() => { setTimeframe(tf); localStorage.setItem('lab_timeframe', tf); onTimeframe?.(tf) }}
                 className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${tf === timeframe ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'}`}
               >{tf}</button>
             ))}

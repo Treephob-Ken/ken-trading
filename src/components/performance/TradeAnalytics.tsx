@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BarChart3, RefreshCw } from 'lucide-react'
 import { apiFetch } from '@/contexts/AuthContext'
+import PageHeader from '@/components/ui/PageHeader'
+import RangeTabs from '@/components/ui/RangeTabs'
 import { money, pct, sourceLabel } from '@/lib/journal'
 import type { PortfolioRange, RoundTrip } from '@/lib/journal'
 
@@ -187,36 +189,26 @@ export default function TradeAnalytics() {
   }, [trips])
 
   return (
-    <main className="flex w-full flex-1 flex-col gap-5 px-3 py-4 sm:px-6 sm:py-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-brand" />
-          <span className="text-xs font-semibold text-text">Trade analytics</span>
-          <span className="hidden sm:block text-[11px] text-dim">How well you're trading — quality, edge, and where it comes from.</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {RANGES.map((r) => (
+    <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5">
+      <PageHeader
+        icon={BarChart3}
+        title="Trade Analytics"
+        subtitle="How well you're trading — quality, edge, and where it comes from."
+        actions={
+          <>
+            <RangeTabs value={range} options={RANGES} onChange={setRange} />
             <button
-              key={r.id}
               type="button"
-              onClick={() => setRange(r.id)}
-              className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${
-                r.id === range ? 'border-brand bg-brand/10 text-brand' : 'border-border bg-panel-2 text-dim hover:text-text'
-              }`}
+              onClick={() => fetchTrips(range)}
+              disabled={loading}
+              className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50"
+              aria-label="Refresh"
             >
-              {r.label}
+              <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
             </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => fetchTrips(range)}
-            disabled={loading}
-            className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {error && <div className="card border border-loss/30 bg-loss/5 p-3 text-xs text-loss">{error}</div>}
 

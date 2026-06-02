@@ -22,6 +22,7 @@ import {
 } from 'lightweight-charts'
 import { Briefcase, RefreshCw, X } from 'lucide-react'
 import { apiFetch } from '@/contexts/AuthContext'
+import RangeTabs from '@/components/ui/RangeTabs'
 import { money, pct, sourceLabel } from '@/lib/journal'
 import type {
   DailyBucket,
@@ -236,7 +237,7 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
   }, [eqData, hasEqData])
 
   return (
-    <main className="flex w-full flex-1 flex-col gap-5 px-3 py-4 sm:px-6 sm:py-5">
+    <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5">
       {/* ── Header — title hidden when embedded in the Performance hub ──── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         {embedded ? (
@@ -251,20 +252,7 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
           </div>
         )}
         <div className="flex items-center gap-2">
-          {RANGES.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => setRange(r.id)}
-              className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${
-                r.id === range
-                  ? 'border-brand bg-brand/10 text-brand'
-                  : 'border-border bg-panel-2 text-dim hover:text-text'
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
+          <RangeTabs value={range} options={RANGES} onChange={setRange} />
           <button
             type="button"
             onClick={() => { fetchTrips(range); fetchEquity(period) }}
@@ -299,22 +287,7 @@ export default function PortfolioPage({ embedded = false }: PortfolioPageProps =
             )}
           </div>
           {heroIsAccount && (
-            <div className="flex items-center gap-1">
-              {EQUITY_PERIODS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPeriod(p.id)}
-                  className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer ${
-                    p.id === period
-                      ? 'border-brand bg-brand/10 text-brand'
-                      : 'border-border bg-panel-2 text-dim hover:text-text'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+            <RangeTabs value={period} options={EQUITY_PERIODS} onChange={setPeriod} />
           )}
         </div>
 

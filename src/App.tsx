@@ -120,7 +120,7 @@ export default function App() {
           {/* Market Structure — LuxAlgo SMC port (swing structure, BOS/CHoCH, strong/weak) */}
           <Route path="structure" element={
             <Suspense fallback={<div className="p-6 text-sm text-dim">Loading…</div>}>
-              <MarketStructurePage />
+              <MarketStructurePage onSymbol={setSymbol} onTimeframe={setTimeframe} />
             </Suspense>
           } />
 

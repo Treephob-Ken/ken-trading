@@ -6,6 +6,7 @@ import {
   clearUniverseCache,
   type UniverseKind,
 } from '@/lib/scanner/universe'
+import PageHeader from '@/components/ui/PageHeader'
 import IndicatorScanTab from '@/components/scanner/IndicatorScanTab'
 import GridScanTab from '@/components/scanner/GridScanTab'
 import SmcScanTab from '@/components/scanner/SmcScanTab'
@@ -65,30 +66,28 @@ export default function ScannerPage({ onSymbol, onTimeframe }: Props) {
   return (
     <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Radar className="h-5 w-5 text-brand" />
-          <h1 className="text-lg font-semibold text-text font-display">Scanner</h1>
-          <p className="hidden sm:block text-xs text-dim">
-            Batch-rank symbols × strategies to find the best combos right now.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] font-mono text-text">
-            {loading ? '…' : `Symbols (${universe.length})`}
-          </span>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50"
-            title="Re-pull HL asset list and Binance 24h volume"
-          >
-            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        icon={Radar}
+        title="Scanner"
+        subtitle="Batch-rank symbols × strategies to find the best combos right now."
+        actions={
+          <>
+            <span className="rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] font-mono text-text">
+              {loading ? '…' : `Symbols (${universe.length})`}
+            </span>
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={loading}
+              className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50"
+              title="Re-pull HL asset list and Binance 24h volume"
+            >
+              <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </>
+        }
+      />
 
       {error && (
         <div className="card border border-loss/30 bg-loss/5 p-3 text-xs text-loss">

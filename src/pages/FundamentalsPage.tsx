@@ -13,6 +13,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts'
 import { apiFetch } from '@/contexts/AuthContext'
+import PageHeader from '@/components/ui/PageHeader'
 
 // ─── Server response shapes (mirror bot/src/fundamentals.ts) ─────────────────
 
@@ -181,37 +182,30 @@ export default function FundamentalsPage() {
   useEffect(() => { void load() }, [load])
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden gap-4 px-3 py-4 sm:px-5 sm:py-5">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden gap-4 px-3 py-4 sm:px-6 sm:py-5">
       {/* ─── Header ─── */}
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-brand/30 bg-brand/10">
-            <Brain className="h-[18px] w-[18px] text-brand" aria-hidden="true" />
-          </div>
-          <div>
-            <h1 className="text-sm font-semibold text-text">Fundamentals</h1>
-            <p className="text-[11px] text-dim">
-              Sentiment · valuation · regime · positioning — institutional view on BTC
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="fund-num font-mono text-[11px] text-dim">
-            {lastFetch ? `Updated ${timeAgo(lastFetch)}` : 'Loading…'}
-          </span>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void load()}
-            aria-label="Refresh fundamentals data"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-1.5 text-xs text-muted transition-colors hover:border-border-strong hover:text-text disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
-          >
-            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
-            Refresh
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        icon={Brain}
+        title="Fundamentals"
+        subtitle="Sentiment · valuation · regime · positioning — institutional view on BTC"
+        actions={
+          <>
+            <span className="fund-num font-mono text-[11px] text-dim">
+              {lastFetch ? `Updated ${timeAgo(lastFetch)}` : 'Loading…'}
+            </span>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void load()}
+              aria-label="Refresh fundamentals data"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel-2 px-3 py-1.5 text-xs text-muted transition-colors hover:border-border-strong hover:text-text disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+            >
+              <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+              Refresh
+            </button>
+          </>
+        }
+      />
 
       {error && (
         <div role="alert" className="rounded-xl border border-loss/30 bg-loss/10 p-3 text-xs text-loss">
