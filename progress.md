@@ -56,7 +56,9 @@ key, their own bot configs, and isolated data under `bot/data/<userId>/`.
 | Account-wide kill switch | ✅ stops every bot for the user |
 | Slippage gate (rejects orders past N% past mid) | ✅ |
 | Network badge (testnet/mainnet) | ✅ in sidebar |
-| Strategy Backtester (Binance candles, MTF, regime, walk-forward) | ✅ |
+| Strategy Backtester (Binance candles, MTF, regime, walk-forward) | ✅ + inline honesty caveat under Confidence Strip (Binance candles, fee%, no slippage/funding → live runs lower) |
+| Deploy → Signal Bot is alive | ✅ guide banner walks Create → Start; deploy carries a `backtestSnapshot` (win rate, PF, expectancy, etc.) onto the bot config |
+| Forward-test scorecard (Backtest vs Live) | ✅ `ForecastVsActualCard` compares deployed backtest snapshot vs real HL round-trips (`/stats`); win-rate gated at 10 live trips + costs caveat. Snapshot persists through `parseSignalConfig` (bot side) — UI-only, never traded on |
 | Grid Optimizer (sweep + deploy-to-bot) | ✅ |
 | Currency Scanner (Indicator + Grid + **SMC** tabs, batch-rank coins, colored verdicts) | ✅ SMC tab (`src/lib/scanner/smcScan.ts` + `SmcScanTab.tsx`) ranks coins by best SMC entry-rule expectancy; green = ≥+0.2R & ≥30 trades; row → Market Structure page |
 | Scanner — "Stocks & Commodities" universe toggle (HIP-3 ranked by HL open interest) | ✅ Phase A read-only |
