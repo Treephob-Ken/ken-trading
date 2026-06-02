@@ -5,6 +5,7 @@
 
 import {
   adx,
+  atr,
   bollinger,
   cci,
   crossDown,
@@ -401,6 +402,92 @@ export function smcRetestSignals(
   return signals
 }
 
+// VERBATIM COPY of src/lib/strategies.ts smcSweepSignals — keep in exact sync
+// (locked by the parity test). Single-bar liquidity sweep of equal highs/lows.
+export const SMC_EQUAL_LENGTH = 3
+export const SMC_EQUAL_THRESHOLD = 0.1
+export const SMC_SWEEP_WINDOW = 100
+
+export function smcSweepSignals(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  equalLength: number,
+  equalThreshold: number,
+  sweepWindow: number,
+): Signal[] {
+  const n = highs.length
+  const signals: Signal[] = new Array(n).fill(null)
+  const sizeE = Math.max(2, Math.floor(equalLength))
+  if (n < sizeE + 3) return signals
+
+  const vol = atr(highs, lows, closes, 200)
+  const volBase = new Array<number>(n)
+  let trSum = 0
+  for (let i = 0; i < n; i++) {
+    const tr = i === 0
+      ? highs[i] - lows[i]
+      : Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]))
+    trSum += tr
+    volBase[i] = Number.isNaN(vol[i]) ? trSum / (i + 1) : vol[i]
+  }
+
+  interface Eq { kind: 'EQH' | 'EQL'; level: number; idx: number }
+  const eqs: Eq[] = []
+  let legE = 0
+  let lastHigh: number | null = null
+  let lastLow: number | null = null
+  for (let i = sizeE; i < n; i++) {
+    const ref = i - sizeE
+    let maxR = -Infinity
+    let minR = Infinity
+    for (let k = ref + 1; k <= i; k++) {
+      if (highs[k] > maxR) maxR = highs[k]
+      if (lows[k] < minR) minR = lows[k]
+    }
+    const prev = legE
+    if (highs[ref] > maxR) legE = 0
+    else if (lows[ref] < minR) legE = 1
+    if (legE === prev) continue
+    const thr = equalThreshold * volBase[ref]
+    if (legE === 0) {
+      const lvl = highs[ref]
+      if (lastHigh !== null && Math.abs(lvl - lastHigh) < thr) eqs.push({ kind: 'EQH', level: lvl, idx: i })
+      lastHigh = lvl
+    } else {
+      const lvl = lows[ref]
+      if (lastLow !== null && Math.abs(lvl - lastLow) < thr) eqs.push({ kind: 'EQL', level: lvl, idx: i })
+      lastLow = lvl
+    }
+  }
+
+  interface Active { kind: 'EQH' | 'EQL'; level: number; expiry: number }
+  let active: Active[] = []
+  let ei = 0
+  const win = Math.max(1, Math.floor(sweepWindow))
+  for (let j = 0; j < n; j++) {
+    while (ei < eqs.length && eqs[ei].idx < j) {
+      active.push({ kind: eqs[ei].kind, level: eqs[ei].level, expiry: eqs[ei].idx + win })
+      ei++
+    }
+    if (active.length === 0) continue
+    const next: Active[] = []
+    for (const a of active) {
+      if (j > a.expiry) continue
+      if (a.kind === 'EQH') {
+        if (highs[j] > a.level && closes[j] < a.level) { if (!signals[j]) signals[j] = 'sell'; continue }
+        if (closes[j] > a.level) continue
+      } else {
+        if (lows[j] < a.level && closes[j] > a.level) { if (!signals[j]) signals[j] = 'buy'; continue }
+        if (closes[j] < a.level) continue
+      }
+      next.push(a)
+    }
+    active = next
+  }
+  return signals
+}
+
 // Returns one signal per candle, aligned to the input. NaN-tolerant: early
 // bars where the indicator is undefined yield a null (no-signal).
 export function generateSignals(
@@ -548,6 +635,9 @@ export function generateSignals(
       // entryMode: 0 = enter on the break (default); 1/2/3 = wait for the
       // pull-back and enter on the retest of level / order-block / FVG.
       const entryMode = params.entryMode | 0
+      if (entryMode === 4) {
+        return smcSweepSignals(highs, lows, closes, SMC_EQUAL_LENGTH, SMC_EQUAL_THRESHOLD, SMC_SWEEP_WINDOW)
+      }
       if (entryMode >= 1) {
         const target = entryMode === 2 ? 'ob' : entryMode === 3 ? 'fvg' : 'level'
         return smcRetestSignals(highs, lows, closes, swingSize, 'both', target)

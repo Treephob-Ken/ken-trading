@@ -44,7 +44,7 @@ export default function MarketStructurePage({ onSymbol, onTimeframe }: Props = {
   const [slPct, setSlPct] = useState(() => +(localStorage.getItem('smc_sl_pct') || '1.5'))
   const [lookbackDays, setLookbackDays] = useState(() => +(localStorage.getItem('smc_lookback_days') || '150'))
   // How the bot enters: on the break (CHoCH/BOS) or on the retest pull-back.
-  const [entryStrategy, setEntryStrategy] = useState<'choch' | 'both' | 'retestLevel' | 'retestOB' | 'retestFVG'>('both')
+  const [entryStrategy, setEntryStrategy] = useState<'choch' | 'both' | 'retestLevel' | 'retestOB' | 'retestFVG' | 'sweep'>('both')
   // Exit mode for the deployed bot.
   const [exitMode, setExitMode] = useState<'flip' | 'rr' | 'mfe'>('mfe')
   const [rrTarget, setRrTarget] = useState(2)
@@ -87,11 +87,11 @@ export default function MarketStructurePage({ onSymbol, onTimeframe }: Props = {
       strategy: 'smc',
       timeframe,
       // mode: 1=CHoCH-only, 2=BOS+CHoCH. entryMode: 0=break, 1=retest level,
-      // 2=retest OB, 3=retest FVG (retest uses BOS+CHoCH breaks internally).
+      // 2=retest OB, 3=retest FVG, 4=liquidity sweep of EQH/EQL.
       params: {
         swingLength,
         mode: entryStrategy === 'choch' ? 1 : 2,
-        entryMode: entryStrategy === 'retestLevel' ? 1 : entryStrategy === 'retestOB' ? 2 : entryStrategy === 'retestFVG' ? 3 : 0,
+        entryMode: entryStrategy === 'retestLevel' ? 1 : entryStrategy === 'retestOB' ? 2 : entryStrategy === 'retestFVG' ? 3 : entryStrategy === 'sweep' ? 4 : 0,
       },
       direction: 'both',
       slPct,
@@ -283,6 +283,7 @@ export default function MarketStructurePage({ onSymbol, onTimeframe }: Props = {
               <option value="retestLevel">Retest level (pull-back)</option>
               <option value="retestOB">Retest order block</option>
               <option value="retestFVG">Retest fair value gap</option>
+              <option value="sweep">Liquidity sweep (EQH/EQL)</option>
             </select>
           </label>
           <label className="text-[11px] text-dim">

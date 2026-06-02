@@ -14,7 +14,7 @@
 import type { Candle, Signal } from '@/types'
 import type { SMCResult, StructureBreak } from './types'
 import { runBacktest } from '@/lib/backtest'
-import { smcRetestSignals } from '@/lib/strategies'
+import { smcRetestSignals, smcSweepSignals, SMC_EQUAL_LENGTH, SMC_EQUAL_THRESHOLD, SMC_SWEEP_WINDOW } from '@/lib/strategies'
 
 export interface EntryResult {
   name: string         // "BOS + CHoCH · 2R"
@@ -96,6 +96,7 @@ export function compareSmcEntries(candles: Candle[], result: SMCResult, slPct = 
     { name: 'Retest level', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'level'), deployable: true },
     { name: 'Retest OB', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'ob'), deployable: true },
     { name: 'Retest FVG', signals: smcRetestSignals(highs, lows, closes, swingLength, 'both', 'fvg'), deployable: true },
+    { name: 'Liquidity sweep', signals: smcSweepSignals(highs, lows, closes, SMC_EQUAL_LENGTH, SMC_EQUAL_THRESHOLD, SMC_SWEEP_WINDOW), deployable: true },
   ]
 
   const out: EntryResult[] = []

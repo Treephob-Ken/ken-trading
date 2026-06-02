@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { Candle } from '@/types'
 import type { SMCResult, StructureBreak } from './types'
 import { compareSmcEntries, smcQuality } from './strategyTest'
-import { smcRetestSignals } from '@/lib/strategies'
+import { smcRetestSignals, smcSweepSignals } from '@/lib/strategies'
 
 function resultWith(structures: StructureBreak[]): SMCResult {
   return {
@@ -12,9 +12,9 @@ function resultWith(structures: StructureBreak[]): SMCResult {
 }
 
 describe('compareSmcEntries (entry × exit combos via runBacktest)', () => {
-  it('returns 6 entries × 3 exits = 18 combos with sane numbers', () => {
+  it('returns 7 entries × 3 exits = 21 combos with sane numbers', () => {
     const out = compareSmcEntries([], resultWith([]), 1.5)
-    expect(out.length).toBe(18)
+    expect(out.length).toBe(21)
     for (const r of out) {
       expect(r.name).toContain(' · ')
       expect(['Flip', '2R', 'MFE']).toContain(r.exit)
@@ -94,5 +94,36 @@ describe('smcRetestSignals', () => {
     expect(sig.length).toBe(91)
     expect(buys).toEqual([46, 87])
     expect(sells).toEqual([65])
+  })
+})
+
+// Equal-high/low + double sweep fixture, shared verbatim with the bot parity
+// guard (bot/src/strategy/retestParity.check.ts). Double-top at 10 (EQH) swept
+// then rejected → sell; double-bottom at 0 (EQL) swept then reclaimed → buy.
+function sweepFixture(): { highs: number[]; lows: number[]; closes: number[] } {
+  const closes: number[] = []
+  const push = (from: number, to: number, step: number) => {
+    for (let v = from; step > 0 ? v <= to : v >= to; v += step) closes.push(v)
+  }
+  push(0, 10, 1); push(9, 1, -1); push(2, 10, 1); push(9, 1, -1)
+  push(2, 8, 1); push(7, 0, -1); push(1, 8, 1); push(7, 0, -1); push(1, 6, 1)
+  const highs = closes.map((c) => c + 0.1)
+  const lows = closes.map((c) => c - 0.1)
+  closes.push(9.5); highs.push(10.6); lows.push(9.4)
+  closes.push(8); highs.push(8.1); lows.push(7.9)
+  closes.push(0.5); highs.push(0.6); lows.push(-0.6)
+  closes.push(2); highs.push(2.1); lows.push(1.9)
+  return { highs, lows, closes }
+}
+
+describe('smcSweepSignals (liquidity sweep parity)', () => {
+  it('matches the canonical bot/web sweep fixture', () => {
+    const { highs, lows, closes } = sweepFixture()
+    const sig = smcSweepSignals(highs, lows, closes, 3, 0.1, 100)
+    const buys = sig.map((s, i) => (s === 'buy' ? i : -1)).filter((i) => i >= 0)
+    const sells = sig.map((s, i) => (s === 'sell' ? i : -1)).filter((i) => i >= 0)
+    expect(sig.length).toBe(79)
+    expect(sells).toEqual([75]) // EQH swept then rejected
+    expect(buys).toEqual([77])  // EQL swept then reclaimed
   })
 })
