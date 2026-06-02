@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Activity,
@@ -8,10 +9,13 @@ import {
   Hammer,
   LayoutGrid,
   LineChart,
+  LogOut,
+  Menu,
   Network,
   Radar,
   Radio,
   Settings,
+  X,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import NetworkBadge from '@/components/NetworkBadge'
@@ -57,9 +61,93 @@ export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { logout } = useAuth()
+  // Mobile drawer open state. Desktop (lg+) shows the fixed rail and ignores this.
+  const [open, setOpen] = useState(false)
+
+  // Close the drawer whenever the route changes (a nav tap navigated us).
+  useEffect(() => { setOpen(false) }, [location.pathname])
+
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(path + '/')
 
   return (
-    <aside className="relative flex flex-col h-dvh w-[60px] shrink-0 border-r border-border bg-panel/90 backdrop-blur-sm z-50">
+    <>
+      {/* ══ Mobile top bar — only < lg. Holds the menu trigger + brand + network. ══ */}
+      <header className="lg:hidden fixed inset-x-0 top-0 z-40 flex h-12 items-center gap-3 border-b border-border bg-panel/95 px-3 backdrop-blur">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open menu"
+          className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-text"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-brand/30 bg-brand/10">
+            <CandlestickChart className="h-4 w-4 text-brand" />
+          </div>
+          <span className="text-sm font-semibold text-text font-display">Garlic Trading</span>
+        </div>
+        <div className="ml-auto"><NetworkBadge /></div>
+      </header>
+
+      {/* ══ Mobile drawer — labelled nav. Slides over content; backdrop closes it. ══ */}
+      {open && (
+        <div className="lg:hidden fixed inset-0 z-[60]">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          <aside className="absolute inset-y-0 left-0 flex w-64 max-w-[82vw] flex-col border-r border-border bg-panel">
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-3">
+              <span className="text-sm font-semibold text-text">Menu</span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close menu"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:text-text"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <nav className="flex-1 overflow-y-auto p-2">
+              {NAV_GROUPS.map((group, gi) => (
+                <div key={gi}>
+                  {gi > 0 && <div className="my-2 h-px bg-border" />}
+                  {group.map(({ path, icon: Icon, label }) => {
+                    const active = isActive(path)
+                    return (
+                      <button
+                        key={path}
+                        type="button"
+                        onClick={() => navigate(path)}
+                        aria-current={active ? 'page' : undefined}
+                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                          active ? 'bg-brand/15 text-brand' : 'text-dim hover:bg-panel-2 hover:text-text'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+            </nav>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); logout() }}
+              className="m-2 flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-dim transition-colors hover:bg-panel-2 hover:text-text"
+            >
+              <LogOut className="h-4 w-4" /> Log out
+            </button>
+          </aside>
+        </div>
+      )}
+
+      {/* ══ Desktop rail — only lg+. ══ */}
+      <aside className="relative hidden lg:flex flex-col h-dvh w-[60px] shrink-0 border-r border-border bg-panel/90 backdrop-blur-sm z-50">
       {/* ── Brand logo ── */}
       <div className="flex items-center justify-center h-[60px] shrink-0 border-b border-border">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-brand/30 bg-brand/10">
@@ -157,5 +245,6 @@ export default function Sidebar() {
       {/* ── Subtle bottom accent ── */}
       <div className="h-[3px] w-full shrink-0 bg-gradient-to-r from-brand/40 via-brand/20 to-transparent" />
     </aside>
+    </>
   )
 }

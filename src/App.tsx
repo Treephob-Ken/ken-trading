@@ -22,7 +22,8 @@ function AppShell() {
   return (
     <div className="flex h-dvh overflow-hidden">
       <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+      {/* pt-12 on mobile clears the fixed mobile top bar; no offset on lg+ (rail is in-flow). */}
+      <div className="flex flex-1 flex-col overflow-hidden min-w-0 pt-12 lg:pt-0">
         {/* 3px brand accent stripe */}
         <div className="h-[3px] w-full shrink-0 bg-brand" />
         <KillSwitchBanner />
