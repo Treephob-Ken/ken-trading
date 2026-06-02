@@ -6,9 +6,9 @@
 // signals lives in lib/builder/evaluate.ts. This page is the UI shell — it
 // owns the spec state and wires user actions into those modules.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Hammer, Plus, Play, Save, Trash2, X, Rocket, Folder } from 'lucide-react'
+import { Hammer, Plus, Play, Save, Trash2, X, Rocket, Folder, ChevronDown } from 'lucide-react'
 import { apiFetch } from '@/contexts/AuthContext'
 import { fetchKlines } from '@/lib/binance'
 import { useHLAssets } from '@/lib/hlAssets'
@@ -319,6 +319,23 @@ export default function BuilderPage() {
     }
   }, [result])
 
+  // "New ▾" menu — blank vs. start from a built-in example template.
+  const [newMenuOpen, setNewMenuOpen] = useState(false)
+  const newMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) setNewMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const loadExample = () => {
+    setSpec(breakoutVolumeTemplate())
+    setResult(null)
+    setNotice('Loaded example · Breakout + Volume Filter (Long & Short): long above EMA-200 on an upper-band breakout, short below on a lower-band breakdown, both with a volume spike · ATR×2 stop · 2R. Save it to keep your own copy.')
+  }
+
   return (
     <main className="flex w-full flex-1 flex-col gap-4 px-3 py-4 sm:px-6 sm:py-5">
       {/* Header */}
@@ -329,12 +346,35 @@ export default function BuilderPage() {
           <p className="hidden md:block text-xs text-dim">Combine indicators with AND/OR. Backtest, save, deploy.</p>
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={newStrategy} disabled={busy} className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50">
-            <Plus className="h-3 w-3" /> New
-          </button>
-          <button type="button" onClick={() => { setSpec(breakoutVolumeTemplate()); setResult(null); setNotice('Loaded Breakout + Volume Filter (Long & Short): long above EMA-200 on upper-band breakout, short below on lower-band breakdown, both with a volume spike · ATR×2 stop · 2R.') }} disabled={busy} className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50" title="Load the Breakout + Volume Filter strategy (long & short)">
-            <Hammer className="h-3 w-3" /> Breakout+Vol
-          </button>
+          <div ref={newMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setNewMenuOpen((o) => !o)}
+              disabled={busy}
+              className="flex items-center gap-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11px] text-dim hover:text-text disabled:opacity-50"
+            >
+              <Plus className="h-3 w-3" /> New <ChevronDown className="h-3 w-3" />
+            </button>
+            {newMenuOpen && (
+              <div className="absolute left-0 z-50 mt-1 w-52 overflow-hidden rounded-lg border border-border bg-panel shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => { newStrategy(); setNewMenuOpen(false) }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-text hover:bg-panel-2"
+                >
+                  <Plus className="h-3 w-3 text-dim" /> Blank strategy
+                </button>
+                <div className="px-3 pt-1.5 pb-0.5 text-[9px] uppercase tracking-wider text-dim">Start from an example</div>
+                <button
+                  type="button"
+                  onClick={() => { loadExample(); setNewMenuOpen(false) }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-text hover:bg-panel-2"
+                >
+                  <Hammer className="h-3 w-3 text-dim" /> Breakout + Volume (Long &amp; Short)
+                </button>
+              </div>
+            )}
+          </div>
           <button type="button" onClick={savePreset} disabled={busy} className="flex items-center gap-1 rounded-md border border-brand/40 bg-brand/10 px-2 py-1 text-[11px] text-brand hover:bg-brand/15 disabled:opacity-50">
             <Save className="h-3 w-3" /> Save
           </button>
